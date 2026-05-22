@@ -322,6 +322,56 @@ function loadMeta() {
 function saveMeta() { localStorage.setItem('shadowSurvivors', JSON.stringify({gold:G.gold, upgrades:G.upgrades})); }
 loadMeta();
 
+// ===== PLAYER ID & REFERRAL =====
+function getPlayerId() {
+  let id = localStorage.getItem('shadowPid');
+  if (!id) { id = 's'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); localStorage.setItem('shadowPid', id); }
+  return id;
+}
+const PLAYER_ID = getPlayerId();
+
+// Check for referral
+(function checkReferral() {
+  const m = location.search.match(/[?&]ref=([^&]+)/);
+  if (m && m[1] !== PLAYER_ID) {
+    const ref = m[1];
+    const claimed = localStorage.getItem('shadowRefClaimed');
+    if (!claimed || !claimed.includes(ref)) {
+      G.gold += 25;
+      localStorage.setItem('shadowRefClaimed', (claimed||'') + ',' + ref);
+      saveMeta();
+      // Show welcome toast on load
+      setTimeout(() => {
+        const t = document.createElement('div');
+        t.className='toast'; t.style.setProperty('--accent','#ffd700');
+        t.textContent='🎁 通过好友邀请进入！获得 25 金币';
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 2500);
+      }, 800);
+    }
+  }
+})();
+
+// ===== PERSONAL BESTS =====
+function loadBests() {
+  try { return JSON.parse(localStorage.getItem('shadowBests')||'{}'); } catch(e) { return {}; }
+}
+function saveBests(b) { localStorage.setItem('shadowBests', JSON.stringify(b)); }
+
+function updateBests() {
+  const b = loadBests();
+  let broken = [];
+  if (!b.bestCombo || G.comboMax > b.bestCombo) { b.bestCombo = G.comboMax; broken.push('最高连击'); }
+  if (!b.bestScore || G.score > b.bestScore) { b.bestScore = G.score; broken.push('最高分数'); }
+  if (!b.bestLevel || P.level > b.bestLevel) { b.bestLevel = P.level; broken.push('最高等级'); }
+  if (!b.bestGold || G.runGold > b.bestGold) { b.bestGold = G.runGold; broken.push('单局金币'); }
+  if (!b.bestStage || G.level > b.bestStage) { b.bestStage = G.level; broken.push('最高关卡'); }
+  b.totalGames = (b.totalGames||0) + 1;
+  b.totalKills = (b.totalKills||0) + G.score;
+  saveBests(b);
+  return { bests: b, broken };
+}
+
 const UPGRADE_COSTS = { hp:[10,25,50,85,130], atk:[10,25,50,85,130], spd:[10,25,50,85,130], blades:[15,35,65,110], xp:[8,20,40,70,110] };
 const UPGRADE_NAMES = { hp:'最大生命', atk:'攻击力', spd:'移动速度', blades:'初始飞刀', xp:'经验获取' };
 const UPGRADE_MAX = { hp:5, atk:5, spd:5, blades:4, xp:5 };
@@ -471,6 +521,7 @@ function resetGame() {
   G.projectiles = []; G.dmgTexts = []; G.goldDrops = []; G.waveEffects = [];
   G.boss = null; G.hasBoss = false; G.counting = false; G.over = false; G.started = false; G.paused = false;
   G.combo = 0; G.comboTimer = 0; G.shakeDur = 0;
+  localStorage.removeItem('shadowShareGold');
   document.getElementById('bossBar').style.display = 'none';
   document.getElementById('overOverlay').style.display = 'none';
   document.getElementById('pauseOverlay').classList.remove('show');
@@ -508,16 +559,20 @@ document.getElementById('pauseResume').onclick = togglePause;
 document.getElementById('pauseRestart').onclick = () => { togglePause(); resetGame(); P.hero = HEROES[selectedHero]; applyHero(); applyUpgrades(); startBGM(); nextLevel(); G.started = true; };
 document.getElementById('pauseMenu').onclick = () => { G.paused = false; G.started = false; stopBGM(); document.getElementById('pauseOverlay').classList.remove('show'); document.getElementById('menu').style.display = 'flex'; resetGame(); };
 document.getElementById('overShare').onclick = () => {
-  const url = 'https://samouswolf.github.io/shadow-survivors/';
+  const url = 'https://samouswolf.github.io/shadow-survivors/?ref=' + PLAYER_ID;
   const title = '暗影幸存者 - 我的战绩';
-  const text = `🏆 暗影幸存者战绩 🏆\n${P.hero.icon} ${P.hero.name} | 难度:${DIFF_NAMES[G.diff]}\n📊 等级${P.level} | 关卡${G.level} | 分数${G.score}\n🔥 最高连击: ${G.comboMax}\n💰 金币: +${G.runGold}\n\n来挑战我吧！`;
+  const bests = loadBests();
+  let recordLine = '';
+  if (bests.bestCombo) recordLine += `\n🏆 个人最佳连击: ${bests.bestCombo}`;
+  if (bests.bestScore) recordLine += `\n🏆 个人最佳分数: ${bests.bestScore}`;
+  const text = `🏆 暗影幸存者战绩 🏆\n${P.hero.icon} ${P.hero.name} | 难度:${DIFF_NAMES[G.diff]}\n📊 等级${P.level} | 关卡${G.level} | 分数${G.score}\n🔥 最高连击: ${G.comboMax}\n💰 金币: +${G.runGold}${recordLine}\n\n点击链接免费玩，还能获得25金币！`;
   if (navigator.share) {
     navigator.share({ title, text, url }).catch(() => {});
   } else {
     navigator.clipboard.writeText(text + '\n' + url).then(() => {
       const t = document.createElement('div'); t.className='toast'; t.style.setProperty('--accent','#ffd700');
-      t.textContent='📋 战绩已复制，分享给朋友吧！'; document.body.appendChild(t);
-      setTimeout(() => t.remove(), 2000);
+      t.textContent='📋 战绩+邀请链接已复制！好友进入双方各得金币 💰'; document.body.appendChild(t);
+      setTimeout(() => t.remove(), 2500);
     }).catch(() => {});
   }
 };
@@ -1098,9 +1153,45 @@ function updateUI() {
 
 function gameOver() {
   G.over = true; stopBGM();
-  G.gold += G.runGold; saveMeta(); renderUpgradePanel();
-  document.getElementById('overStats').innerHTML = `等级 <span>${P.level}</span> | 关卡 <span>${G.level}</span><br>分数 <span>${G.score}</span> | 最高连击 <span>${G.comboMax}</span>`;
-  document.getElementById('goldBreakdown').innerHTML = `本局获得 💰<span style="font-size:22px">+${G.runGold}</span><br>💰 总金币: <span>${G.gold}</span>`;
+  G.gold += G.runGold; saveMeta();
+
+  // Verify share-gold reward
+  const shareRewarded = localStorage.getItem('shadowShareGold') === 'done';
+  if (!shareRewarded) {
+    G.gold += 30;
+    localStorage.setItem('shadowShareGold', 'done');
+  }
+
+  const { bests, broken } = updateBests();
+  renderUpgradePanel();
+
+  let brokenHTML = '';
+  if (broken.length > 0) {
+    brokenHTML = `<div style="color:#ffd700;font-size:18px;margin-bottom:4px">🏆 新纪录！${broken.join(' · ')}</div>`;
+  }
+
+  document.getElementById('overStats').innerHTML =
+    brokenHTML +
+    `等级 <span>${P.level}</span> | 关卡 <span>${G.level}</span> | 分数 <span>${G.score}</span><br>` +
+    `最高连击 <span>${G.comboMax}</span> | 本局金币 <span>+${G.runGold}</span>`;
+
+  // Personal bests summary
+  const pbParts = [];
+  if (bests.bestCombo) pbParts.push(`🏆最佳连击: <span>${bests.bestCombo}</span>`);
+  if (bests.bestScore) pbParts.push(`🏆最佳分数: <span>${bests.bestScore}</span>`);
+  if (bests.bestLevel) pbParts.push(`🏆最高等级: <span>${bests.bestLevel}</span>`);
+  if (bests.bestStage) pbParts.push(`🏆最高关卡: <span>${bests.bestStage}</span>`);
+  if (bests.totalGames) pbParts.push(`🎮总场次: <span>${bests.totalGames}</span>`);
+
+  document.getElementById('goldBreakdown').innerHTML =
+    `💰 本局获得 <span style="font-size:22px">+${G.runGold}</span> | 💰 总金币: <span>${G.gold}</span>` +
+    `<br><span style="font-size:12px;color:#888">${shareRewarded ? '分享奖励已领取 ✓' : ''}</span>`;
+
+  // PBs
+  if (pbParts.length > 0) {
+    document.getElementById('goldBreakdown').innerHTML += `<br><span style="font-size:12px;color:#aaa">${pbParts.join(' · ')}</span>`;
+  }
+
   document.getElementById('overOverlay').style.display = 'flex';
 }
 
@@ -1109,11 +1200,11 @@ document.getElementById('speedBtn').onclick = () => { G.speedIdx = (G.speedIdx+1
 document.getElementById('musicBtn').onclick = toggleMusic;
 document.getElementById('upgradeToggle').onclick = () => { const p = document.getElementById('upgradePanel'); p.style.display = p.style.display==='none'?'block':'none'; };
 document.getElementById('shareBtn').onclick = () => {
-  const url = 'https://samouswolf.github.io/shadow-survivors/';
+  const url = 'https://samouswolf.github.io/shadow-survivors/?ref=' + PLAYER_ID;
   const title = '暗影幸存者 - Shadow Survivors';
-  let text = '我在玩《暗影幸存者》！4位英雄+4种难度，来挑战最高连击吧！';
+  let text = '我在玩《暗影幸存者》！点击链接免费玩，还能获得25金币奖励！';
   if (G.started && !G.over) {
-    text = `暗影幸存者 | ${P.hero.name} | 等级${P.level} | 连击${G.comboMax} | 关卡${G.level} | 💰${G.runGold}金币 — 来挑战我吧！`;
+    text = `暗影幸存者 | ${P.hero.name} | 等级${P.level} | 连击${G.comboMax} | 关卡${G.level} | 💰${G.runGold}金币 — 点击链接和我一起玩！`;
   } else if (G.over) {
     text = `暗影幸存者 | ${P.hero.name} | 最终等级${P.level} | 最高连击${G.comboMax} | 获得💰${G.runGold}金币 — 你能超过我吗？`;
   }
@@ -1122,8 +1213,8 @@ document.getElementById('shareBtn').onclick = () => {
   } else {
     navigator.clipboard.writeText(text + '\n' + url).then(() => {
       const t = document.createElement('div'); t.className='toast'; t.style.setProperty('--accent','#ffd700');
-      t.textContent='📋 链接已复制，分享给朋友吧！'; document.body.appendChild(t);
-      setTimeout(() => t.remove(), 2000);
+      t.textContent='📋 邀请链接已复制！好友通过链接进入，双方各得金币 💰'; document.body.appendChild(t);
+      setTimeout(() => t.remove(), 2500);
     }).catch(() => {});
   }
 };
