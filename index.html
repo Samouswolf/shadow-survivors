@@ -84,6 +84,9 @@ body{overflow:hidden;background:#0a0a0f;touch-action:none;-webkit-touch-callout:
 .over-btn:hover{box-shadow:0 0 20px rgba(150,100,255,.5)}
 /* TOAST */
 .toast{position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:rgba(10,10,20,.9);border:1px solid var(--accent,#c49bff);color:#c49bff;padding:10px 24px;border-radius:8px;font:14px "Microsoft YaHei",sans-serif;z-index:1000;pointer-events:none}
+.record-indicator{position:fixed;top:48px;right:16px;z-index:20;display:none;align-items:center;gap:8px;background:rgba(10,10,20,.9);padding:5px 12px;border-radius:8px;border:1px solid rgba(255,80,80,.4);font:bold 13px "Microsoft YaHei",sans-serif;color:#ff5050;pointer-events:none}
+.record-dot{width:12px;height:12px;border-radius:50%;background:#ff3030;animation:recordPulse .8s infinite}
+@keyframes recordPulse{0%,100%{opacity:1;box-shadow:0 0 6px #ff3030}50%{opacity:.3;box-shadow:0 0 12px #ff3030}}
 /* SPONSOR */
 .sponsor-card{text-align:center;padding:12px 16px;background:linear-gradient(135deg,rgba(200,150,255,.08) 0%,rgba(200,150,255,.02) 100%);border:1px solid rgba(200,150,255,.2);border-radius:8px;margin-top:4px}
 .sponsor-card .sponsor-text{font-size:12px;color:#999;line-height:1.6;margin-bottom:6px}
@@ -125,6 +128,7 @@ body{overflow:hidden;background:#0a0a0f;touch-action:none;-webkit-touch-callout:
     <button id="pauseBtn">⏸</button>
     <button id="settingsBtn">⚙</button>
     <button id="upgradeToggle">⭐天赋</button>
+    <button id="recordBtn" style="font-size:14px">🔴 录制</button>
     <button id="shareBtn" style="font-size:14px">📤</button>
   </div>
 </div>
@@ -135,6 +139,8 @@ body{overflow:hidden;background:#0a0a0f;touch-action:none;-webkit-touch-callout:
 </div>
 
 <div class="boss-bar" id="bossBar"><div class="boss-hp" id="bossHp"></div></div>
+
+<div class="record-indicator" id="recordIndicator"><div class="record-dot"></div><span id="recordTimer">00:00</span></div>
 
 <div class="combo-display">
   <div class="combo-num" id="comboNum"></div>
@@ -304,6 +310,7 @@ const G = {
   combo:0, comboTimer:0, comboMax:0,
   gold:0, runGold:0, upgrades:{hp:0, atk:0, spd:0, blades:0, xp:0},
   shakeX:0, shakeY:0, shakeDur:0, frame:0,
+  recording:false, recorder:null, recordChunks:[], recordStart:0,
 };
 
 const P = {
@@ -608,6 +615,12 @@ let lastSpawn = 0;
 function update() {
   if (!G.started || G.over || G.counting || G.paused) return;
   G.frame++;
+  if (G.recording) {
+    const elapsed = Math.floor((Date.now() - G.recordStart) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    document.getElementById('recordTimer').textContent = m + ':' + s;
+  }
   P.hurtThisFrame = false;
 
   movePlayer();
@@ -1153,6 +1166,7 @@ function updateUI() {
 
 function gameOver() {
   G.over = true; stopBGM();
+  if (G.recording) stopRecording();
   G.gold += G.runGold; saveMeta();
 
   // Verify share-gold reward
@@ -1219,6 +1233,57 @@ document.getElementById('shareBtn').onclick = () => {
     }).catch(() => {});
   }
 };
+
+// ===== VIDEO RECORDING =====
+function toggleRecording() {
+  if (!G.started || G.over) return;
+  if (G.recording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+function startRecording() {
+  try {
+    const canvas = document.getElementById('canvas');
+    const stream = canvas.captureStream(60);
+    G.recordChunks = [];
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    G.recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4000000 });
+    G.recorder.ondataavailable = e => { if (e.data.size > 0) G.recordChunks.push(e.data); };
+    G.recorder.onstop = () => {
+      const blob = new Blob(G.recordChunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().slice(0,19).replace(/:/g,'-');
+      a.href = url; a.download = `暗影幸存者_${P.hero?P.hero.name:''}_${ts}.webm`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const t = document.createElement('div');
+      t.className='toast'; t.style.setProperty('--accent','#ff5050');
+      t.textContent='🎬 录像已下载到本地！';
+      document.body.appendChild(t); setTimeout(() => t.remove(), 2500);
+    };
+    G.recorder.start(1000);
+    G.recordStart = Date.now();
+    G.recording = true;
+    document.getElementById('recordBtn').textContent = '⏹ 停止';
+    document.getElementById('recordBtn').style.color = '#ff5050';
+    document.getElementById('recordIndicator').style.display = 'flex';
+  } catch(e) {
+    alert('录屏失败：你的浏览器不支持。请使用 Chrome 或 Edge 浏览器。');
+    console.error('Record error:', e);
+  }
+}
+function stopRecording() {
+  if (!G.recording || !G.recorder) return;
+  G.recorder.stop();
+  G.recording = false;
+  document.getElementById('recordBtn').textContent = '🔴 录制';
+  document.getElementById('recordBtn').style.color = '';
+  document.getElementById('recordIndicator').style.display = 'none';
+}
+document.getElementById('recordBtn').onclick = toggleRecording;
 
 // ===== MAIN LOOP =====
 function gameLoop() {
