@@ -194,6 +194,7 @@ body{overflow:hidden;background:#0a0a0f;touch-action:none;-webkit-touch-callout:
   <div class="sub">SHADOW SURVIVORS</div>
   <div class="chars" id="charList"></div>
   <div class="diff-row" id="diffRow"></div>
+  <div class="diff-row" id="modeRow" style="margin-top:4px"></div>
   <button class="start-btn" id="startBtn">开始战斗</button>
   <div style="color:#888;font:12px 'Microsoft YaHei',sans-serif">WASD / 方向键移动 | 空格闪避 | ESC暂停</div>
   <div class="sponsor-card">
@@ -287,6 +288,7 @@ document.getElementById('settingsClose').onclick = () => document.getElementById
 // ===== CONSTANTS =====
 const DIFF_NAMES = ['简单','普通','地狱','噩梦'];
 const DIFF_MULT = [0.65, 1, 1.7, 2.5];
+const MODE_NAMES = ['闯关', '无尽'];
 
 const HEROES = [
   { id:'blade', name:'剑舞者', icon:'⚔️', desc:'高速低血 近战专精', weapon:'旋转飞刃', color:'#00d4ff',
@@ -311,6 +313,7 @@ const G = {
   gold:0, runGold:0, upgrades:{hp:0, atk:0, spd:0, blades:0, xp:0},
   shakeX:0, shakeY:0, shakeDur:0, frame:0,
   recording:false, recorder:null, recordChunks:[], recordStart:0,
+  gameMode:1, waveCleared:0, victory:false,
 };
 
 const P = {
@@ -470,23 +473,61 @@ function resizeCanvas() {
 
 function bindTouch() {
   const c = document.getElementById('canvas');
+  const maxR = 80;
+  let touchStartTime = 0, touchStartX = 0, touchStartY = 0;
   c.addEventListener('touchstart', e => {
     e.preventDefault();
     for (const t of e.changedTouches) {
-      if (t.clientY > G.h*0.55) { G.joystick.active=true; G.joystick.baseX=t.clientX; G.joystick.baseY=t.clientY; }
+      if (t.clientY > G.h*0.45) {
+        G.joystick.active = true;
+        G.joystick.baseX = t.clientX;
+        G.joystick.baseY = t.clientY;
+        G.joystick.dx = 0; G.joystick.dy = 0;
+        G.joystick.smoothX = 0; G.joystick.smoothY = 0;
+        touchStartTime = Date.now();
+        touchStartX = t.clientX; touchStartY = t.clientY;
+      }
     }
   }, {passive:false});
   c.addEventListener('touchmove', e => {
     e.preventDefault();
     for (const t of e.changedTouches) {
-      if (G.joystick.active) { G.joystick.dx=clamp(t.clientX-G.joystick.baseX,-60,60); G.joystick.dy=clamp(t.clientY-G.joystick.baseY,-60,60); }
+      if (!G.joystick.active) return;
+      let rawDx = t.clientX - G.joystick.baseX;
+      let rawDy = t.clientY - G.joystick.baseY;
+      let dist = Math.hypot(rawDx, rawDy);
+      if (dist > maxR * 1.3) {
+        G.joystick.baseX = t.clientX - (rawDx / dist) * maxR;
+        G.joystick.baseY = t.clientY - (rawDy / dist) * maxR;
+        rawDx = t.clientX - G.joystick.baseX;
+        rawDy = t.clientY - G.joystick.baseY;
+        dist = Math.hypot(rawDx, rawDy);
+      }
+      if (dist < 15) { G.joystick.dx = 0; G.joystick.dy = 0; return; }
+      let ratio = dist / maxR;
+      ratio = ratio < 0.3 ? ratio * 0.5 : Math.min(1, ratio * ratio);
+      G.joystick.dx = (rawDx / dist) * ratio * maxR;
+      G.joystick.dy = (rawDy / dist) * ratio * maxR;
     }
   }, {passive:false});
-  c.addEventListener('touchend', e => { G.joystick.active=false; G.joystick.dx=0; G.joystick.dy=0; });
+  c.addEventListener('touchend', e => {
+    if (G.over || G.victory) return;
+    if (Date.now() - touchStartTime < 200) {
+      const tdx = (e.changedTouches[0] ? e.changedTouches[0].clientX : touchStartX) - touchStartX;
+      const tdy = (e.changedTouches[0] ? e.changedTouches[0].clientY : touchStartY) - touchStartY;
+      if (Math.hypot(tdx, tdy) < 15) {
+        if (touchStartX < 50 && touchStartY < 50) togglePause();
+        else G.speed = G.speed === 1 ? 2 : 1;
+      }
+    }
+    G.joystick.active = false;
+    G.joystick.dx = 0; G.joystick.dy = 0;
+    G.joystick.smoothX = 0; G.joystick.smoothY = 0;
+  });
 }
 
 // ===== MENU =====
-let selectedHero = 0, selectedDiff = 1;
+let selectedHero = 0, selectedDiff = 1, selectedMode = 1;
 
 function buildMenu() {
   const charList = document.getElementById('charList');
@@ -507,6 +548,15 @@ function buildMenu() {
     btn.onclick = () => { selectedDiff=i; buildMenu(); };
     diffRow.appendChild(btn);
   });
+  const modeRow = document.getElementById('modeRow');
+  modeRow.innerHTML = '';
+  MODE_NAMES.forEach((m,i) => {
+    const btn = document.createElement('button');
+    btn.className = 'diff-btn' + (i===selectedMode?' active':'');
+    btn.textContent = (i===0?'🏰 ':'♾️ ') + m;
+    btn.onclick = () => { selectedMode=i; buildMenu(); };
+    modeRow.appendChild(btn);
+  });
   document.getElementById('startBtn').onclick = startGame;
 }
 
@@ -514,6 +564,8 @@ function startGame() {
   document.getElementById('menu').style.display = 'none';
   document.getElementById('overOverlay').style.display = 'none';
   G.diff = selectedDiff;
+  G.gameMode = selectedMode;
+  G.victory = false; G.waveCleared = 0;
   P.hero = HEROES[selectedHero];
   applyHero();
   applyUpgrades();
@@ -527,6 +579,7 @@ function resetGame() {
   G.enemies = []; G.props = []; G.exps = []; G.texts = []; G.particles = [];
   G.projectiles = []; G.dmgTexts = []; G.goldDrops = []; G.waveEffects = [];
   G.boss = null; G.hasBoss = false; G.counting = false; G.over = false; G.started = false; G.paused = false;
+  G.victory = false; G.waveCleared = 0;
   G.combo = 0; G.comboTimer = 0; G.shakeDur = 0;
   localStorage.removeItem('shadowShareGold');
   document.getElementById('bossBar').style.display = 'none';
@@ -563,7 +616,7 @@ function togglePause() {
 }
 document.getElementById('pauseBtn').onclick = togglePause;
 document.getElementById('pauseResume').onclick = togglePause;
-document.getElementById('pauseRestart').onclick = () => { togglePause(); resetGame(); P.hero = HEROES[selectedHero]; applyHero(); applyUpgrades(); startBGM(); nextLevel(); G.started = true; };
+document.getElementById('pauseRestart').onclick = () => { togglePause(); resetGame(); G.diff = selectedDiff; G.gameMode = selectedMode; G.over = false; G.victory = false; document.getElementById('overOverlay').style.display = 'none'; P.hero = HEROES[selectedHero]; applyHero(); applyUpgrades(); startBGM(); nextLevel(); G.started = true; };
 document.getElementById('pauseMenu').onclick = () => { G.paused = false; G.started = false; stopBGM(); G.gold += G.runGold; saveMeta(); document.getElementById('pauseOverlay').classList.remove('show'); document.getElementById('menu').style.display = 'flex'; resetGame(); };
 document.getElementById('overShare').onclick = () => {
   const url = 'https://samouswolf.github.io/shadow-survivors/?ref=' + PLAYER_ID;
@@ -572,7 +625,8 @@ document.getElementById('overShare').onclick = () => {
   let recordLine = '';
   if (bests.bestCombo) recordLine += `\n🏆 个人最佳连击: ${bests.bestCombo}`;
   if (bests.bestScore) recordLine += `\n🏆 个人最佳分数: ${bests.bestScore}`;
-  const text = `🏆 暗影幸存者战绩 🏆\n${P.hero.icon} ${P.hero.name} | 难度:${DIFF_NAMES[G.diff]}\n📊 等级${P.level} | 关卡${G.level} | 分数${G.score}\n🔥 最高连击: ${G.comboMax}\n💰 金币: +${G.runGold}${recordLine}\n\n点击链接免费玩，还能获得25金币！`;
+  const modeText = G.victory ? '闯关-通关!' : (G.gameMode === 0 ? '闯关' : '无尽');
+  const text = `🏆 暗影幸存者战绩 🏆\n${P.hero.icon} ${P.hero.name} | 难度:${DIFF_NAMES[G.diff]} | 模式:${modeText}\n📊 等级${P.level} | 关卡${G.level} | 分数${G.score}\n🔥 最高连击: ${G.comboMax}\n💰 金币: +${G.runGold}${recordLine}\n\n点击链接免费玩，还能获得25金币！`;
   if (navigator.share) {
     navigator.share({ title, text, url }).catch(() => {});
   } else {
@@ -583,8 +637,8 @@ document.getElementById('overShare').onclick = () => {
     }).catch(() => {});
   }
 };
-document.getElementById('overRestart').onclick = () => { resetGame(); P.hero = HEROES[selectedHero]; applyHero(); applyUpgrades(); startBGM(); nextLevel(); G.started = true; };
-document.getElementById('overMenu').onclick = () => { G.started = false; stopBGM(); document.getElementById('overOverlay').style.display = 'none'; document.getElementById('menu').style.display = 'flex'; resetGame(); };
+document.getElementById('overRestart').onclick = () => { G.victory = false; G.over = false; document.getElementById('overOverlay').style.display = 'none'; resetGame(); G.diff = selectedDiff; G.gameMode = selectedMode; P.hero = HEROES[selectedHero]; applyHero(); applyUpgrades(); startBGM(); nextLevel(); G.started = true; };
+document.getElementById('overMenu').onclick = () => { G.started = false; G.over = false; G.victory = false; stopBGM(); document.getElementById('overOverlay').style.display = 'none'; document.getElementById('menu').style.display = 'flex'; resetGame(); };
 
 // ===== LEVEL =====
 function nextLevel() {
@@ -627,17 +681,55 @@ function update() {
   const aliveCount = G.enemies.filter(e=>e.alive).length;
   const diffMult = [0.7, 1, 1.4, 1.8];
   const enemyMult = settings.lowEnd ? 0.6 : 1;
-  const maxEnemies = Math.floor((35 + G.level * 8) * diffMult[G.diff] * enemyMult);
-  if (aliveCount < maxEnemies) {
-    lastSpawn += G.speed;
-    const spawnRate = Math.max(3, 18 - G.level * 1.2);
-    if (lastSpawn >= spawnRate) {
-      lastSpawn = 0;
-      let type = 'grunt';
-      if (G.level >= 2 && Math.random() < 0.35) type = 'runner';
-      if (G.level >= 4 && Math.random() < 0.25) type = 'tank';
-      G.enemies.push(new Enemy(type));
+
+  if (G.gameMode === 0) {
+    // 闯关模式：波次制
+    const waveNeed = 15 + G.level * 8;
+    if (G.score >= waveNeed && !G.hasBoss && !G.counting) {
+      G.level++;
+      G.waveCleared = G.level - 1;
+      G.score = 0;
+      if (G.level > 25) {
+        G.waveCleared = 25;
+        document.getElementById('bossBar').style.display = 'none';
+        gameVictory();
+        return;
+      }
+      if (G.level % 5 === 0) {
+        G.hasBoss = true; G.boss = new Boss();
+        document.getElementById('bossBar').style.display = 'block';
+        sfxBoss();
+      }
+      G.enemies = []; G.exps = [];
+      updateUI();
     }
+    const stageMax = Math.floor((15 + G.level * 5) * diffMult[G.diff] * enemyMult);
+    if (aliveCount < stageMax) {
+      lastSpawn += G.speed;
+      const stageRate = Math.max(3, 16 - G.level * 1.2);
+      if (lastSpawn >= stageRate) {
+        lastSpawn = 0;
+        let stype = 'grunt';
+        if (G.level >= 2 && Math.random() < 0.3) stype = 'runner';
+        if (G.level >= 4 && Math.random() < 0.2) stype = 'tank';
+        G.enemies.push(new Enemy(stype));
+      }
+    }
+  } else {
+    // 无尽模式
+    const maxEnemies = Math.floor((35 + G.level * 8) * diffMult[G.diff] * enemyMult);
+    if (aliveCount < maxEnemies) {
+      lastSpawn += G.speed;
+      const spawnRate = Math.max(3, 18 - G.level * 1.2);
+      if (lastSpawn >= spawnRate) {
+        lastSpawn = 0;
+        let type = 'grunt';
+        if (G.level >= 2 && Math.random() < 0.35) type = 'runner';
+        if (G.level >= 4 && Math.random() < 0.25) type = 'tank';
+        G.enemies.push(new Enemy(type));
+      }
+    }
+    if (G.score >= G.needScore && !G.hasBoss && !G.counting) startCountdown();
   }
 
   G.enemies.forEach(e => e.alive && e.update());
@@ -680,7 +772,6 @@ function update() {
   if (P.speedTimer > 0) { P.speedTimer -= G.speed; if (P.speedTimer <= 0) P.speed = P.origSpeed; }
   if (G.hasBoss && G.boss && G.boss.alive) G.boss.update();
   if (G.comboTimer > 0) { G.comboTimer -= G.speed; if (G.comboTimer <= 0 && G.combo > 0) G.combo = 0; }
-  if (G.score >= G.needScore && !G.hasBoss && !G.counting) startCountdown();
   P.angle += P.atkSp * G.speed;
   updateWeapons();
   if (G.shakeDur > 0) { G.shakeDur--; G.shakeX *= 0.85; G.shakeY *= 0.85; }
@@ -692,7 +783,14 @@ function movePlayer() {
   if (G.keys.s || G.keys.arrowdown) dy = sp;
   if (G.keys.a || G.keys.arrowleft) dx = -sp;
   if (G.keys.d || G.keys.arrowright) dx = sp;
-  if (G.joystick.active) { dx = G.joystick.dx / 60 * sp; dy = G.joystick.dy / 60 * sp; }
+  if (G.joystick.active) {
+    G.joystick.smoothX = G.joystick.smoothX || 0;
+    G.joystick.smoothY = G.joystick.smoothY || 0;
+    G.joystick.smoothX = lerp(G.joystick.smoothX, G.joystick.dx, 0.35);
+    G.joystick.smoothY = lerp(G.joystick.smoothY, G.joystick.dy, 0.35);
+    dx = G.joystick.smoothX / 80 * sp;
+    dy = G.joystick.smoothY / 80 * sp;
+  }
   if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
   P.x = clamp(P.x + dx, 10, G.w - 10);
   P.y = clamp(P.y + dy, 10, G.h - 10);
@@ -881,11 +979,23 @@ function render() {
     ctx.textAlign = 'center'; ctx.fillText(t.text, t.x, t.y);
   });
 
-  // Touch joystick
+  // Touch joystick (80px range + floating base)
   if (G.isMobile && G.joystick.active) {
-    ctx.globalAlpha = 0.25; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(G.joystick.baseX, G.joystick.baseY, 60, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(G.joystick.baseX+G.joystick.dx, G.joystick.baseY+G.joystick.dy, 18, 0, Math.PI*2); ctx.fill();
+    const jbx = G.joystick.baseX, jby = G.joystick.baseY;
+    const jdx = G.joystick.smoothX || G.joystick.dx;
+    const jdy = G.joystick.smoothY || G.joystick.dy;
+    ctx.globalAlpha = 0.2; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(jbx, jby, 80, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(jbx, jby, 20, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 0.7; ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(jbx + jdx, jby + jdy, 16, 0, Math.PI*2); ctx.fill();
+    const jdist = Math.hypot(jdx, jdy);
+    if (jdist > 2) {
+      ctx.globalAlpha = 0.3; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(jbx, jby);
+      ctx.lineTo(jbx + jdx / jdist * (jdist + 8), jby + jdy / jdist * (jdist + 8));
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -964,10 +1074,12 @@ class Enemy {
       case 3: this.x = -20; this.y = rng(0, G.h); break;
     }
     const m = DIFF_MULT[G.diff];
+    const lm = 1 + (G.level - 1) * 0.08; // 等级缩放
+    this.lvMult = lm;
     switch(type) {
-      case 'grunt': this.hp = 5+G.level*2.5; this.speed = 1.2*m; this.dmg = 8; this.color = '#e74c3c'; this.size = 14; break;
-      case 'runner': this.hp = 3+G.level*1.3; this.speed = 2.2*m; this.dmg = 6; this.color = '#e67e22'; this.size = 11; break;
-      case 'tank': this.hp = 14+G.level*7; this.speed = 0.8*m; this.dmg = 15; this.color = '#8e44ad'; this.size = 22; break;
+      case 'grunt': this.hp = (5+G.level*2.5)*lm; this.speed = 1.2*m; this.dmg = 8; this.color = '#e74c3c'; this.size = 14; break;
+      case 'runner': this.hp = (3+G.level*1.3)*lm; this.speed = 2.2*m; this.dmg = 6; this.color = '#e67e22'; this.size = 11; break;
+      case 'tank': this.hp = (14+G.level*7)*lm; this.speed = 0.8*m; this.dmg = 15; this.color = '#8e44ad'; this.size = 22; break;
     }
     this.flashTimer = 0;
   }
@@ -976,7 +1088,7 @@ class Enemy {
     const dx = P.x - this.x, dy = P.y - this.y, d = Math.hypot(dx, dy);
     if (d > 22) { this.x += dx/d * this.speed * G.speed; this.y += dy/d * this.speed * G.speed; }
     if (d < 22 && P.hurtCD <= 0 && !P.hurtThisFrame) {
-      P.hp -= this.dmg; P.hurtCD = 60; P.hurtThisFrame = true;
+      P.hp -= this.dmg * (this.lvMult || 1); P.hurtCD = 60; P.hurtThisFrame = true;
       if (settings.showShake) shake(3);
       if (P.hp <= 0) { P.hp = 0; gameOver(); }
       updateUI();
@@ -1156,7 +1268,11 @@ class Prop {
 
 // ===== UI =====
 function updateUI() {
-  document.getElementById('ui').innerHTML = `难度:${DIFF_NAMES[G.diff]} | 关卡:${G.level} | 等级:${P.level} | 分数:${G.score} | 连击:${G.comboMax} | 💰${G.gold}`;
+  if (G.gameMode === 0) {
+    document.getElementById('ui').innerHTML = `难度:${DIFF_NAMES[G.diff]} | 第${G.waveCleared+1}波/共25波 | 击杀:${G.score} | Lv${P.level} | 连击:${G.comboMax} | 💰${G.gold}`;
+  } else {
+    document.getElementById('ui').innerHTML = `难度:${DIFF_NAMES[G.diff]} | 关卡:${G.level} | 等级:${P.level} | 分数:${G.score} | 连击:${G.comboMax} | 💰${G.gold}`;
+  }
   document.getElementById('goldRun').textContent = `💰${G.runGold}`;
   document.getElementById('hpBar').style.width = (P.hp/P.maxHp*100)+'%';
   document.getElementById('expBar').style.width = (P.exp/P.needExp*100)+'%';
@@ -1164,8 +1280,45 @@ function updateUI() {
   document.getElementById('expText').textContent = `${Math.floor(P.exp)}/${P.needExp}`;
 }
 
+function gameVictory() {
+  G.victory = true; G.started = false; stopBGM();
+  if (G.recording) stopRecording();
+  G.gold += G.runGold; saveMeta();
+
+  const shareRewarded = localStorage.getItem('shadowShareGold') === 'done';
+  if (!shareRewarded) {
+    G.gold += 30;
+    localStorage.setItem('shadowShareGold', 'done');
+    saveMeta();
+  }
+
+  const { bests, broken } = updateBests();
+  renderUpgradePanel();
+
+  let brokenHTML = '';
+  if (broken.length > 0) {
+    brokenHTML = `<div style="color:#ffd700;font-size:18px;margin-bottom:4px">🏆 新纪录！${broken.join(' · ')}</div>`;
+  }
+
+  document.getElementById('overOverlay').querySelector('h2').textContent = '通关!';
+  document.getElementById('overOverlay').querySelector('h2').style.color = '#ffd700';
+  document.getElementById('overStats').innerHTML =
+    brokenHTML +
+    `英雄 <span>${P.hero.icon} ${P.hero.name}</span> | 模式 <span>闯关</span><br>` +
+    `等级 <span>${P.level}</span> | 击杀 <span>${G.score}</span> | 本局金币 <span>+${G.runGold}</span>`;
+
+  document.getElementById('goldBreakdown').innerHTML =
+    `💰 本局获得 <span style="font-size:22px">+${G.runGold}</span> | 💰 总金币: <span>${G.gold}</span>` +
+    `<br><span style="font-size:12px;color:#888">${shareRewarded ? '分享奖励已领取 ✓' : ''}</span>`;
+
+  document.getElementById('overShare').style.display = '';
+  document.getElementById('overOverlay').style.display = 'flex';
+}
+
 function gameOver() {
   G.over = true; stopBGM();
+  document.getElementById('overOverlay').querySelector('h2').textContent = '阵亡';
+  document.getElementById('overOverlay').querySelector('h2').style.color = '#e74c3c';
   if (G.recording) stopRecording();
   G.gold += G.runGold; saveMeta();
 
@@ -1211,7 +1364,7 @@ function gameOver() {
 }
 
 // ===== BUTTONS =====
-document.getElementById('speedBtn').onclick = () => { G.speedIdx = (G.speedIdx+1)%3; G.speed = G.speeds[G.speedIdx]; document.getElementById('speedBtn').textContent = G.speed+'X'; };
+document.getElementById('speedBtn').onclick = () => { if (G.over || G.victory) return; G.speedIdx = (G.speedIdx+1)%3; G.speed = G.speeds[G.speedIdx]; document.getElementById('speedBtn').textContent = G.speed+'X'; };
 document.getElementById('musicBtn').onclick = toggleMusic;
 document.getElementById('upgradeToggle').onclick = () => { const p = document.getElementById('upgradePanel'); p.style.display = p.style.display==='none'?'block':'none'; };
 document.getElementById('shareBtn').onclick = () => {
