@@ -198,6 +198,9 @@ const SNAKE_SKINS = [
 ];
 let selectedSkin = 0;
 let speedMultiplier = 1;
+let npcSnakes = [];
+const NPC_NAMES = ['小黄','小青','小粉','小蓝','小橙','小紫'];
+const NPC_COLORS = ['#ff6b6b','#4dc9f6','#ff69b4','#ffd93d','#ff922b','#c084fc'];
 let snake, food, bonusFood, particles, texts, powerUp;
 let dir, nextDir, score, combo, comboTimer, highScore;
 let gameRunning, gamePaused, gameOver, gameStarted;
@@ -243,6 +246,10 @@ powerUp = null;
 powerUpActive = false;
 powerUpTimer = 0;
 speed = baseSpeed;
+speedMultiplier = 1;
+document.querySelectorAll('.spd-btn').forEach(b=>b.classList.remove('active'));
+const defSpd = document.querySelector('.spd-btn[data-spd=\"1\"]');
+if (defSpd) defSpd.classList.add('active');
 gameRunning = true;
 gamePaused = false;
 gameOver = false;
@@ -252,6 +259,7 @@ shakeAmount = 0;
 shakeDuration = 0;
 rainbowHue = 0;
 lastMilestone = 0;
+spawnNPCs();
 spawnFood();
 sfxStart();
 startBGM();
@@ -271,6 +279,7 @@ valid = true;
 for (const s of snake) { if (s.x===fx && s.y===fy) { valid=false; break; } }
 if (bonusFood && bonusFood.x===fx && bonusFood.y===fy) valid=false;
 if (powerUp && powerUp.x===fx && powerUp.y===fy) valid=false;
+for (const npc of npcSnakes) { for (const s of npc.segments) { if (s.x===fx&&s.y===fy) { valid=false; break; } } }
 } while (!valid);
 
 // Pick food type based on chance
@@ -315,6 +324,154 @@ const types = [
 {emoji:'🧲', name:'磁铁', color:'#ff69b4', glow:'#ff1493', duration:150},
 ];
 powerUp = {x:fx, y:fy, type:types[Math.floor(Math.random()*types.length)], life:250};
+}
+
+// ===== NPC SNAKES =====
+function spawnNPCs() {
+npcSnakes = [];
+const count = 3 + Math.floor(Math.random()*2); // 3-4 NPCs
+for (let i=0;i<count;i++) {
+let nx, ny, valid;
+const len = 3 + Math.floor(Math.random()*4); // 3-6 segments
+do {
+nx = Math.floor(Math.random()*(BOARD.cols-6))+3;
+ny = Math.floor(Math.random()*(BOARD.rows-6))+3;
+valid = true;
+for (const s of snake) { if (Math.abs(s.x-nx)<4 && Math.abs(s.y-ny)<4) { valid=false; break; } }
+} while (!valid);
+const ndir = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}][Math.floor(Math.random()*4)];
+const segs = [];
+for (let j=0;j<len;j++) segs.push({x:nx - ndir.x*j, y:ny - ndir.y*j});
+const ci = i % NPC_COLORS.length;
+npcSnakes.push({
+segments: segs, dir: {...ndir}, nextDir: {...ndir},
+color: NPC_COLORS[ci], name: NPC_NAMES[ci],
+aiTimer: 20 + Math.floor(Math.random()*40),
+});
+}
+}
+
+function updateNPCs() {
+for (let ni=npcSnakes.length-1;ni>=0;ni--) {
+const npc = npcSnakes[ni];
+npc.aiTimer--;
+// AI: periodically change direction
+if (npc.aiTimer <= 0) {
+npc.aiTimer = 20 + Math.floor(Math.random()*30);
+const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+// Filter out reverse direction
+const validDirs = dirs.filter(d => !(d.x===-npc.dir.x && d.y===-npc.dir.y));
+// Prefer direction toward nearest food, sometimes
+if (food && Math.random()<0.4) {
+const h = npc.segments[0];
+const dx = food.x - h.x;
+const dy = food.y - h.y;
+npc.nextDir = Math.abs(dx)>Math.abs(dy) ? {x:dx>0?1:-1,y:0} : {x:0,y:dy>0?1:-1};
+} else {
+npc.nextDir = validDirs[Math.floor(Math.random()*validDirs.length)];
+}
+}
+npc.dir = {...npc.nextDir};
+const head = {x:npc.segments[0].x+npc.dir.x, y:npc.segments[0].y+npc.dir.y};
+// Wall bounce
+if (head.x<0||head.x>=BOARD.cols||head.y<0||head.y>=BOARD.rows) {
+npc.nextDir = {x:-npc.dir.x, y:-npc.dir.y};
+npc.dir = {...npc.nextDir};
+head.x = npc.segments[0].x+npc.dir.x;
+head.y = npc.segments[0].y+npc.dir.y;
+}
+// Self collision - change direction
+let selfHit = false;
+for (const s of npc.segments) {
+if (s.x===head.x && s.y===head.y) { selfHit=true; break; }
+}
+if (selfHit) {
+npc.nextDir = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}].filter(d => !(d.x===-npc.dir.x&&d.y===-npc.dir.y))[Math.floor(Math.random()*3)] || {x:-npc.dir.x,y:-npc.dir.y};
+npc.dir = {...npc.nextDir};
+head.x = npc.segments[0].x+npc.dir.x;
+head.y = npc.segments[0].y+npc.dir.y;
+}
+npc.segments.unshift(head);
+// Eat food if nearby (rare - NPCs mostly ignore food)
+if (food && head.x===food.x && head.y===food.y) {
+spawnFood();
+} else {
+npc.segments.pop();
+}
+}
+}
+
+function checkSnakeCollisions() {
+const head = snake[0];
+const playerLen = snake.length;
+// Player head vs NPC bodies
+for (let ni=npcSnakes.length-1;ni>=0;ni--) {
+const npc = npcSnakes[ni];
+for (let si=0;si<npc.segments.length;si++) {
+const s = npc.segments[si];
+if (head.x===s.x && head.y===s.y) {
+if (si===0) {
+// Head-to-head collision
+if (playerLen > npc.segments.length) {
+eatNPC(ni); return;
+} else {
+die(); return;
+}
+} else {
+// Player head hit NPC body
+eatNPC(ni); return;
+}
+}
+}
+// NPC head vs player body
+const npcHead = npc.segments[0];
+for (let si=1;si<snake.length;si++) {
+if (npcHead.x===snake[si].x && npcHead.y===snake[si].y) {
+if (npc.segments.length > playerLen) {
+die(); return;
+} else {
+eatNPC(ni); return;
+}
+}
+}
+// NPC vs NPC
+for (let nj=npcSnakes.length-1;nj>ni;nj--) {
+const other = npcSnakes[nj];
+const oh = other.segments[0];
+for (let si=1;si<npc.segments.length;si++) {
+if (oh.x===npc.segments[si].x && oh.y===npc.segments[si].y) {
+if (other.segments.length > npc.segments.length) {
+addFloatingText(npc.segments[0].x*GS, npc.segments[0].y*GS, '💀', '#ff4444', 20);
+npcSnakes.splice(ni,1);
+} else {
+addFloatingText(other.segments[0].x*GS, other.segments[0].y*GS, '💀', '#ff4444', 20);
+npcSnakes.splice(nj,1);
+}
+break;
+}
+}
+}
+}
+}
+
+function eatNPC(idx) {
+const npc = npcSnakes[idx];
+const bonus = npc.segments.length * 3;
+score += bonus;
+burstParticles(npc.segments[0].x*GS+GS/2, npc.segments[0].y*GS+GS/2, npc.color, 25);
+addFloatingText(npc.segments[0].x*GS+GS/2, npc.segments[0].y*GS, '吞噬 ' + npc.name + '! +'+bonus, npc.color, 22);
+sfxBonus();
+shake(8, 10);
+// Grow player by eating the NPC
+for (let i=0;i<npc.segments.length;i++) snake.push({...snake[snake.length-1]});
+npcSnakes.splice(idx,1);
+updateScoreUI();
+// Respawn NPC after delay
+setTimeout(() => {
+if (gameRunning && !gameOver && npcSnakes.length<4) {
+spawnNPCs();
+}
+}, 3000);
 }
 
 function updateScoreUI() {
@@ -364,6 +521,9 @@ function update() {
 if (!gameRunning || gamePaused || gameOver) return;
 frameCount++;
 
+// Update NPCs
+updateNPCs();
+
 // Combo timer
 if (comboTimer > 0) { comboTimer--; if (comboTimer<=0) combo=0; }
 
@@ -402,6 +562,10 @@ if (s.x===head.x && s.y===head.y) { die(); return; }
 }
 
 snake.unshift(head);
+
+// Check NPC collisions
+checkSnakeCollisions();
+if (gameOver) return;
 
 // Check food
 if (food && head.x===food.x && head.y===food.y) {
@@ -544,60 +708,71 @@ const glowColor = ng>=3 ? skin.glow(i,total,rainbowHue) : ng>=2 ? skin.glow(i,to
 ctx.save();
 ctx.translate(sx, sy);
 
-// Glow
+// Glow - bigger for head
 ctx.shadowColor = glowColor;
-ctx.shadowBlur = 8 + (i===0?6:2);
+ctx.shadowBlur = i===0 ? 16 : 8;
 
-// Body
-const r = GS/2 - 1;
+// Body radius - head is exaggerated BIG
+const r = i===0 ? GS*0.88 : GS/2-1;
 ctx.fillStyle = color;
 ctx.beginPath();
+if (i===0) {
+ctx.ellipse(0, 0, r*1.05, r*0.92, 0, 0, Math.PI*2);
+} else {
 ctx.roundRect(-r, -r, r*2, r*2, r*(1-ratio*0.5));
+}
 ctx.fill();
 
-// Eyes on head
+// Eyes on head (big cartoon eyes)
 if (i === 0) {
 ctx.shadowBlur = 0;
-const eyeR = r * 0.35;
-const eyeOffX = r * 0.5;
-const eyeOffY = -r * 0.2;
+const eyeR = r * 0.3;
+const eyeOffX = r * 0.45;
+const eyeOffY = -r * 0.15;
 
 // White of eyes
 ctx.fillStyle = '#fff';
-ctx.beginPath(); ctx.arc(eyeOffX, eyeOffY, eyeR*1.3, 0, Math.PI*2); ctx.fill();
-ctx.beginPath(); ctx.arc(-eyeOffX, eyeOffY, eyeR*1.3, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.ellipse(eyeOffX, eyeOffY, eyeR*1.4, eyeR*1.6, 0, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.ellipse(-eyeOffX, eyeOffY, eyeR*1.4, eyeR*1.6, 0, 0, Math.PI*2); ctx.fill();
+
+// Eye sparkle
+ctx.fillStyle = 'rgba(255,255,255,.3)';
+ctx.beginPath(); ctx.arc(eyeOffX+eyeR*0.3, eyeOffY-eyeR*0.4, eyeR*0.35, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(-eyeOffX+eyeR*0.3, eyeOffY-eyeR*0.4, eyeR*0.35, 0, Math.PI*2); ctx.fill();
 
 // Pupils
 ctx.fillStyle = '#111';
-const lookX = dir.x * eyeR * 0.4;
-const lookY = dir.y * eyeR * 0.4;
-ctx.beginPath(); ctx.arc(eyeOffX+lookX, eyeOffY+lookY, eyeR, 0, Math.PI*2); ctx.fill();
-ctx.beginPath(); ctx.arc(-eyeOffX+lookX, eyeOffY+lookY, eyeR, 0, Math.PI*2); ctx.fill();
+const lookX = dir.x * eyeR * 0.5;
+const lookY = dir.y * eyeR * 0.5;
+ctx.beginPath(); ctx.arc(eyeOffX+lookX, eyeOffY+lookY, eyeR*0.85, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(-eyeOffX+lookX, eyeOffY+lookY, eyeR*0.85, 0, Math.PI*2); ctx.fill();
 
-// Tongue (flickers every 30 frames)
+// Pupil highlight
+ctx.fillStyle = '#fff';
+ctx.beginPath(); ctx.arc(eyeOffX+lookX+eyeR*0.2, eyeOffY+lookY-eyeR*0.2, eyeR*0.2, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(-eyeOffX+lookX+eyeR*0.2, eyeOffY+lookY-eyeR*0.2, eyeR*0.2, 0, Math.PI*2); ctx.fill();
+
+// Tongue (flickers)
 if (Math.floor(frameCount/15)%2 === 0) {
-const tongueLen = r * 1.2;
-const tx = dir.x * r * 0.9;
-const ty = dir.y * r * 0.9;
 ctx.strokeStyle = '#ff4444';
-ctx.lineWidth = 2;
+ctx.lineWidth = 2.5;
 ctx.lineCap = 'round';
 ctx.beginPath();
-ctx.moveTo(dir.x*r*0.5, dir.y*r*0.5);
+ctx.moveTo(dir.x*r*0.45, dir.y*r*0.45);
 ctx.quadraticCurveTo(
-dir.x*r*0.7 + (dir.y===0?0:3),
-dir.y*r*0.7 + (dir.x===0?0:3),
-dir.x*r + (dir.y===0?0:4)*Math.sin(frameCount/5),
-dir.y*r + (dir.x===0?0:4)*Math.sin(frameCount/5)
+dir.x*r*0.65+(dir.y===0?0:3),
+dir.y*r*0.65+(dir.x===0?0:3),
+dir.x*r*1.05+(dir.y===0?0:5)*Math.sin(frameCount/5),
+dir.y*r*1.05+(dir.x===0?0:5)*Math.sin(frameCount/5)
 );
 ctx.stroke();
 }
 
-// Cheeks (cute blush)
-ctx.fillStyle = 'rgba(255,150,150,0.5)';
-const cheekR = r * 0.25;
-ctx.beginPath(); ctx.arc(-r*0.7, r*0.1, cheekR, 0, Math.PI*2); ctx.fill();
-ctx.beginPath(); ctx.arc(r*0.7, r*0.1, cheekR, 0, Math.PI*2); ctx.fill();
+// Cheeks
+ctx.fillStyle = 'rgba(255,150,150,0.45)';
+const cheekR = r * 0.22;
+ctx.beginPath(); ctx.arc(-r*0.65, r*0.15, cheekR, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(r*0.65, r*0.15, cheekR, 0, Math.PI*2); ctx.fill();
 }
 
 ctx.restore();
@@ -664,6 +839,52 @@ ctx.beginPath(); ctx.arc(hx, hy, pr, 0, Math.PI*2); ctx.fill();
 for (let i=snake.length-1;i>=0;i--) {
 drawSnakeSegment(snake[i].x, snake[i].y, i, snake.length);
 }
+
+// Draw NPC snakes
+for (const npc of npcSnakes) {
+for (let i=npc.segments.length-1;i>=0;i--) {
+const seg = npc.segments[i];
+const sx = BOARD.x + seg.x*GS + GS/2;
+const sy = BOARD.y + seg.y*GS + GS/2;
+const ratio = i/Math.max(npc.segments.length-1,1);
+const r = i===0 ? GS*0.6 : GS/2-2;
+ctx.save();
+ctx.translate(sx, sy);
+// Body
+ctx.shadowColor = npc.color;
+ctx.shadowBlur = i===0 ? 6 : 2;
+ctx.fillStyle = npc.color;
+ctx.globalAlpha = 0.85 - ratio*0.3;
+ctx.beginPath();
+if (i===0) {
+ctx.ellipse(0, 0, r*1.05, r*0.9, 0, 0, Math.PI*2);
+} else {
+ctx.roundRect(-r, -r, r*2, r*2, r*0.6);
+}
+ctx.fill();
+// Small eyes on NPC head
+if (i===0) {
+ctx.shadowBlur = 0;
+ctx.globalAlpha = 1;
+ctx.fillStyle = '#fff';
+const er = r*0.25;
+const eox = r*0.4;
+const eoy = -r*0.1;
+ctx.beginPath(); ctx.arc(eox, eoy, er, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(-eox, eoy, er, 0, Math.PI*2); ctx.fill();
+ctx.fillStyle = '#111';
+ctx.beginPath(); ctx.arc(eox+npc.dir.x*er*0.3, eoy+npc.dir.y*er*0.3, er*0.55, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(-eox+npc.dir.x*er*0.3, eoy+npc.dir.y*er*0.3, er*0.55, 0, Math.PI*2); ctx.fill();
+// NPC name
+ctx.fillStyle = 'rgba(255,255,255,.6)';
+ctx.font = '9px "Microsoft YaHei",sans-serif';
+ctx.textAlign = 'center';
+ctx.fillText(npc.name, 0, -r-8);
+}
+ctx.restore();
+}
+}
+ctx.globalAlpha = 1;
 
 // Draw food
 if (food) {
