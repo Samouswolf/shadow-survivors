@@ -81,6 +81,7 @@ canvas{display:block}
 <div class="over-overlay" id="overOverlay">
 <h2>游戏结束</h2>
 <div class="over-score" id="overScore">得分: 0</div>
+<div class="over-encourage" id="overEncourage" style="color:#ffa502;font:bold 18px 'Microsoft YaHei',sans-serif;margin-bottom:4px"></div>
 <div class="over-new" id="overNew" style="display:none">🎉 新纪录！</div>
 <button class="over-btn" id="overRestart">🔄 再来一局</button>
 <button class="over-btn" id="overMenu" style="background:rgba(255,255,255,.15)">🏠 返回菜单</button>
@@ -112,6 +113,29 @@ function sfxCombo() { beep(900, 'triangle', 0.12, 0.1, 400) }
 function sfxPowerUp() { [523,659,784,1047].forEach((f,i)=>beep(f,'sine',0.15,0.08,0)) }
 function sfxDie() { beep(50, 'sawtooth', 0.5, 0.15, -30) }
 function sfxBonus() { beep(1200, 'sine', 0.1, 0.06, -200) }
+function sfxTurn() { if (!soundOn) return; beep(200+Math.random()*100, 'sine', 0.04, 0.03, 50) }
+function sfxMilestone() { [392,523,659,784,1047].forEach((f,i)=>beep(f,'triangle',0.2,0.08,0)) }
+function sfxStart() { [262,330,392,523,659].forEach((f,i)=>beep(f,'sine',0.18,0.06,0)) }
+
+// BGM - simple kids melody
+let bgmTimer = null, bgmPlaying = false;
+function startBGM() {
+if (bgmPlaying || !audioCtx || !soundOn) return;
+bgmPlaying = true;
+const notes = [262,294,330,349,392,349,330,294,262,330,392,440,392,349,330,294];
+let ni = 0;
+function playNote() {
+if (!bgmPlaying) return;
+beep(notes[ni%notes.length], 'triangle', 0.25, 0.015, 0);
+ni++;
+bgmTimer = setTimeout(playNote, 280);
+}
+playNote();
+}
+function stopBGM() {
+bgmPlaying = false;
+if (bgmTimer) { clearTimeout(bgmTimer); bgmTimer = null; }
+}
 
 // ===== CANVAS =====
 const canvas = document.getElementById('c');
@@ -133,10 +157,10 @@ let gameRunning, gamePaused, gameOver, gameStarted;
 let speed, baseSpeed, difficulty, frameCount;
 let powerUpActive, powerUpTimer;
 let shakeAmount, shakeDuration;
-let rainbowHue;
+let rainbowHue, lastMilestone;
 
-const DIFF_NAMES = ['🍼 简单', '⚡ 普通', '🔥 困难'];
-const DIFF_SPEEDS = [80, 55, 35];
+const DIFF_NAMES = ['🐢 入门', '🐇 简单', '🦊 普通'];
+const DIFF_SPEEDS = [150, 110, 80];
 
 // Food types with different scores/effects
 const FOOD_TYPES = [
@@ -182,7 +206,10 @@ frameCount = 0;
 shakeAmount = 0;
 shakeDuration = 0;
 rainbowHue = 0;
+lastMilestone = 0;
 spawnFood();
+sfxStart();
+startBGM();
 updateScoreUI();
 document.getElementById('overOverlay').style.display = 'none';
 document.getElementById('mobileCtrl').style.display = innerWidth<=768 ? 'flex':'none';
@@ -356,6 +383,14 @@ shake(8, 10);
 
 spawnFood();
 updateScoreUI();
+// Milestone every 50 points
+if (Math.floor(score/50) > Math.floor(lastMilestone/50)) {
+popCombo('🎉 ' + Math.floor(score/50)*50 + '分!', '#ffd700');
+sfxMilestone();
+burstParticles(head.x*GS+GS/2, head.y*GS+GS/2, '#ffd700', 40);
+shake(6, 8);
+}
+lastMilestone = score;
 } else {
 snake.pop();
 }
@@ -425,6 +460,7 @@ rainbowHue += 0.02;
 function die() {
 gameRunning = false;
 gameOver = true;
+stopBGM();
 sfxDie();
 burstParticles(snake[0].x*GS+GS/2, snake[0].y*GS+GS/2, '#ff0000', 50);
 shake(15, 15);
@@ -435,8 +471,13 @@ localStorage.setItem('snakeHigh', highScore);
 updateHighScoreUI();
 }
 
+// Kid-friendly encouragement
+const msgs = ['加油！再来一次 💪', '好棒！继续努力 ⭐', '你很厉害哦！🌟', '差一点就破纪录了！🔥'];
+const msg = score >= highScore ? '太厉害了！新纪录！🏆' : msgs[Math.floor(Math.random()*msgs.length)];
+
 document.getElementById('overScore').textContent = `得分: ${score}`;
-const isNew = score >= highScore;
+document.getElementById('overEncourage').textContent = msg;
+const isNew = score >= highScore && score > 0;
 document.getElementById('overNew').style.display = isNew ? 'block' : 'none';
 document.getElementById('overOverlay').style.display = 'flex';
 }
@@ -515,13 +556,23 @@ ctx.restore();
 }
 
 function render() {
-// Background gradient
+// Brighter kid-friendly background
 const bgGrad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)*0.7);
-bgGrad.addColorStop(0, '#1a1a3e');
-bgGrad.addColorStop(0.5, '#0d0d20');
+bgGrad.addColorStop(0, '#2a1a4e');
+bgGrad.addColorStop(0.4, '#1a1a3e');
+bgGrad.addColorStop(0.7, '#0d0d20');
 bgGrad.addColorStop(1, '#050510');
 ctx.fillStyle = bgGrad;
 ctx.fillRect(0, 0, W, H);
+
+// Floating decorative stars
+for (let i=0;i<20;i++) {
+const sx = (i*137+frameCount*0.3)%W;
+const sy = (i*251+frameCount*0.2)%H;
+const sr = 1+Math.sin(frameCount/30+i)*1;
+ctx.fillStyle = `rgba(255,255,200,${0.15+Math.sin(frameCount/20+i)*0.1})`;
+ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI*2); ctx.fill();
+}
 
 // Grid (subtle)
 ctx.strokeStyle = 'rgba(255,255,255,.02)';
@@ -759,8 +810,9 @@ touchStart = {x:t.clientX, y:t.clientY};
 canvas.addEventListener('touchend', () => { touchStart = null; });
 
 function setDir(dx, dy) {
-if (dx !== 0 && dir.x === -dx) return; // Prevent 180
+if (dx !== 0 && dir.x === -dx) return;
 if (dy !== 0 && dir.y === -dy) return;
+if (dx !== dir.x || dy !== dir.y) sfxTurn();
 nextDir = {x:dx, y:dy};
 }
 
@@ -775,6 +827,7 @@ document.getElementById('pauseBtn').onclick = togglePause;
 document.getElementById('soundBtn').onclick = () => {
 soundOn = !soundOn;
 document.getElementById('soundBtn').textContent = soundOn ? '🔊' : '🔇';
+if (!soundOn) stopBGM(); else if (gameStarted && !gameOver) startBGM();
 };
 
 document.getElementById('startBtn').onclick = () => {
@@ -792,6 +845,7 @@ gameLoop();
 };
 
 document.getElementById('overMenu').onclick = () => {
+stopBGM();
 gameRunning = false;
 gameOver = false;
 gameStarted = false;
