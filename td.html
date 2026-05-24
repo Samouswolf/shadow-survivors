@@ -116,10 +116,10 @@ color: #fff;
 
 
 
-*{margin:0;padding:0;box-sizing:border-box}
+html,body,div,h1,span,a,button{margin:0;padding:0}
 html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:"Microsoft YaHei","PingFang SC",sans-serif;color:#ccc}
-#wrapper{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh}
-#td-board{position:relative}
+#wrapper{margin:0 auto;max-width:100%}
+#td-board{}
 #td-loading{color:#aaa;font-size:16px;text-align:center;padding:20px}
 .nav-bar{position:fixed;top:6px;right:10px;z-index:90;display:flex;gap:8px;opacity:.6}
 .nav-bar:hover{opacity:1}
@@ -131,7 +131,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:
 .footer a:hover{color:#c89840}
 #about{display:none}
 @media(max-width:768px){
-  #td-canvas{max-width:100vw!important;max-height:65vh!important}
+  
   .game-title{font-size:16px;margin:4px 0}
 }
 </style>
@@ -198,12 +198,22 @@ var _TD = {
 
 				return {
 
-					step_time: 36, 
-					grid_size: 32 * _TD.retina, 
-					padding: 10 * _TD.retina, 
-					global_speed: 0.1 
+					base_step_time: 36,
+					step_time: 36,
+					grid_size: 32 * _TD.retina,
+					padding: 10 * _TD.retina,
+					base_global_speed: 0.1,
+					global_speed: 0.1,
+					speed_mult: 1
 				};
 
+			},
+			setSpeed: function (mult) {
+				this.speed_mult = mult;
+				this.global_speed = this.base_global_speed * mult;
+				this.step_time = Math.max(1, Math.floor(this.base_step_time / mult));
+				this._exp_fps_0 = this.exp_fps * mult - 0.4;
+				this._exp_fps_1 = this.exp_fps * mult + 0.4;
 			},
 
 
@@ -239,13 +249,17 @@ var _TD = {
 
 				var _this = this;
 
-				this._exp_fps_0 = this.exp_fps - 0.4; 
-				this._exp_fps_1 = this.exp_fps + 0.4; 
+				var saved_speed = this.speed_mult || 1;
 
-
-				this.mode = "normal"; 
-				this.eventManager.clear(); 
+				this.mode = "normal";
+				this.eventManager.clear();
 				this.lang.mix(this, this.defaultSettings());
+				if (saved_speed != 1) {
+					this.setSpeed(saved_speed);
+				} else {
+					this._exp_fps_0 = this.exp_fps - 0.4;
+					this._exp_fps_1 = this.exp_fps + 0.4;
+				}
 
 				this.stage = new TD.Stage("stage-main", TD.getDefaultStageData("stage_main"));
 
@@ -483,6 +497,7 @@ var _TD = {
 
 
 
+		window.TD = TD;
 		TD.init(td_board);
 
 	}
@@ -2499,7 +2514,7 @@ _TD.a.push(function (TD) {
 
 			building.locate(this);
 
-
+			if (TD.Sound) TD.Sound.place();
 
 			this.scene.addElement(building, this.step_level, this.render_level + 1);
 
@@ -2929,7 +2944,8 @@ _TD.a.push(function (TD) {
 
 					this.scene.panel.btn_upgrade.hide();
 
-					this.scene.panel.btn_sell.hide();
+					this.scene.panel.btn_merge.hide();
+						this.scene.panel.btn_sell.hide();
 
 				}
 
@@ -2939,7 +2955,44 @@ _TD.a.push(function (TD) {
 
 
 
-		updateBtnDesc: function () {
+		findMergePartner: function () {
+				this._merge_partner = null;
+				var mx = this.grid.mx, my = this.grid.my;
+				var adj = [[mx-1,my],[mx+1,my],[mx,my-1],[mx,my+1]];
+				for (var i = 0; i < adj.length; i++) {
+					var g = this.map.getGrid(adj[i][0], adj[i][1]);
+					if (g && g.building && g.building.type == this.type &&
+					    g.building.level == this.level &&
+					    g.building.is_valid && g.building != this) {
+						this._merge_partner = g.building;
+						return g.building;
+					}
+				}
+				return null;
+			},
+
+			_mergeInto: function (target) {
+				var other = target || this._merge_partner;
+				if (!other || !other.is_valid) return;
+				other.level++;
+				other.damage = Math.floor(other.damage * 1.6);
+				other.range = Math.floor(other.range * 1.15);
+				other.range_px = Math.floor(other.range * TD.grid_size);
+				other.speed = Math.floor(other.speed * 1.1);
+				other.cost = other.cost + Math.floor(other.cost * 0.8);
+				other.grid.hightLight(false);
+				other.updateBtnDesc();
+				this.grid.removeBuilding();
+				this.is_valid = false;
+				this.scene.panel.btn_upgrade.hide();
+				this.scene.panel.btn_sell.hide();
+				this.scene.panel.btn_merge.hide();
+				if (TD.Sound) { TD.Sound.place(); setTimeout(function(){ if(TD.Sound)TD.Sound.explosion(); }, 100); }
+				TD.log("Merge: " + other.type + " -> Lv" + other.level);
+			},
+
+
+			updateBtnDesc: function () {
 
 			this.scene.panel.btn_upgrade.desc = TD._t(
 
@@ -3075,6 +3128,8 @@ _TD.a.push(function (TD) {
 		fire: function () {
 
 			if (!this.target || !this.target.is_valid) return;
+
+			if (TD.Sound) TD.Sound.shoot();
 
 
 
@@ -3241,7 +3296,7 @@ _TD.a.push(function (TD) {
 
 			if (!this.is_valid) return;
 
-
+			if (TD.Sound) TD.Sound.sell();
 
 			TD.money += this.getSellMoney();
 
@@ -3809,6 +3864,8 @@ _TD.a.push(function (TD) {
 		beKilled: function (building) {
 
 			if (!this.is_valid) return;
+
+			if (TD.Sound) TD.Sound.explosion();
 
 			this.life = 0;
 
@@ -4405,7 +4462,54 @@ _TD.a.push(function (TD) {
 
 			});
 
-			this.btn_restart = new TD.Button("panel-btn-restart", {
+							// Speed control buttons
+				var _panel = this;
+				this.speed_btns = [];
+				var _spd_labels = ['1x', '2x', '||'];
+				var _spd_vals = [1, 2, 0];
+				var _makeSpdCb = function(v) {
+					return function() {
+						if (v == 0) {
+							if (_panel.scene.state == 1) {
+								_panel.scene.pause();
+								_panel.btn_pause.text = TD._t('button_continue_text');
+								_panel.btn_upgrade.hide();
+								_panel.btn_sell.hide();
+								_panel.btn_restart.show();
+							}
+						} else {
+							TD.setSpeed(v);
+							if (_panel.scene.state == 2) {
+								_panel.scene.start();
+								_panel.btn_pause.text = TD._t('button_pause_text');
+								_panel.btn_restart.hide();
+							}
+						}
+						for (var _si = 0; _si < _panel.speed_btns.length; _si++) {
+							_panel.speed_btns[_si]._active = (_panel.speed_btns[_si]._spd_val == v);
+						}
+					};
+				};
+				for (var _si = 0; _si < 3; _si++) {
+					var _sb = new TD.Button('panel-spd-' + _si, {
+						scene: this.scene,
+						x: this.x + _si * 32 * _TD.retina,
+						y: this.y + 230 * _TD.retina,
+						width: 28 * _TD.retina,
+						height: 24 * _TD.retina,
+						text: _spd_labels[_si],
+						step_level: this.step_level,
+						render_level: this.render_level + 1,
+						onClick: _makeSpdCb(_spd_vals[_si])
+					});
+					_sb._spd_val = _spd_vals[_si];
+					_sb._active = (_si == 0);
+					_sb.font_x = _sb.x + 6 * _TD.retina;
+					_sb.font_y = _sb.y + 4 * _TD.retina;
+					this.speed_btns.push(_sb);
+				}
+
+this.btn_restart = new TD.Button("panel-btn-restart", {
 
 				scene: this.scene,
 
@@ -4487,6 +4591,22 @@ _TD.a.push(function (TD) {
 
 			});
 
+			this.btn_merge = new TD.Button('panel-btn-merge', {
+				scene: this.scene,
+				x: this.x,
+				y: this.y + 380 * _TD.retina,
+				is_visiable: false,
+				text: '合成',
+				step_level: this.step_level,
+				render_level: this.render_level + 1,
+				onClick: function () {
+					var b = this.scene.map.selected_building;
+					if (b && b._merge_partner) {
+						b._merge_partner._mergeInto(b);
+					}
+				}
+			});
+
 		},
 
 		step: function () {
@@ -4546,6 +4666,7 @@ _TD.a.push(function (TD) {
 				this.x, this.y + 80 * _TD.retina);
 
 			ctx.fillText(TD._t("wave_info", [this.scene.wave]), this.x, this.y + 210 * _TD.retina);
+			ctx.fillText(TD._t("speed_info", [TD.speed_mult]), this.x, this.y + 222 * _TD.retina);
 
 			ctx.closePath();
 
@@ -4841,9 +4962,8 @@ _TD.a.push(function (TD) {
 
 			ctx.lineWidth = 2 * _TD.retina;
 
-			ctx.fillStyle = this.is_hover ? "#eee" : "#ccc";
-
-			ctx.strokeStyle = "#999";
+			ctx.fillStyle = this._active ? "#ffd700" : (this.is_hover ? "#eee" : "#ccc");
+			ctx.strokeStyle = this._active ? "#c89840" : "#999";
 
 			ctx.beginPath();
 
@@ -5408,6 +5528,8 @@ _TD.a.push(function (TD) {
 				newWave: function (cfg) {
 
 					cfg = cfg || {};
+
+					if (TD.Sound) TD.Sound.waveStart();
 
 					var map = cfg.map,
 
@@ -6749,6 +6871,7 @@ _TD.a.push(function (TD) {
         "exit": "出口",
         "not_enough_money": "金钱不足，需要 $${0}",
         "wave_info": "第 ${0} 波",
+        "speed_info": "速度: ${0}x",
         "panel_money_title": "金钱: ",
         "panel_score_title": "分数: ",
         "panel_life_title": "生命: ",
@@ -6781,6 +6904,51 @@ _TD.a.push(function (TD) {
         "monster_be_blocked": "怪物被阻挡",
         "upgrade_success": "升级成功",
     };
+    // ===== AUDIO SYSTEM =====
+    TD.Sound = {
+        _enabled: true, _ctx: null,
+        _init: function () {
+            try {
+                var AudioContext = window.AudioContext || window.webkitAudioContext;
+                this._ctx = new AudioContext();
+            } catch (e) { this._enabled = false; }
+        },
+        toggle: function () { this._enabled = !this._enabled; return this._enabled; },
+        _beep: function (freq, duration, type, vol) {
+            if (!this._enabled || !this._ctx) return;
+            try {
+                var ctx = this._ctx;
+                var osc = ctx.createOscillator();
+                var gain = ctx.createGain();
+                osc.type = type || 'square';
+                osc.frequency.setValueAtTime(freq, ctx.currentTime);
+                gain.gain.setValueAtTime(vol || 0.08, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + duration);
+            } catch (e) {}
+        },
+        shoot: function () { this._beep(800 + Math.random() * 400, 0.08, 'square', 0.04); },
+        explosion: function () { this._beep(80 + Math.random() * 60, 0.18, 'sawtooth', 0.1); },
+        place: function () { this._beep(600, 0.06, 'square', 0.05); setTimeout(this._beep.bind(this, 900, 0.08, 'square', 0.05), 60); },
+        waveStart: function () { this._beep(400, 0.1, 'triangle', 0.07); setTimeout(this._beep.bind(this, 600, 0.1, 'triangle', 0.07), 100); setTimeout(this._beep.bind(this, 900, 0.15, 'triangle', 0.08), 200); },
+        sell: function () { this._beep(500, 0.05, 'triangle', 0.05); setTimeout(this._beep.bind(this, 700, 0.05, 'triangle', 0.04), 50); },
+        click: function () { this._beep(1000, 0.03, 'square', 0.03); },
+        error: function () { this._beep(150, 0.2, 'sawtooth', 0.07); }
+    };
+    var _audioInited = false;
+    var _initAudio = function () {
+        if (_audioInited) return;
+        _audioInited = true;
+        TD.Sound._init();
+        document.removeEventListener('click', _initAudio);
+        document.removeEventListener('touchstart', _initAudio);
+    };
+    document.addEventListener('click', _initAudio);
+    document.addEventListener('touchstart', _initAudio);
+    // ========================
+
     TD._t = function (k, args) {
         var s = TD._msg_texts[k] || k;
         if (args && args.length) {
@@ -6823,8 +6991,10 @@ window.onerror = function(m,s,l,c,e) {
     el.style.color = "red";
     el.textContent = "Error: " + m + " (line " + l + ")";
   }
+  console.error("GAME ERROR:", m, "at line", l);
   return false;
 };
+
 window.onload = function() {
   try {
     _TD.init("td-board", true);
