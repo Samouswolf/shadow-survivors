@@ -434,6 +434,15 @@ G.dmgTexts.push({x:x+rng(-8,8), y:y+rng(-6,6), value:Math.round(val*10)/10, life
 function addParticles(x,y,color,count=6) {
 const n = settings.lowEnd ? Math.floor(count/3) : count;
 for (let i=0;i<n;i++) G.particles.push({x,y,color,vx:rng(-2,2),vy:rng(-2,2),life:rng(12,22),size:rng(2,4)});
+
+function shadeColor(color, percent) {
+	const num = parseInt(color.replace('#',''), 16);
+	const amt = Math.round(2.55 * percent);
+	const R = Math.max(0, Math.min(255, (num >> 16) + amt));
+	const G = Math.max(0, Math.min(255, (num >> 8 & 0x00FF00) + amt));
+	const B = Math.max(0, Math.min(255, (num & 0x0000FF) + amt));
+	return '#' + (0x1000000 + R*0x10000 + G*0x100 + B).toString(16).slice(1);
+}
 }
 function shake(amount) {
 if (!settings.showShake) return;
@@ -642,9 +651,10 @@ document.getElementById('overMenu').onclick = () => { G.started = false; G.over 
 
 // ===== LEVEL =====
 function nextLevel() {
-G.grass = [];
+G.grass = []; G.ambientDust = [];
 const grassCount = settings.lowEnd ? 150 : 600;
-for (let i=0;i<grassCount;i++) G.grass.push({x:Math.random()*G.w, y:Math.random()*G.h});
+for (let i=0;i<grassCount;i++) G.grass.push({x:Math.random()*G.w, y:Math.random()*G.h, shade:Math.random()<0.3?'#2a6a2a':(Math.random()<0.5?'#1e5a1e':'#164016'), tall:Math.random()<0.2});
+if (!settings.lowEnd) { const dc = 80; for (let i=0;i<dc;i++) G.ambientDust.push({x:Math.random()*G.w, y:Math.random()*G.h, vx:(Math.random()-0.5)*0.15, vy:(Math.random()-0.5)*0.15, life:Math.random()*200, size:Math.random()*1.8+0.3, alpha:Math.random()*0.25+0.03}); }
 G.enemies = []; G.props = []; G.exps = [];
 if (G.level % 5 === 0) {
 G.hasBoss = true; G.boss = new Boss();
@@ -779,6 +789,8 @@ for (let i = G.waveEffects.length - 1; i >= 0; i--) { G.waveEffects[i].life -= G
 for (let i = G.texts.length - 1; i >= 0; i--) { const t = G.texts[i]; t.y+=t.vy; t.a-=0.022; if (t.a<=0) G.texts.splice(i,1); }
 for (let i = G.dmgTexts.length - 1; i >= 0; i--) { const t = G.dmgTexts[i]; t.y+=t.vy; t.a-=0.028; if (t.a<=0) G.dmgTexts.splice(i,1); }
 for (let i = G.particles.length - 1; i >= 0; i--) { const p = G.particles[i]; p.x+=p.vx; p.y+=p.vy; p.life--; if (p.life<=0) G.particles.splice(i,1); }
+if (G.ambientDust) { G.ambientDust.forEach(d => { d.x+=d.vx; d.y+=d.vy; d.life--; if (d.life<=0) { d.x=Math.random()*G.w; d.y=Math.random()*G.h; d.life=200; } }); }
+if (G.ambientDust) { G.ambientDust.forEach(d => { d.x+=d.vx; d.y+=d.vy; d.life--; if (d.life<=0) { d.x=Math.random()*G.w; d.y=Math.random()*G.h; d.life=200; } }); }
 if (P.shield) { P.shieldTimer -= G.speed; if (P.shieldTimer <= 0) P.shield = false; }
 if (P.hurtCD > 0) P.hurtCD -= G.speed;
 if (P.dashCD > 0) P.dashCD -= G.speed;
@@ -916,7 +928,9 @@ const gridSize = 80;
 for (let x = gridSize; x < G.w; x += gridSize) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,G.h); ctx.stroke(); }
 for (let y = gridSize; y < G.h; y += gridSize) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(G.w,y); ctx.stroke(); }
 
-ctx.fillStyle = '#1e5a1e'; G.grass.forEach(g => ctx.fillRect(g.x, g.y, 2, 6));
+G.grass.forEach(g => { ctx.fillStyle = g.shade; if (g.tall) { ctx.fillRect(g.x, g.y, 2, 9); } else { ctx.fillRect(g.x, g.y, 2, 5); } });
+// Ambient dust particles
+if (G.ambientDust && !settings.lowEnd) { G.ambientDust.forEach(d => { ctx.fillStyle = 'rgba(180,220,180,'+d.alpha+')'; ctx.beginPath(); ctx.arc(d.x, d.y, d.size, 0, Math.PI*2); ctx.fill(); }); }
 
 // Gold drops
 G.goldDrops.forEach(g => {
@@ -925,7 +939,11 @@ ctx.fillStyle = '#ffd700'; ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 8;
 ctx.beginPath();
 for (let i=0;i<6;i++) { const a = t + Math.PI*2/6*i; (i===0?ctx.moveTo:ctx.lineTo).call(ctx, Math.cos(a)*6, Math.sin(a)*6); }
 ctx.closePath(); ctx.fill();
-ctx.shadowBlur = 0; ctx.restore();
+ctx.shadowBlur = 0;
+// Specular highlight on gold
+ctx.fillStyle = 'rgba(255,255,255,0.7)';
+ctx.beginPath(); ctx.arc(-1.5, -1.5, 2, 0, Math.PI*2); ctx.fill();
+ctx.restore();
 });
 
 G.exps.forEach(e => {
@@ -966,8 +984,8 @@ ctx.shadowBlur = 0; ctx.fillStyle = eq.color; ctx.globalAlpha = 0.7;
 ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
 ctx.globalAlpha = 1; ctx.restore();
 });
-G.enemies.forEach(e => e.render());
-if (G.hasBoss && G.boss) G.boss.render();
+G.enemies.forEach(e => { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(e.x, e.y + e.size*0.7, e.size*0.55, e.size*0.2, 0, 0, Math.PI*2); ctx.fill(); e.render(); });
+if (G.hasBoss && G.boss) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(G.boss.x, G.boss.y + 30, 32, 10, 0, 0, Math.PI*2); ctx.fill(); G.boss.render(); }
 
 // Wave effects (nova)
 G.waveEffects.forEach(w => {
@@ -1014,8 +1032,15 @@ const tipX = Math.cos(a) * (P.range + 14), tipY = Math.sin(a) * (P.range + 14);
 const baseX = Math.cos(a) * (P.range - bladeLen), baseY = Math.sin(a) * (P.range - bladeLen);
 // Blade trail glow
 ctx.shadowColor = P.hero.color; ctx.shadowBlur = 16;
-// Main blade body - curved dagger shape
-ctx.fillStyle = P.hero.color;
+// Metallic blade with gradient shimmer
+const bladeGrad = ctx.createLinearGradient(baseX, baseY, tipX, tipY);
+const shimmer = Math.sin(G.frame * 0.15 + i) * 0.3;
+bladeGrad.addColorStop(0, '#fff');
+bladeGrad.addColorStop(0.25 + shimmer * 0.3, P.hero.color);
+bladeGrad.addColorStop(0.5, '#fff');
+bladeGrad.addColorStop(0.75 + shimmer * 0.3, P.hero.color);
+bladeGrad.addColorStop(1, '#fff');
+ctx.fillStyle = bladeGrad;
 ctx.beginPath();
 const perpX = -Math.sin(a) * 5;
 const perpY = Math.cos(a) * 5;
@@ -1024,7 +1049,11 @@ ctx.lineTo(tipX, tipY);
 ctx.lineTo(baseX - perpX, baseY - perpY);
 ctx.closePath(); ctx.fill();
 // Inner bright core
-ctx.fillStyle = '#fff';
+const coreGrad = ctx.createLinearGradient(baseX, baseY, tipX, tipY);
+coreGrad.addColorStop(0, '#fff');
+coreGrad.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+coreGrad.addColorStop(1, '#fff');
+ctx.fillStyle = coreGrad;
 ctx.beginPath();
 const innerPerpX = -Math.sin(a) * 2;
 const innerPerpY = Math.cos(a) * 2;
@@ -1116,12 +1145,23 @@ ctx.strokeStyle = 'rgba(99,219,255,0.6)'; ctx.lineWidth = 3;
 ctx.beginPath(); ctx.arc(0, 0, 36, 0, Math.PI*2); ctx.stroke(); ctx.shadowBlur = 0;
 }
 
+// Ground drop shadow
+ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(0, 19, 18, 6, 0, 0, Math.PI*2); ctx.fill();
 ctx.shadowColor = h.color; ctx.shadowBlur = 14;
-// Body
-const bodyGrad = ctx.createRadialGradient(0, -5, 2, 0, 0, 22);
-bodyGrad.addColorStop(0, '#fff'); bodyGrad.addColorStop(0.3, h.color); bodyGrad.addColorStop(1, '#111');
+// 3D sphere body with specular highlight
+const bodyGrad = ctx.createRadialGradient(-7, -10, 3, 0, -2, 22);
+bodyGrad.addColorStop(0, '#ffffff');
+bodyGrad.addColorStop(0.12, h.color);
+const d1 = parseInt(h.color.slice(1),16), rd1=Math.max(0,(d1>>16)-51), gd1=Math.max(0,(d1>>8&255)-51), bd1=Math.max(0,(d1&255)-51);
+bodyGrad.addColorStop(0.45, '#'+((rd1<<16)|(gd1<<8)|bd1).toString(16).padStart(6,'0'));
+const d2 = parseInt(h.color.slice(1),16), rd2=Math.max(0,(d2>>16)-115), gd2=Math.max(0,(d2>>8&255)-115), bd2=Math.max(0,(d2&255)-115);
+bodyGrad.addColorStop(0.75, '#'+((rd2<<16)|(gd2<<8)|bd2).toString(16).padStart(6,'0'));
+bodyGrad.addColorStop(1, '#0a0a0a');
 ctx.fillStyle = bodyGrad;
 ctx.beginPath(); ctx.arc(0, -2, 22, 0, Math.PI*2); ctx.fill();
+// Rim light
+ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1.5;
+ctx.beginPath(); ctx.arc(0, -2, 21, -Math.PI*0.7, -Math.PI*0.3); ctx.stroke();
 ctx.shadowBlur = 0;
 
 // Draw hero-specific model
@@ -1227,12 +1267,13 @@ ctx.restore();
 }
 drawBat(ctx) {
 const s = this.size;
-// Wings
-ctx.fillStyle = '#3a1a2e';
+// Wings (membrane gradient)
+const wgL = ctx.createLinearGradient(0, 0, -s*1.2, -s*1.2); wgL.addColorStop(0, '#5a2a4a'); wgL.addColorStop(1, '#2a0a1a'); ctx.fillStyle = wgL;
 ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(-s*1.8, -s*0.9, -s*0.6, -s*1.3); ctx.quadraticCurveTo(0, -s*0.4, 0, 0); ctx.fill();
+const wgR = ctx.createLinearGradient(0, 0, s*1.2, -s*1.2); wgR.addColorStop(0, '#5a2a4a'); wgR.addColorStop(1, '#2a0a1a'); ctx.fillStyle = wgR;
 ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(s*1.8, -s*0.9, s*0.6, -s*1.3); ctx.quadraticCurveTo(0, -s*0.4, 0, 0); ctx.fill();
-// Body
-ctx.fillStyle = this.flashTimer>0?'#fff':'#4a2538';
+// Body (radial gradient for 3D depth)
+if (this.flashTimer>0) { ctx.fillStyle = '#fff'; } else { const bg = ctx.createRadialGradient(0, -s*0.2, s*0.1, 0, 0, s*0.65); bg.addColorStop(0, '#6a3550'); bg.addColorStop(0.6, '#4a2538'); bg.addColorStop(1, '#2a1020'); ctx.fillStyle = bg; }
 ctx.beginPath(); ctx.ellipse(0, 0, s*0.45, s*0.65, 0, 0, Math.PI*2); ctx.fill();
 // Ears
 ctx.beginPath(); ctx.moveTo(-s*0.3, -s*0.6); ctx.lineTo(-s*0.5, -s*1.2); ctx.lineTo(-s*0.1, -s*0.55); ctx.fill();
@@ -1242,8 +1283,8 @@ ctx.fillStyle = '#ff4444'; ctx.beginPath(); ctx.arc(-s*0.22, -s*0.18, s*0.14, 0,
 }
 drawWolf(ctx) {
 const s = this.size;
-// Body
-ctx.fillStyle = this.flashTimer>0?'#fff':'#5a3a20';
+// Body (radial gradient for fur depth)
+if (this.flashTimer>0) { ctx.fillStyle = '#fff'; } else { const wbg = ctx.createRadialGradient(0, -s*0.1, s*0.1, 0, 0, s*0.9); wbg.addColorStop(0, '#8a5a30'); wbg.addColorStop(0.5, '#5a3a20'); wbg.addColorStop(1, '#3a2010'); ctx.fillStyle = wbg; }
 ctx.beginPath(); ctx.ellipse(0, 0, s*0.9, s*0.5, 0, 0, Math.PI*2); ctx.fill();
 // Head
 ctx.beginPath(); ctx.arc(s*0.7, -s*0.2, s*0.45, 0, Math.PI*2); ctx.fill();
@@ -1259,8 +1300,8 @@ ctx.fillStyle = '#ff8800'; ctx.beginPath(); ctx.arc(s*0.85, -s*0.3, s*0.12, 0, M
 }
 drawGolem(ctx) {
 const s = this.size;
-// Body
-ctx.fillStyle = this.flashTimer>0?'#fff':'#3a3050';
+// Body (linear gradient for stone depth)
+if (this.flashTimer>0) { ctx.fillStyle = '#fff'; } else { const gbg = ctx.createLinearGradient(-s*0.65, -s*0.5, s*0.65, s*0.8); gbg.addColorStop(0, '#5a4a70'); gbg.addColorStop(0.4, '#3a3050'); gbg.addColorStop(1, '#201830'); ctx.fillStyle = gbg; }
 ctx.fillRect(-s*0.65, -s*0.5, s*1.3, s*1.3);
 // Crack lines
 ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1;
@@ -1311,6 +1352,15 @@ sfxExplosion(); updateUI(); }
 render() {
 const ctx = G.ctx; ctx.save(); ctx.translate(this.x, this.y);
 const s = 38;
+// Pulsing aura rings
+const auraPulse = 1 + Math.sin(G.frame * 0.04) * 0.15;
+const auraR = s * 1.5 * auraPulse;
+ctx.strokeStyle = 'rgba(155,89,231,' + (0.18 + Math.sin(G.frame*0.04)*0.06) + ')';
+ctx.lineWidth = 3; ctx.shadowColor = '#9b59e7'; ctx.shadowBlur = 16;
+ctx.beginPath(); ctx.arc(0, -4, auraR, 0, Math.PI*2); ctx.stroke();
+ctx.shadowBlur = 0;
+ctx.strokeStyle = 'rgba(200,120,255,' + (0.08 + Math.cos(G.frame*0.06)*0.04) + ')';
+ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, -4, auraR + 6, 0, Math.PI*2); ctx.stroke();
 // Body
 ctx.fillStyle = this.flashTimer>0?'#fff':'#2a1040'; ctx.shadowColor = '#9b59e7'; ctx.shadowBlur = 20;
 ctx.beginPath(); ctx.ellipse(0, -4, s*0.85, s, 0, 0, Math.PI*2); ctx.fill();
