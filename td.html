@@ -3725,22 +3725,28 @@ _TD.a.push(function (TD) {
 
 
 
-		render: function () {
-
-			var ctx = TD.ctx;
-
-			ctx.fillStyle = this.color;
-
-			ctx.beginPath();
-
-			ctx.arc(this.cx, this.cy, this.r, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-		}
-
+render: function () {
+            var ctx = TD.ctx;
+            // Try sprite-based rendering
+            if (TD.SPR && TD.SPR.ready && this.building) {
+                var spriteName = TD.SPR.getBulletSprite(this.building.type);
+                if (spriteName) {
+                    var img = TD.SPR.get(spriteName);
+                    if (img && img.complete && img.naturalWidth > 0) {
+                        var iw = img.naturalWidth, ih = img.naturalHeight;
+                        var scale = Math.min((this.r * 2.5) / iw, (this.r * 2.5) / ih, 1);
+                        ctx.drawImage(img, this.cx - iw * scale / 2, this.cy - ih * scale / 2, iw * scale, ih * scale);
+                        return;
+                    }
+                }
+            }
+            // Fallback circle
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.cy, this.r, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+        }
 	};
 
 
@@ -5207,6 +5213,113 @@ _TD.a.push(function (TD) {
 
 			map.addToScene(scene, 1, 2, map.grids);
 
+						// Add grass background element at render_level 0
+			scene.addElement({
+				id: "bg-grass",
+				is_valid: true,
+				is_visiable: true,
+				render_level: 0,
+				step_level: 1,
+				_roadPath: null,
+				render: function () {
+					var ctx = TD.ctx;
+					var mx = TD.padding, my = TD.padding;
+					var gs = TD.grid_size;
+					var mw = gs * 16, mh = gs * 16;
+					ctx.fillStyle = "#3a5a2a";
+					ctx.fillRect(mx, my, mw, mh);
+					if (!TD.SPR || !TD.SPR.ready) return;
+					// Draw grass tiles with solid fill between diamond gaps
+					var grass = TD.SPR.get("grass");
+					if (grass && grass.complete && grass.naturalWidth > 0) {
+						var tw = grass.naturalWidth, th = grass.naturalHeight;
+						for (var y = my; y <= my + mh; y += th) {
+							for (var x = mx; x <= mx + mw; x += tw) {
+								ctx.fillStyle = "#4a6a3a";
+								ctx.fillRect(x, y, tw, th);
+								ctx.drawImage(grass, x, y, tw, th);
+							}
+						}
+					}
+					// Draw road tiles from cached path
+					var roadImg = TD.SPR.get("road_1");
+					if (roadImg && roadImg.complete && roadImg.naturalWidth > 0 && this._roadPath) {
+						var rw = gs * 0.95, rh = gs * 0.95;
+						for (var pi = 0; pi < this._roadPath.length; pi++) {
+							var px = mx + this._roadPath[pi][0] * gs + (gs - rw) / 2;
+							var py = my + this._roadPath[pi][1] * gs + (gs - rh) / 2;
+							ctx.drawImage(roadImg, px, py, rw, rh);
+						}
+					}
+				},
+				step: function () {
+					// Compute path once
+					if (!this._roadPath && TD.SPR && TD.SPR.ready) {
+						var map = TD.map || (TD.stage && TD.stage.current_act && TD.stage.current_act.current_scene && TD.stage.current_act.current_scene.map);
+						if (map && map.is_main_map && map.entrance && map.exit) {
+							var fw = new TD.FindWay(
+								map.grid_x, map.grid_y,
+								map.entrance.mx, map.entrance.my,
+								map.exit.mx, map.exit.my,
+								function (x, y) { return map.checkPassable(x, y); }
+							);
+							this._roadPath = fw.way;
+						} else {
+							this._roadPath = [];
+						}
+					}
+				}
+			}, 1, 0);
+			
+			// Add environment decorations at render_level 1
+			scene.addElement({
+				id: "bg-env",
+				is_valid: true,
+				is_visiable: true,
+				render_level: 1,
+				step_level: 1,
+				_roadPath: null,
+				render: function () {
+					var ctx = TD.ctx;
+					if (!TD.SPR || !TD.SPR.ready) return;
+					var mx = TD.padding, my = TD.padding;
+					var gs = TD.grid_size;
+					var names = ["stone1", "stone2", "grass_deco1", "grass_deco2"];
+					for (var gy = 0; gy < 16; gy++) {
+						for (var gx = 0; gx < 16; gx++) {
+							var grid = map.getGrid(gx, gy);
+							if (!grid || grid.passable_flag === 0 || grid.build_flag === 0 || grid.is_entrance || grid.is_exit) continue;
+							if (grid.building) continue;
+							var isPath = this._roadPath && this._roadPath.some(function(p) { return p[0] === gx && p[1] === gy; });
+							var h = (gx * 13 + gy * 7 + 3) % 17;
+							if (isPath) { if (h % 7 !== 0) continue; }
+							else { if (h >= 6) continue; }
+							if (h >= names.length) h = h % names.length;
+							if (h < 0) h = 0;
+							var name = names[h];
+							var img = TD.SPR.get(name);
+							if (!img || !img.complete || img.naturalWidth === 0) continue;
+							var iw = img.naturalWidth, ih = img.naturalHeight;
+							var scale = Math.min((gs * 0.4) / iw, (gs * 0.5) / ih, 1);
+							var w = iw * scale, h2 = ih * scale;
+							var cx = mx + gx * gs + gs / 2, cy = my + gy * gs + gs / 2;
+							var dy = cy - h2 + gs * 0.2;
+							ctx.drawImage(img, cx - w / 2, dy, w, h2);
+						}
+					}
+				},
+				step: function () {
+					// Reference road path from grass element
+					if (!this._roadPath) {
+						var scene = TD.stage && TD.stage.current_act && TD.stage.current_act.current_scene;
+						if (scene && scene._render_elements && scene._render_elements[0]) {
+							var bg = scene._render_elements[0].find(function(e) { return e.id === "bg-grass"; });
+							if (bg) this._roadPath = bg._roadPath;
+						}
+					}
+				}
+			}, 1, 1);
+
 			scene.map = map;
 
 
@@ -5830,58 +5943,46 @@ _TD.a.push(function (TD) {
 
 
 
-	function defaultMonsterRender() {
-
-		if (!this.is_valid || !this.grid) return;
-
-		var ctx = TD.ctx;
-
-
-
-		ctx.strokeStyle = "#000";
-
-		ctx.lineWidth = 1;
-
-		ctx.fillStyle = this.color;
-
-		ctx.beginPath();
-
-		ctx.arc(this.cx, this.cy, this.r, 0, Math.PI * 2, true);
-
-		ctx.closePath();
-
-		ctx.fill();
-
-		ctx.stroke();
-
-
-
-		if (TD.show_monster_life) {
-
-			var s = Math.floor(TD.grid_size / 4),
-
-				l = s * 2 - 2 * _TD.retina;
-
-			ctx.fillStyle = "#000";
-
-			ctx.beginPath();
-
-			ctx.fillRect(this.cx - s, this.cy - this.r - 6, s * 2, 4 * _TD.retina);
-
-			ctx.closePath();
-
-			ctx.fillStyle = "#f00";
-
-			ctx.beginPath();
-
-			ctx.fillRect(this.cx - s + _TD.retina, this.cy - this.r - (6 - _TD.retina), this.life * l / this.life0, 2 * _TD.retina);
-
-			ctx.closePath();
-
-		}
-
-	}
-
+function defaultMonsterRender() {
+            if (!this.is_valid || !this.grid) return;
+            var ctx = TD.ctx;
+            if (TD.SPR && TD.SPR.ready) {
+                var ufoName = TD.SPR.getMonsterSprite(this.idx, TD.iframe || 0);
+                if (ufoName) {
+                    var tintColor = TD.SPR.monsterColors[this.idx] || null;
+                    TD.SPR.drawMonster(ctx, ufoName, this.cx, this.cy, this.r * 3.5, tintColor);
+                    // Draw hp bar
+                    if (TD.show_monster_life) {
+                        var s = Math.floor(TD.grid_size / 4);
+                        var l = s * 2 - 2 * _TD.retina;
+                        ctx.fillStyle = "#000";
+                        ctx.fillRect(this.cx - s, this.cy - this.r - 6, s * 2, 4 * _TD.retina);
+                        ctx.fillStyle = "#f00";
+                        ctx.fillRect(this.cx - s + _TD.retina, this.cy - this.r - (6 - _TD.retina), this.life * l / this.life0, 2 * _TD.retina);
+                    }
+                    return;
+                }
+            }
+            // Fallback: original circle rendering
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 1;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.cy, this.r, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            if (TD.show_monster_life) {
+                var s = Math.floor(TD.grid_size / 4);
+                var l = s * 2 - 2 * _TD.retina;
+                ctx.fillStyle = "#000";
+                ctx.fillRect(this.cx - s, this.cy - this.r - 6, s * 2, 4 * _TD.retina);
+                ctx.closePath();
+                ctx.fillStyle = "#f00";
+                ctx.fillRect(this.cx - s + _TD.retina, this.cy - this.r - (6 - _TD.retina), this.life * l / this.life0, 2 * _TD.retina);
+                ctx.closePath();
+            }
+        }
 
 
 	TD.getDefaultMonsterAttributes = function (monster_idx) {
@@ -6133,6 +6234,181 @@ _TD.a.push(function (TD) {
 
 _TD.a.push(function (TD) {
 
+    // ===== SPRITE SYSTEM =====
+    TD.SPR = {
+        images: {},
+        ready: false,
+        _loaded: 0, _total: 0,
+        assetBase: "../assets/塔防保卫战/Isometric Tower Defense Pack/Sprites",
+
+        defs: {
+            // Towers
+            archer_lv1: ["Towers/Archer/archer_level_1.png"],
+            archer_lv2: ["Towers/Archer/archer_level_2.png"],
+            archer_lv3: ["Towers/Archer/archer_level_3.png"],
+            wizard_lv1: ["Towers/Wizard/wizard_level_1.png"],
+            wizard_lv2: ["Towers/Wizard/wizard_level_2.png"],
+            wizard_lv3: ["Towers/Wizard/wizard_level_3.png"],
+            barrack_lv1: ["Towers/Barrack/barrack_level_1 (1).png"],
+            barrack_lv2: ["Towers/Barrack/barrack_level_2 (1).png"],
+            barrack_lv3: ["Towers/Barrack/barrack_level_3 (1).png"],
+            // Projectiles
+            arrow: ["Towers/Archer/arrow.png"],
+            wizard_bullet: ["Towers/Wizard/wizard_bullet.png"],
+            // Knights (Barrack melee)
+            knight_lv1: ["Towers/Barrack/knight_level_1.png"],
+            knight_lv2: ["Towers/Barrack/knight_level_2.png"],
+            knight_lv3: ["Towers/Barrack/knight_level_3.png"],
+            // Landscape
+            grass: ["Landscape tiles/grass.png"],
+            building_place: ["Landscape tiles/buildingPlaceGrass.png"],
+            // Roads (spring biome)
+            road_1: ["Road tiles/Spring biome/road_spring(1).png"],
+            road_2: ["Road tiles/Spring biome/road_spring(2).png"],
+            road_3: ["Road tiles/Spring biome/road_spring(3).png"],
+            // Environment
+            tree1: ["Enviroument tiles/Spring biome/trees/tree(1).png"],
+            tree2: ["Enviroument tiles/Spring biome/trees/tree(2).png"],
+            stone1: ["Enviroument tiles/Spring biome/stones/stone(1).png"],
+            stone2: ["Enviroument tiles/Spring biome/stones/stone(2).png"],
+            stone3: ["Enviroument tiles/Spring biome/stones/stone(3).png"],
+            stone4: ["Enviroument tiles/Spring biome/stones/stone(4).png"],
+            grass_deco1: ["Enviroument tiles/Spring biome/grass decoration/grass_decoration(1).png"],
+            grass_deco2: ["Enviroument tiles/Spring biome/grass decoration/grass_decoration(2).png"],
+            // Monsters (UFO)
+            ufo1: ["UFO/UFO(1).png"],
+            ufo2: ["UFO/UFO(2).png"],
+            ufo3: ["UFO/UFO(3).png"],
+            ufo4: ["UFO/UFO(4).png"],
+            ufo5: ["UFO/UFO(5).png"],
+            ufo6: ["UFO/UFO(6).png"],
+            ufo7: ["UFO/UFO(7).png"]
+        },
+
+        load: function (callback) {
+            var self = this;
+            var keys = Object.keys(this.defs);
+            this._total = keys.length;
+            this._loaded = 0;
+            keys.forEach(function (k) {
+                var img = new Image();
+                img.onload = function () {
+                    self._loaded++;
+                    if (self._loaded >= self._total) {
+                        self.ready = true;
+                        if (callback) callback();
+                    }
+                };
+                img.onerror = function () {
+                    self._loaded++;
+                    if (self._loaded >= self._total) {
+                        self.ready = true;
+                        if (callback) callback();
+                    }
+                };
+                img.src = self.assetBase + "/" + self.defs[k][0];
+                self.images[k] = img;
+            });
+        },
+
+        get: function (name) {
+            return this.images[name] || null;
+        },
+
+        // Draw sprite centered at (cx, cy), scaled to fit within maxSize
+        draw: function (ctx, name, cx, cy, maxSize) {
+            var img = this.get(name);
+            if (!img || !img.complete || img.naturalWidth === 0) return false;
+            var iw = img.naturalWidth, ih = img.naturalHeight;
+            var scale = Math.min(maxSize / iw, maxSize / ih, 1);
+            var w = iw * scale, h = ih * scale;
+            ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+            return true;
+        },
+
+        // Draw sprite with position offset (shifted up for isometric perspective)
+        drawTower: function (ctx, name, cx, cy, gridSize) {
+            var img = this.get(name);
+            if (!img || !img.complete || img.naturalWidth === 0) return false;
+            var iw = img.naturalWidth, ih = img.naturalHeight;
+            var scale = Math.min((gridSize * 0.5) / iw, (gridSize * 0.65) / ih, 1);
+            var w = iw * scale, h = ih * scale;
+            var drawY = cy - h + (gridSize * 0.3);
+            ctx.drawImage(img, cx - w / 2, drawY, w, h);
+            return true;
+        },
+
+        // Draw monster sprite (UFO)
+        drawMonster: function (ctx, name, cx, cy, maxSize, tintColor) {
+            var img = this.get(name);
+            if (!img || !img.complete || img.naturalWidth === 0) return false;
+            var iw = img.naturalWidth, ih = img.naturalHeight;
+            var scale = Math.min(maxSize / iw, maxSize / ih, 1);
+            var w = iw * scale, h = ih * scale;
+            var dx = cx - w / 2, dy = cy - h / 2;
+            if (tintColor) {
+                ctx.save();
+                ctx.drawImage(img, dx, dy, w, h);
+                ctx.globalCompositeOperation = "source-atop";
+                ctx.fillStyle = tintColor;
+                ctx.fillRect(dx, dy, w, h);
+                ctx.restore();
+            } else {
+                ctx.drawImage(img, dx, dy, w, h);
+            }
+            return true;
+        },
+
+        getTowerSprite: function (type, level) {
+            var map = {
+                cannon: ["archer_lv1", "archer_lv2", "archer_lv3"],
+                LMG: ["wizard_lv1", "wizard_lv2", "wizard_lv3"],
+                HMG: ["barrack_lv1", "barrack_lv2", "barrack_lv3"]
+            };
+            var list = map[type];
+            if (!list) return null;
+            var idx = level < 2 ? 0 : (level < 4 ? 1 : 2);
+            return list[idx];
+        },
+
+        getBulletSprite: function (buildingType) {
+            var map = { cannon: "arrow", LMG: "wizard_bullet" };
+            return map[buildingType] || null;
+        },
+
+        getKnightSprite: function (level) {
+            var list = ["knight_lv1", "knight_lv2", "knight_lv3"];
+            var idx = level < 2 ? 0 : (level < 4 ? 1 : 2);
+            return list[idx];
+        },
+
+        getMonsterSprite: function (idx, frame) {
+            // Use UFO sprites cycling through 7 frames
+            var frameIdx = (idx + Math.floor(frame || 0)) % 7;
+            var list = ["ufo1", "ufo2", "ufo3", "ufo4", "ufo5", "ufo6", "ufo7"];
+            return list[frameIdx];
+        },
+
+        monsterColors: [
+            null,           // 0 - unused
+            "rgba(255,255,255,0.3)", // 小怪物
+            "rgba(255,100,100,0.3)", // 强壮怪物
+            "rgba(100,255,100,0.3)", // 快速怪物
+            "rgba(200,100,255,0.3)", // 血牛怪物
+            "rgba(100,150,255,0.3)", // 护甲怪物
+            "rgba(255,200,50,0.3)",  // 高伤怪物
+            "rgba(255,100,255,0.3)", // 精英怪物
+            "rgba(100,255,255,0.3)", // 极速怪物
+            "rgba(255,215,0,0.4)"    // BOSS怪物
+        ]
+    };
+
+    TD.SPR.load();
+
+});
+
+_TD.a.push(function (TD) {
+
 
 
 	function lineTo2(ctx, x0, y0, x1, y1, len) {
@@ -6213,346 +6489,243 @@ _TD.a.push(function (TD) {
 
 
 
-	var renderFunctions = {
-
-		"cannon": function (b, ctx, map, gs, gs2) {
-
-			var target_position = b.getTargetPosition();
-
-
-
-			ctx.fillStyle = "#393";
-
-			ctx.strokeStyle = "#000";
-
-			ctx.beginPath();
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.arc(b.cx, b.cy, gs2 - 5, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.lineWidth = 3 * _TD.retina;
-
-			ctx.beginPath();
-
-			ctx.moveTo(b.cx, b.cy);
-
-			b.muzzle = lineTo2(ctx, b.cx, b.cy, target_position[0], target_position[1], gs2);
-
-			ctx.closePath();
-
-			ctx.stroke();
-
-
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.fillStyle = "#060";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx, b.cy, 7 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.fillStyle = "#cec";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx + 2, b.cy - 2, 3 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-
-
-		},
-
-		"LMG": function (b, ctx, map, gs, gs2) {
-
-			var target_position = b.getTargetPosition();
-
-
-
-			ctx.fillStyle = "#36f";
-
-			ctx.strokeStyle = "#000";
-
-			ctx.beginPath();
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.arc(b.cx, b.cy, 7 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.lineWidth = 2 * _TD.retina;
-
-			ctx.beginPath();
-
-			ctx.moveTo(b.cx, b.cy);
-
-			b.muzzle = lineTo2(ctx, b.cx, b.cy, target_position[0], target_position[1], gs2);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.fillStyle = "#66c";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx, b.cy, 5 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.fillStyle = "#ccf";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx + 1, b.cy - 1, 2 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-
-
-		},
-
-		"HMG": function (b, ctx, map, gs, gs2) {
-
-			var target_position = b.getTargetPosition();
-
-
-
-			ctx.fillStyle = "#933";
-
-			ctx.strokeStyle = "#000";
-
-			ctx.beginPath();
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.arc(b.cx, b.cy, gs2 - 2, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.lineWidth = 5 * _TD.retina;
-
-			ctx.beginPath();
-
-			ctx.moveTo(b.cx, b.cy);
-
-			b.muzzle = lineTo2(ctx, b.cx, b.cy, target_position[0], target_position[1], gs2);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.fillStyle = "#630";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx, b.cy, gs2 - 5 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.fillStyle = "#960";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx + 1, b.cy - 1, 8 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-
-
-			ctx.fillStyle = "#fcc";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx + 3, b.cy - 3, 4 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-
-
-		},
-
-		"wall": function (b, ctx, map, gs, gs2) {
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.fillStyle = "#666";
-
-			ctx.strokeStyle = "#000";
-
-			ctx.fillRect(b.cx - gs2 + 1, b.cy - gs2 + 1, gs - 1, gs - 1);
-
-			ctx.beginPath();
-
-			ctx.moveTo(b.cx - gs2 + 0.5, b.cy - gs2 + 0.5);
-
-			ctx.lineTo(b.cx - gs2 + 0.5, b.cy + gs2 + 0.5);
-
-			ctx.lineTo(b.cx + gs2 + 0.5, b.cy + gs2 + 0.5);
-
-			ctx.lineTo(b.cx + gs2 + 0.5, b.cy - gs2 + 0.5);
-
-			ctx.lineTo(b.cx - gs2 + 0.5, b.cy - gs2 + 0.5);
-
-			ctx.moveTo(b.cx - gs2 + 0.5, b.cy + gs2 + 0.5);
-
-			ctx.lineTo(b.cx + gs2 + 0.5, b.cy - gs2 + 0.5);
-
-			ctx.moveTo(b.cx - gs2 + 0.5, b.cy - gs2 + 0.5);
-
-			ctx.lineTo(b.cx + gs2 + 0.5, b.cy + gs2 + 0.5);
-
-			ctx.closePath();
-
-			ctx.stroke();
-
-		},
-
-		"laser_gun": function (b, ctx) {
-
-
-
-			ctx.fillStyle = "#f00";
-
-			ctx.strokeStyle = "#000";
-
-			ctx.beginPath();
-
-			ctx.lineWidth = _TD.retina;
-
-			ctx.moveTo(b.cx, b.cy - 10 * _TD.retina);
-
-			ctx.lineTo(b.cx - 8.66 * _TD.retina, b.cy + 5 * _TD.retina);
-
-			ctx.lineTo(b.cx + 8.66 * _TD.retina, b.cy + 5 * _TD.retina);
-
-			ctx.lineTo(b.cx, b.cy - 10 * _TD.retina);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.fillStyle = "#60f";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx, b.cy, 7 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-
-
-			ctx.fillStyle = "#000";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx, b.cy, 3 * _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-
-
-			ctx.fillStyle = "#666";
-
-			ctx.beginPath();
-
-			ctx.arc(b.cx + 1, b.cy - 1, _TD.retina, 0, Math.PI * 2, true);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-
-
-			ctx.lineWidth = 3 * _TD.retina;
-
-			ctx.beginPath();
-
-			ctx.moveTo(b.cx, b.cy);
-
-			ctx.closePath();
-
-			ctx.fill();
-
-			ctx.stroke();
-
-		}
-
-	};
-
+var renderFunctions = {
+
+    "cannon": function (b, ctx, map, gs, gs2) {
+        if (!TD.SPR || !TD.SPR.ready) {
+            // Fallback to procedural
+            ctx.fillStyle = "#393";
+            ctx.strokeStyle = "#000";
+            ctx.beginPath();
+            ctx.lineWidth = _TD.retina;
+            ctx.arc(b.cx, b.cy, gs2 - 5, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = 3 * _TD.retina;
+            var target_position = b.getTargetPosition();
+            ctx.beginPath();
+            ctx.moveTo(b.cx, b.cy);
+            b.muzzle = lineTo2(ctx, b.cx, b.cy, target_position[0], target_position[1], gs2);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.lineWidth = _TD.retina;
+            ctx.fillStyle = "#060";
+            ctx.beginPath();
+            ctx.arc(b.cx, b.cy, 7 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#cec";
+            ctx.beginPath();
+            ctx.arc(b.cx + 2, b.cy - 2, 3 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            return;
+        }
+        var sName = TD.SPR.getTowerSprite("cannon", b.level);
+        if (sName) {
+            TD.SPR.drawTower(ctx, sName, b.cx, b.cy, gs);
+            // Draw bow animation frame when firing
+            if (b._fire_wait <= 1 && b.target && b.target.is_valid) {
+                var bowFrame = Math.floor((TD.iframe || 0) / 2) % 4 + 1;
+                var bowName = "bow" + bowFrame;
+                if (!TD.SPR.images["bow1"]) {
+                    // Load bow animation on first use
+                    for (var bi = 1; bi <= 4; bi++) {
+                        (function(fi) {
+                            var ib = new Image();
+                            ib.src = TD.SPR.assetBase + "/Towers/Archer/bow_animation(" + fi + ").png";
+                            TD.SPR.images["bow" + fi] = ib;
+                        })(bi);
+                    }
+                }
+                if (TD.SPR.images[bowName] && TD.SPR.images[bowName].complete) {
+                    var ibImg = TD.SPR.images[bowName];
+                    var ibScale = Math.min((gs * 0.6) / ibImg.naturalWidth, (gs * 0.6) / ibImg.naturalHeight, 1);
+                    ctx.drawImage(ibImg, b.cx - ibImg.naturalWidth * ibScale / 2, b.cy - gs2 - ibImg.naturalHeight * ibScale * 0.5, ibImg.naturalWidth * ibScale, ibImg.naturalHeight * ibScale);
+                }
+            }
+        }
+    },
+
+    "LMG": function (b, ctx, map, gs, gs2) {
+        if (!TD.SPR || !TD.SPR.ready) {
+            // Fallback
+            ctx.fillStyle = "#36f";
+            ctx.strokeStyle = "#000";
+            ctx.beginPath();
+            ctx.lineWidth = _TD.retina;
+            ctx.arc(b.cx, b.cy, 7 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = 2 * _TD.retina;
+            var target_position = b.getTargetPosition();
+            ctx.beginPath();
+            ctx.moveTo(b.cx, b.cy);
+            b.muzzle = lineTo2(ctx, b.cx, b.cy, target_position[0], target_position[1], gs2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = _TD.retina;
+            ctx.fillStyle = "#66c";
+            ctx.beginPath();
+            ctx.arc(b.cx, b.cy, 5 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#ccf";
+            ctx.beginPath();
+            ctx.arc(b.cx + 1, b.cy - 1, 2 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            return;
+        }
+        var sName = TD.SPR.getTowerSprite("LMG", b.level);
+        if (sName) {
+            TD.SPR.drawTower(ctx, sName, b.cx, b.cy, gs);
+            // Draw stick (wand) overlay
+            if (!TD.SPR.images["stick"]) {
+                var stickImg = new Image();
+                stickImg.src = TD.SPR.assetBase + "/Towers/Wizard/stick.png";
+                TD.SPR.images["stick"] = stickImg;
+            }
+            if (TD.SPR.images["stick"] && TD.SPR.images["stick"].complete) {
+                var si = TD.SPR.images["stick"];
+                var sScale = Math.min((gs * 0.4) / si.naturalWidth, (gs * 0.5) / si.naturalHeight, 1);
+                ctx.drawImage(si, b.cx - si.naturalWidth * sScale / 2, b.cy - gs2 - si.naturalHeight * sScale * 0.3, si.naturalWidth * sScale, si.naturalHeight * sScale);
+            }
+        }
+    },
+
+    "HMG": function (b, ctx, map, gs, gs2) {
+        if (!TD.SPR || !TD.SPR.ready) {
+            ctx.fillStyle = "#933";
+            ctx.strokeStyle = "#000";
+            ctx.beginPath();
+            ctx.lineWidth = _TD.retina;
+            ctx.arc(b.cx, b.cy, gs2 - 2, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = 5 * _TD.retina;
+            var target_position = b.getTargetPosition();
+            ctx.beginPath();
+            ctx.moveTo(b.cx, b.cy);
+            b.muzzle = lineTo2(ctx, b.cx, b.cy, target_position[0], target_position[1], gs2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = _TD.retina;
+            ctx.fillStyle = "#630";
+            ctx.beginPath();
+            ctx.arc(b.cx, b.cy, gs2 - 5 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#960";
+            ctx.beginPath();
+            ctx.arc(b.cx + 1, b.cy - 1, 8 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#fcc";
+            ctx.beginPath();
+            ctx.arc(b.cx + 3, b.cy - 3, 4 * _TD.retina, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.fill();
+            return;
+        }
+        // Draw Barrack tower
+        var sName = TD.SPR.getTowerSprite("HMG", b.level);
+        if (sName) {
+            TD.SPR.drawTower(ctx, sName, b.cx, b.cy, gs);
+        }
+        // Draw knight unit near the tower
+        var knightName = TD.SPR.getKnightSprite(b.level);
+        if (knightName && TD.SPR.images[knightName] && TD.SPR.images[knightName].complete) {
+            var ki = TD.SPR.images[knightName];
+            var kScale = Math.min((gs * 0.5) / ki.naturalWidth, (gs * 0.5) / ki.naturalHeight, 1);
+            // Position knight slightly offset based on iframe for patrol animation
+            var offsetX = Math.sin((TD.iframe || 0) * 0.03) * gs * 0.15;
+            var offsetY = Math.cos((TD.iframe || 0) * 0.03 + 1) * gs * 0.1;
+            ctx.drawImage(ki, b.cx + offsetX - ki.naturalWidth * kScale / 2, b.cy + offsetY - ki.naturalHeight * kScale * 0.2, ki.naturalWidth * kScale, ki.naturalHeight * kScale);
+        }
+        // Draw sword overlay
+        if (!TD.SPR.images["sword"]) {
+            var swImg = new Image();
+            swImg.src = TD.SPR.assetBase + "/Towers/Barrack/sword.png";
+            TD.SPR.images["sword"] = swImg;
+        }
+        if (TD.SPR.images["sword"] && TD.SPR.images["sword"].complete && b._fire_wait <= 1) {
+            var sw = TD.SPR.images["sword"];
+            var swScale = Math.min((gs * 0.3) / sw.naturalWidth, (gs * 0.4) / sw.naturalHeight, 1);
+            var swAngle = Math.sin((TD.iframe || 0) * 0.15) * 0.4;
+            ctx.save();
+            ctx.translate(b.cx + gs2 * 0.3, b.cy - gs2 * 0.2);
+            ctx.rotate(swAngle);
+            ctx.drawImage(sw, -sw.naturalWidth * swScale / 2, -sw.naturalHeight * swScale / 2, sw.naturalWidth * swScale, sw.naturalHeight * swScale);
+            ctx.restore();
+        }
+    },
+
+    "laser_gun": function (b, ctx) {
+        // Keep original laser_gun rendering
+        ctx.fillStyle = "#f00";
+        ctx.strokeStyle = "#000";
+        ctx.beginPath();
+        ctx.lineWidth = _TD.retina;
+        ctx.moveTo(b.cx, b.cy - 10 * _TD.retina);
+        ctx.lineTo(b.cx - 8.66 * _TD.retina, b.cy + 5 * _TD.retina);
+        ctx.lineTo(b.cx + 8.66 * _TD.retina, b.cy + 5 * _TD.retina);
+        ctx.lineTo(b.cx, b.cy - 10 * _TD.retina);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#60f";
+        ctx.beginPath();
+        ctx.arc(b.cx, b.cy, 7 * _TD.retina, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.arc(b.cx, b.cy, 3 * _TD.retina, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#666";
+        ctx.beginPath();
+        ctx.arc(b.cx + 1, b.cy - 1, _TD.retina, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineWidth = 3 * _TD.retina;
+        ctx.beginPath();
+        ctx.moveTo(b.cx, b.cy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    },
+
+    "wall": function (b, ctx, map, gs, gs2) {
+        ctx.lineWidth = _TD.retina;
+        ctx.fillStyle = "#666";
+        ctx.strokeStyle = "#000";
+        ctx.fillRect(b.cx - gs2 + 1, b.cy - gs2 + 1, gs - 1, gs - 1);
+        ctx.beginPath();
+        ctx.moveTo(b.cx - gs2 + 0.5, b.cy - gs2 + 0.5);
+        ctx.lineTo(b.cx - gs2 + 0.5, b.cy + gs2 + 0.5);
+        ctx.lineTo(b.cx + gs2 + 0.5, b.cy + gs2 + 0.5);
+        ctx.lineTo(b.cx + gs2 + 0.5, b.cy - gs2 + 0.5);
+        ctx.lineTo(b.cx - gs2 + 0.5, b.cy - gs2 + 0.5);
+        ctx.moveTo(b.cx - gs2 + 0.5, b.cy + gs2 + 0.5);
+        ctx.lineTo(b.cx + gs2 + 0.5, b.cy - gs2 + 0.5);
+        ctx.moveTo(b.cx - gs2 + 0.5, b.cy - gs2 + 0.5);
+        ctx.lineTo(b.cx + gs2 + 0.5, b.cy + gs2 + 0.5);
+        ctx.closePath();
+        ctx.stroke();
+    }
+
+};
 
 
 	TD.renderBuilding = function (building) {
@@ -6565,13 +6738,20 @@ _TD.a.push(function (TD) {
 
 			gs2 = TD.grid_size / 2;
 
-
+		if (building.is_pre_building) {
+			ctx.save();
+			ctx.globalAlpha = 0.35;
+		}
 
 		(renderFunctions[building.type] || renderFunctions["wall"])(
 
 			building, ctx, map, gs, gs2
 
 		);
+
+		if (building.is_pre_building) {
+			ctx.restore();
+		}
 
 	}
 

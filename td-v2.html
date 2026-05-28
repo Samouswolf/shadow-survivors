@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>塔防保卫战 v2</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#0a0a0f;font-family:"Microsoft YaHei",sans-serif;-webkit-user-select:none;user-select:none}
+#game-board{position:relative;margin:0 auto;width:640px}
+#game-board canvas{display:block;image-rendering:pixelated;cursor:crosshair}
+#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;font-size:18px}
+</style>
+</head>
+<body>
+<div id="game-board">
+	<canvas id="gc"></canvas>
+	<div id="loading">加载中...</div>
+</div>
+<script>
+// ===== 配置 =====
+var CFG = {
+	canvasW: 960, canvasH: 840,
+	retina: 1.5,
+	cols: 16, rows: 16,
+	gridSize: 48,
+	padding: 15,
+	assetBase: "../assets/塔防保卫战/Isometric Tower Defense Pack/Sprites"
+};
+
+var canvas = document.getElementById("gc");
+canvas.width = CFG.canvasW;
+canvas.height = CFG.canvasH;
+canvas.style.width = (CFG.canvasW / CFG.retina) + "px";
+canvas.style.height = (CFG.canvasH / CFG.retina) + "px";
+var ctx = canvas.getContext("2d");
+
+// ===== COORD HELPERS =====
+var MX = CFG.padding, MY = CFG.padding, GS = CFG.gridSize;
+function gridCenter(gx, gy) { return [MX + gx * GS + GS / 2, MY + gy * GS + GS / 2]; }
+function posToGrid(px, py) {
+	var gx = Math.floor((px - MX) / GS), gy = Math.floor((py - MY) / GS);
+	return (gx >= 0 && gx < CFG.cols && gy >= 0 && gy < CFG.rows) ? [gx, gy] : null;
+}
+
+// ===== SPR SYSTEM =====
+var SPR = { images: {}, ready: false, _loaded: 0, _total: 0 };
+SPR.defs = {
+	archer_lv1: ["Towers/Archer/archer_level_1.png"],
+	archer_lv2: ["Towers/Archer/archer_level_2.png"],
+	archer_lv3: ["Towers/Archer/archer_level_3.png"],
+	wizard_lv1: ["Towers/Wizard/wizard_level_1.png"],
+	wizard_lv2: ["Towers/Wizard/wizard_level_2.png"],
+	wizard_lv3: ["Towers/Wizard/wizard_level_3.png"],
+	barrack_lv1: ["Towers/Barrack/barrack_level_1 (1).png"],
+	barrack_lv2: ["Towers/Barrack/barrack_level_2 (1).png"],
+	barrack_lv3: ["Towers/Barrack/barrack_level_3 (1).png"],
+	arrow: ["Towers/Archer/arrow.png"],
+	wizard_bullet: ["Towers/Wizard/wizard_bullet.png"],
+	knight_lv1: ["Towers/Barrack/knight_level_1.png"],
+	knight_lv2: ["Towers/Barrack/knight_level_2.png"],
+	knight_lv3: ["Towers/Barrack/knight_level_3.png"],
+	grass: ["Landscape tiles/grass.png"],
+	building_place: ["Landscape tiles/buildingPlaceGrass.png"],
+	road_1: ["Road tiles/Spring biome/road_spring(1).png"],
+	tree1: ["Enviroument tiles/Spring biome/trees/tree(1).png"],
+	tree2: ["Enviroument tiles/Spring biome/trees/tree(2).png"],
+	stone1: ["Enviroument tiles/Spring biome/stones/stone(1).png"],
+	stone2: ["Enviroument tiles/Spring biome/stones/stone(2).png"],
+	stone3: ["Enviroument tiles/Spring biome/stones/stone(3).png"],
+	stone4: ["Enviroument tiles/Spring biome/stones/stone(4).png"],
+	grass_deco1: ["Enviroument tiles/Spring biome/grass decoration/grass_decoration(1).png"],
+	grass_deco2: ["Enviroument tiles/Spring biome/grass decoration/grass_decoration(2).png"],
+	crystal1: ["Enviroument tiles/crystal(1).png"],
+	crystal2: ["Enviroument tiles/crystal(2).png"],
+	crystal3: ["Enviroument tiles/crystal(3).png"],
+	ufo1: ["UFO/UFO(1).png"], ufo2: ["UFO/UFO(2).png"],
+	ufo3: ["UFO/UFO(3).png"], ufo4: ["UFO/UFO(4).png"],
+	ufo5: ["UFO/UFO(5).png"], ufo6: ["UFO/UFO(6).png"],
+	ufo7: ["UFO/UFO(7).png"]
+};
+SPR.load = function(cb) {
+	var self = this, keys = Object.keys(this.defs);
+	this._total = keys.length; this._loaded = 0;
+	keys.forEach(function(k) {
+		var img = new Image();
+		img.onload = img.onerror = function() {
+			self._loaded++;
+			if (self._loaded >= self._total) { self.ready = true; if (cb) cb(); }
+		};
+		img.src = CFG.assetBase + "/" + self.defs[k][0];
+		self.images[k] = img;
+	});
+};
+SPR.get = function(n) { return this.images[n] || null; };
+SPR.draw = function(ctx, name, cx, cy, maxW, maxH) {
+	var img = this.get(name);
+	if (!img || !img.complete || img.naturalWidth === 0) return false;
+	var iw = img.naturalWidth, ih = img.naturalHeight;
+	var s = Math.min((maxW||GS)/iw, (maxH||GS)/ih, 1);
+	var w = iw * s, h = ih * s;
+	ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+	return true;
+};
+
+// ===== GRID / MAP =====
+var mapGrid = []; // [gy][gx] = { passable, buildable, building, decoration }
+var ROAD_PATH = []; // precomputed way
+
+function initMap() {
+	mapGrid = [];
+	for (var gy = 0; gy < CFG.rows; gy++) {
+		mapGrid[gy] = [];
+		for (var gx = 0; gx < CFG.cols; gx++) {
+			mapGrid[gy][gx] = { passable: true, buildable: true, building: null, decor: null };
+		}
+	}
+	// Build S-path from (0,0) to (15,15)
+	// Path: go right to (10,0), down to (10,12), right to (15,12), down to (15,15)
+	buildRoadPath();
+	// Mark path cells as non-buildable
+	for (var i = 0; i < ROAD_PATH.length; i++) {
+		var gx = ROAD_PATH[i][0], gy = ROAD_PATH[i][1];
+		mapGrid[gy][gx].buildable = false;
+	}
+	// Place environment decorations
+	placeDecorations();
+}
+
+function buildRoadPath() {
+	ROAD_PATH = [];
+	// Segment 1: (0,0) to (10,0) along top
+	for (var x = 0; x <= 10; x++) ROAD_PATH.push([x, 0]);
+	// Segment 2: (10,1) to (10,12) down
+	for (var y = 1; y <= 12; y++) ROAD_PATH.push([10, y]);
+	// Segment 3: (11,12) to (15,12) right
+	for (var x = 11; x <= 15; x++) ROAD_PATH.push([x, 12]);
+	// Segment 4: (15,13) to (15,15) down
+	for (var y = 13; y <= 15; y++) ROAD_PATH.push([15, y]);
+}
+
+function placeDecorations() {
+	var decorItems = ["stone1","stone2","stone3","stone4","grass_deco1","grass_deco2","tree1","tree2"];
+	for (var gy = 0; gy < CFG.rows; gy++) {
+		for (var gx = 0; gx < CFG.cols; gx++) {
+			var g = mapGrid[gy][gx];
+			if (!g.buildable || g.building) continue;
+			// ~20% chance based on position
+			var h = (gx * 13 + gy * 7 + 3) % 19;
+			if (h >= decorItems.length) continue;
+			g.decor = decorItems[h];
+		}
+	}
+}
+
+// ===== BUILDING TYPES =====
+var TOWER_DATA = {
+	archer: { name: "射手", cost: 50, range: 150, dmg: 10, rate: 20, spr: ["archer_lv1","archer_lv2","archer_lv3"], bullet: "arrow", splash: 0 },
+	wizard: { name: "法师", cost: 80, range: 130, dmg: 20, rate: 35, spr: ["wizard_lv1","wizard_lv2","wizard_lv3"], bullet: "wizard_bullet", splash: 40 },
+	barrack: { name: "骑士营", cost: 60, range: 60, dmg: 15, rate: 15, spr: ["barrack_lv1","barrack_lv2","barrack_lv3"], bullet: null, splash: 0 },
+	crystal: { name: "水晶塔", cost: 100, range: 140, dmg: 8, rate: 25, spr: ["crystal1","crystal2","crystal3"], bullet: "wizard_bullet", splash: 30 },
+	wall: { name: "屏障", cost: 30, range: 0, dmg: 0, rate: 0, spr: null, bullet: null, splash: 0 }
+};
+var TOWER_KEYS = ["archer","wizard","barrack","crystal","wall"];
+
+// ===== GAME STATE =====
+var G = {
+	money: 200, life: 20, score: 0, wave: 0, phase: "loading",
+	step: 0, selectedType: null, // selected tower type key
+	buildings: [], monsters: [], bullets: [],
+	waveTimer: 0, spawnQueue: [], waveInProgress: false,
+	gameOver: false, mouseX: 0, mouseY: 0, hoverGrid: null
+};
+
+// ===== BUILDING =====
+var _bid = 0;
+function createBuilding(type, gx, gy) {
+	var td = TOWER_DATA[type];
+	if (!td) return null;
+	var b = {
+		id: "b" + (_bid++),
+		type: type, level: 1, gx: gx, gy: gy,
+		cx: 0, cy: 0, // computed from grid
+		range: td.range, dmg: td.dmg, rate: td.rate,
+		cooldown: 0, target: null,
+		spr: td.spr, bullet: td.bullet, splash: td.splash,
+		cost: td.cost, exp: 0, expNext: 2 // 2 kills to level up
+	};
+	var c = gridCenter(gx, gy);
+	b.cx = c[0]; b.cy = c[1];
+	mapGrid[gy][gx].building = b;
+	G.buildings.push(b);
+	G.money -= td.cost;
+	// Reset cooldown so it doesn't fire immediately
+	b.cooldown = b.rate;
+	return b;
+}
+
+function getTowerSprite(b) {
+	if (!b.spr || b.spr.length === 0) return null;
+	var idx = Math.min(b.level - 1, b.spr.length - 1);
+	return b.spr[idx];
+}
+
+// ===== MONSTER =====
+var _mid = 0;
+function spawnMonster(type, hp, speed, reward, tint) {
+	if (!ROAD_PATH.length) return null;
+	var start = ROAD_PATH[0];
+	var c = gridCenter(start[0], start[1]);
+	var m = {
+		id: "m" + (_mid++),
+		type: type, hp: hp, maxHp: hp, speed: speed, reward: reward,
+		tint: tint || null, pathIdx: 0, // position along ROAD_PATH
+		gx: start[0], gy: start[1],
+		cx: c[0], cy: c[1], alive: true, hitFlash: 0,
+		animFrame: 0
+	};
+	G.monsters.push(m);
+	return m;
+}
+
+function monsterTint(typeIdx) {
+	var tints = [
+		null, "rgba(255,255,255,0.3)", "rgba(255,100,100,0.3)", "rgba(100,255,100,0.3)",
+		"rgba(200,100,255,0.3)", "rgba(100,150,255,0.3)", "rgba(255,200,50,0.4)"
+	];
+	return tints[typeIdx] || null;
+}
+
+// ===== BULLET =====
+var _blid = 0;
+function createBullet(fromBx, fromBy, target, speed, dmg, sprName, splash, fromBld) {
+	var b = {
+		id: "bl" + (_blid++),
+		x: fromBx, y: fromBy, target: target,
+		speed: speed || 4, dmg: dmg, spr: sprName || "arrow",
+		splash: splash || 0, fromBld: fromBld || null, alive: true
+	};
+	G.bullets.push(b);
+	return b;
+}
+
+// ===== WAVE SYSTEM =====
+var WAVE_DEFS = [
+	// wave 1: 5 normal
+	{ count: 5, types: [0], hpMul: 1, speedMul: 1, rewardMul: 1 },
+	// wave 2: 8 mixed
+	{ count: 8, types: [0,1], hpMul: 1, speedMul: 1, rewardMul: 1 },
+	// wave 3: 10 + fast
+	{ count: 10, types: [0,1,2], hpMul: 1.2, speedMul: 1, rewardMul: 1 },
+	// wave 4: 12 tanky
+	{ count: 12, types: [0,1,3], hpMul: 1.5, speedMul: 1, rewardMul: 1.2 },
+	// wave 5: boss
+	{ count: 15, types: [0,1,2,3,6], hpMul: 2, speedMul: 1, rewardMul: 1.5 }
+];
+
+var MONSTER_TYPES = [
+	{ hp: 30, speed: 1.2, reward: 10 },   // 0 normal
+	{ hp: 60, speed: 0.9, reward: 15 },   // 1 strong
+	{ hp: 20, speed: 2.0, reward: 12 },   // 2 fast
+	{ hp: 120, speed: 0.7, reward: 20 },  // 3 tank
+	{ hp: 50, speed: 1.0, reward: 18 },   // 4 shield (not used directly)
+	{ hp: 40, speed: 1.5, reward: 14 },   // 5 agile
+	{ hp: 300, speed: 0.6, reward: 50 }   // 6 boss
+];
+
+function startWave() {
+	if (G.waveInProgress || G.gameOver) return;
+	G.wave++;
+	var def = WAVE_DEFS[Math.min(G.wave - 1, WAVE_DEFS.length - 1)];
+	G.spawnQueue = [];
+	for (var i = 0; i < def.count; i++) {
+		var ti = def.types[i % def.types.length];
+		var mt = MONSTER_TYPES[ti];
+		var delay = 30 + i * 20; // frames between spawns
+		G.spawnQueue.push({
+			type: ti,
+			hp: mt.hp * def.hpMul,
+			speed: mt.speed * def.speedMul,
+			reward: Math.round(mt.reward * def.rewardMul),
+			tint: monsterTint(ti),
+			delay: delay
+		});
+	}
+	G.waveTimer = 0;
+	G.waveInProgress = true;
+	G.money += 20; // wave bonus
+}
+
+// ===== UPDATE =====
+function update() {
+	G.step++;
+
+	// Spawn queue
+	if (G.waveInProgress) {
+		if (G.spawnQueue.length > 0) {
+			G.waveTimer++;
+			while (G.spawnQueue.length > 0 && G.waveTimer >= G.spawnQueue[0].delay) {
+				var sq = G.spawnQueue.shift();
+				var c = gridCenter(ROAD_PATH[0][0], ROAD_PATH[0][1]);
+				spawnMonster(sq.type, sq.hp, sq.speed, sq.reward, sq.tint);
+			}
+		}
+		if (G.spawnQueue.length === 0 && G.monsters.every(function(m) { return !m.alive; })) {
+			G.waveInProgress = false;
+		}
+	}
+
+	// Auto-start next wave when no wave in progress and monsters cleared
+	if (!G.waveInProgress && !G.gameOver && G.monsters.every(function(m) { return !m.alive; })) {
+		if (G.wave === 0 || G.step > 60) { // small delay between waves
+			startWave();
+		}
+	}
+
+	// Update monsters
+	for (var mi = G.monsters.length - 1; mi >= 0; mi--) {
+		var m = G.monsters[mi];
+		if (!m.alive) { G.monsters.splice(mi, 1); continue; }
+
+		// Move along path
+		m.animFrame++;
+		if (m.pathIdx < ROAD_PATH.length - 1) {
+			var next = ROAD_PATH[m.pathIdx + 1];
+			var targetPos = gridCenter(next[0], next[1]);
+			var dx = targetPos[0] - m.cx, dy = targetPos[1] - m.cy;
+			var dist = Math.sqrt(dx * dx + dy * dy);
+			if (dist < m.speed) {
+				m.pathIdx++;
+				m.gx = next[0]; m.gy = next[1];
+				m.cx = targetPos[0]; m.cy = targetPos[1];
+			} else {
+				m.cx += (dx / dist) * m.speed;
+				m.cy += (dy / dist) * m.speed;
+			}
+		} else {
+			// Reached exit
+			m.alive = false;
+			G.life--;
+			if (G.life <= 0) { G.life = 0; G.gameOver = true; G.phase = "gameover"; }
+			continue;
+		}
+		if (m.hitFlash > 0) m.hitFlash--;
+	}
+
+	// Update buildings
+	for (var bi = 0; bi < G.buildings.length; bi++) {
+		var b = G.buildings[bi];
+		if (b.cooldown > 0) b.cooldown--;
+
+		// Find target
+		b.target = null;
+		var bestDist = Infinity;
+		for (var mi2 = 0; mi2 < G.monsters.length; mi2++) {
+			var m2 = G.monsters[mi2];
+			if (!m2.alive) continue;
+			var dx = m2.cx - b.cx, dy = m2.cy - b.cy;
+			var d = Math.sqrt(dx * dx + dy * dy);
+			if (d < b.range && d < bestDist) {
+				bestDist = d;
+				b.target = m2;
+			}
+		}
+
+		// Fire if ready
+		if (b.target && b.cooldown <= 0) {
+			b.cooldown = b.rate;
+			if (b.type === "barrack") {
+				// Melee: instant damage to target in range
+				b.target.hp -= b.dmg;
+				b.target.hitFlash = 5;
+				if (b.target.hp <= 0) {
+					b.target.alive = false;
+					G.money += b.target.reward;
+					b.exp++;
+					if (b.exp >= b.expNext && b.level < 3) {
+						b.level++;
+						b.exp = 0;
+						b.dmg = Math.round(b.dmg * 1.5);
+						b.rate = Math.max(5, Math.round(b.rate * 0.8));
+					}
+				}
+			} else if (b.bullet) {
+				createBullet(b.cx, b.cy, b.target, 4, b.dmg, b.bullet, b.splash, b);
+			}
+		}
+	}
+
+	// Update bullets
+	for (var bli = G.bullets.length - 1; bli >= 0; bli--) {
+		var bl = G.bullets[bli];
+		if (!bl.alive) { G.bullets.splice(bli, 1); continue; }
+		if (!bl.target || !bl.target.alive) {
+			bl.alive = false;
+			G.bullets.splice(bli, 1);
+			continue;
+		}
+		var dx = bl.target.cx - bl.x, dy = bl.target.cy - bl.y;
+		var d = Math.sqrt(dx * dx + dy * dy);
+		if (d < bl.speed + 5) {
+			// Hit
+			bl.target.hp -= bl.dmg;
+			bl.target.hitFlash = 5;
+			// Splash damage
+			if (bl.splash > 0) {
+				for (var si = 0; si < G.monsters.length; si++) {
+					var sm = G.monsters[si];
+					if (!sm.alive || sm === bl.target) continue;
+					var sdx = sm.cx - bl.target.cx, sdy = sm.cy - bl.target.cy;
+					if (Math.sqrt(sdx * sdx + sdy * sdy) < bl.splash) {
+						sm.hp -= Math.round(bl.dmg * 0.5);
+						sm.hitFlash = 3;
+					}
+				}
+			}
+			// Grant tower exp
+			if (bl.target.hp <= 0) {
+				bl.target.alive = false;
+				G.money += bl.target.reward;
+				// Find which tower fired this bullet
+				for (var bi2 = 0; bi2 < G.buildings.length; bi2++) {
+					var tb = bl.fromBld || G.buildings[bi2];
+					if (tb) {
+						tb.exp++;
+						if (tb.exp >= tb.expNext && tb.level < 3) {
+							tb.level++;
+							tb.exp = 0;
+							tb.dmg = Math.round(tb.dmg * 1.5);
+							tb.rate = Math.max(5, Math.round(tb.rate * 0.8));
+						}
+						break;
+					}
+				}
+			}
+			bl.alive = false;
+		} else {
+			bl.x += (dx / d) * bl.speed;
+			bl.y += (dy / d) * bl.speed;
+		}
+	}
+}
+
+// ===== RENDER =====
+function render() {
+	ctx.fillStyle = "#0a0a0f";
+	ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+
+	renderMap();
+	renderDecorations();
+	renderGrid();
+	renderPreview();
+	renderBuildings();
+	renderMonsters();
+	renderBullets();
+	renderUI();
+	renderGameOver();
+}
+
+function renderMap() {
+	var mx = MX, my = MY, mw = GS * 16, mh = GS * 16;
+	ctx.fillStyle = "#3a5a2a";
+	ctx.fillRect(mx, my, mw, mh);
+
+	if (!SPR.ready) return;
+	var grass = SPR.get("grass");
+	if (grass && grass.complete && grass.naturalWidth > 0) {
+		var tw = grass.naturalWidth, th = grass.naturalHeight;
+		for (var y = my; y < my + mh; y += th) {
+			for (var x = mx; x < mx + mw; x += tw) {
+				ctx.fillStyle = "#4a6a3a";
+				ctx.fillRect(x, y, tw, th);
+				ctx.drawImage(grass, x, y, tw, th);
+			}
+		}
+	}
+
+	// Draw road tiles
+	var road = SPR.get("road_1");
+	if (road && road.complete && road.naturalWidth > 0) {
+		var rw = GS * 0.95, rh = GS * 0.95;
+		for (var i = 0; i < ROAD_PATH.length; i++) {
+			var gx = ROAD_PATH[i][0], gy = ROAD_PATH[i][1];
+			var px = mx + gx * GS + (GS - rw) / 2;
+			var py = my + gy * GS + (GS - rh) / 2;
+			ctx.drawImage(road, px, py, rw, rh);
+		}
+	}
+}
+
+function renderDecorations() {
+	if (!SPR.ready) return;
+	for (var gy = 0; gy < CFG.rows; gy++) {
+		for (var gx = 0; gx < CFG.cols; gx++) {
+			var g = mapGrid[gy][gx];
+			if (!g.decor) continue;
+			var img = SPR.get(g.decor);
+			if (!img || !img.complete || img.naturalWidth === 0) continue;
+			var c = gridCenter(gx, gy);
+			var s = Math.min((GS * 0.5) / img.naturalWidth, (GS * 0.6) / img.naturalHeight, 1);
+			var w = img.naturalWidth * s, h = img.naturalHeight * s;
+			ctx.drawImage(img, c[0] - w / 2, c[1] - h + GS * 0.2, w, h);
+		}
+	}
+}
+
+function renderGrid() {
+	// Highlight hovered grid cell
+	if (G.hoverGrid) {
+		var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
+		var px = MX + gx * GS, py = MY + gy * GS;
+		ctx.fillStyle = "rgba(255,255,255,0.08)";
+		ctx.fillRect(px, py, GS, GS);
+		ctx.strokeStyle = "rgba(255,255,255,0.2)";
+		ctx.lineWidth = 1;
+		ctx.strokeRect(px, py, GS, GS);
+	}
+}
+
+function renderPreview() {
+	if (!G.selectedType || !G.hoverGrid) return;
+	var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
+	var g = mapGrid[gy][gx];
+	if (!g.buildable || g.building) return;
+	var td = TOWER_DATA[G.selectedType];
+	if (!td || !td.spr) return;
+	var c = gridCenter(gx, gy);
+	var sprName = td.spr[0];
+	var img = SPR.get(sprName);
+	if (!img || !img.complete || img.naturalWidth === 0) return;
+	ctx.save();
+	ctx.globalAlpha = 0.35;
+	var s = Math.min((GS * 0.5) / img.naturalWidth, (GS * 0.6) / img.naturalHeight, 1);
+	var w = img.naturalWidth * s, h = img.naturalHeight * s;
+	ctx.drawImage(img, c[0] - w / 2, c[1] - h + GS * 0.2, w, h);
+	ctx.restore();
+	// Range circle
+	ctx.beginPath();
+	ctx.arc(c[0], c[1], td.range, 0, Math.PI * 2);
+	ctx.fillStyle = "rgba(187,141,32,0.1)";
+	ctx.fill();
+	ctx.strokeStyle = "rgba(187,141,32,0.3)";
+	ctx.lineWidth = 1;
+	ctx.stroke();
+}
+
+function renderBuildings() {
+	for (var i = 0; i < G.buildings.length; i++) {
+		var b = G.buildings[i];
+		var sprName = getTowerSprite(b);
+		if (!sprName) continue;
+		var img = SPR.get(sprName);
+		if (!img || !img.complete || img.naturalWidth === 0) continue;
+		var s = Math.min((GS * 0.5) / img.naturalWidth, (GS * 0.6) / img.naturalHeight, 1);
+		var w = img.naturalWidth * s, h = img.naturalHeight * s;
+		ctx.drawImage(img, b.cx - w / 2, b.cy - h + GS * 0.2, w, h);
+		// Barrack: draw knight
+		if (b.type === "barrack" && b.level > 0) {
+			var knightSpr = ["knight_lv1","knight_lv2","knight_lv3"][Math.min(b.level-1, 2)];
+			var ki = SPR.get(knightSpr);
+			if (ki && ki.complete && ki.naturalWidth > 0) {
+				var ks = Math.min((GS * 0.4) / ki.naturalWidth, (GS * 0.4) / ki.naturalHeight, 1);
+				var kw = ki.naturalWidth * ks, kh = ki.naturalHeight * ks;
+				var kx = b.cx + GS * 0.3, ky = b.cy - GS * 0.1;
+				if (b.target && b.target.alive) {
+					// Knight moves toward target
+					var dirX = b.target.cx - b.cx, dirY = b.target.cy - b.cy;
+					var d = Math.sqrt(dirX*dirX+dirY*dirY) || 1;
+					var dist = Math.min(GS * 0.4, d);
+					kx = b.cx + (dirX/d) * dist;
+					ky = b.cy + (dirY/d) * dist;
+				}
+				// Swing animation
+				ctx.save();
+				var swing = b.cooldown < 5 ? Math.sin(G.step * 0.3) * 0.3 : 0;
+				ctx.translate(kx, ky);
+				ctx.rotate(swing);
+				ctx.drawImage(ki, -kw/2, -kh/2, kw, kh);
+				ctx.restore();
+			}
+		}
+		// Level indicator
+		if (b.level > 1) {
+			ctx.fillStyle = "#ff0";
+			ctx.font = "bold 10px sans-serif";
+			ctx.textAlign = "center";
+			ctx.fillText("★".repeat(b.level-1), b.cx, b.cy - GS * 0.35);
+		}
+	}
+}
+
+function renderMonsters() {
+	for (var i = 0; i < G.monsters.length; i++) {
+		var m = G.monsters[i];
+		if (!m.alive) continue;
+		var ufoFrame = (m.animFrame % 70 < 10 ? 1 : Math.floor(m.animFrame / 10) % 7) + 1;
+		var sprName = "ufo" + ufoFrame;
+		var img = SPR.get(sprName);
+		if (!img || !img.complete || img.naturalWidth === 0) continue;
+		var s = Math.min(30 / img.naturalWidth, 30 / img.naturalHeight, 1);
+		var w = img.naturalWidth * s, h = img.naturalHeight * s;
+		ctx.save();
+		ctx.drawImage(img, m.cx - w/2, m.cy - h/2, w, h);
+		if (m.tint) {
+			ctx.globalCompositeOperation = "source-atop";
+			ctx.fillStyle = m.tint;
+			ctx.fillRect(m.cx - w/2, m.cy - h/2, w, h);
+		}
+		ctx.restore();
+		// Hit flash
+		if (m.hitFlash > 0) {
+			ctx.fillStyle = "rgba(255,255,255," + (m.hitFlash / 10) + ")";
+			ctx.beginPath();
+			ctx.arc(m.cx, m.cy, 16, 0, Math.PI * 2);
+			ctx.fill();
+		}
+		// HP bar
+		var hpPct = m.hp / m.maxHp;
+		ctx.fillStyle = "#333";
+		ctx.fillRect(m.cx - 15, m.cy - h/2 - 6, 30, 4);
+		ctx.fillStyle = hpPct > 0.5 ? "#4c4" : (hpPct > 0.25 ? "#cc4" : "#c44");
+		ctx.fillRect(m.cx - 15, m.cy - h/2 - 6, 30 * hpPct, 4);
+	}
+}
+
+function renderBullets() {
+	for (var i = 0; i < G.bullets.length; i++) {
+		var bl = G.bullets[i];
+		if (!bl.alive) continue;
+		var img = SPR.get(bl.spr);
+		if (img && img.complete && img.naturalWidth > 0) {
+			var s = Math.min(20 / img.naturalWidth, 20 / img.naturalHeight, 1);
+			var w = img.naturalWidth * s, h = img.naturalHeight * s;
+			ctx.drawImage(img, bl.x - w/2, bl.y - h/2, w, h);
+		} else {
+			// Fallback
+			ctx.fillStyle = "#ff0";
+			ctx.beginPath();
+			ctx.arc(bl.x, bl.y, 4, 0, Math.PI * 2);
+			ctx.fill();
+		}
+	}
+}
+
+function renderUI() {
+	// Right panel background
+	var px = MX + GS * 16 + 10, py = MY, pw = CFG.canvasW - px - 10, ph = GS * 16;
+	ctx.fillStyle = "rgba(20,20,30,0.9)";
+	ctx.fillRect(px, py, pw, ph);
+	ctx.strokeStyle = "#333";
+	ctx.lineWidth = 1;
+	ctx.strokeRect(px, py, pw, ph);
+
+	// Info
+	ctx.fillStyle = "#fff";
+	ctx.font = "bold 14px Microsoft YaHei";
+	ctx.textAlign = "left";
+	ctx.fillText("波次 " + G.wave, px + 8, py + 22);
+	ctx.fillStyle = "#ff0";
+	ctx.fillText("💰 " + G.money, px + 8, py + 44);
+	ctx.fillStyle = "#f44";
+	ctx.fillText("❤ " + G.life + "/20", px + 8, py + 64);
+
+	// Tower buttons
+	var btnY = py + 80;
+	for (var i = 0; i < TOWER_KEYS.length; i++) {
+		var key = TOWER_KEYS[i];
+		var td = TOWER_DATA[key];
+		var by = btnY + i * 60;
+		var selected = G.selectedType === key;
+		ctx.fillStyle = selected ? "rgba(100,150,255,0.3)" : "rgba(255,255,255,0.05)";
+		ctx.fillRect(px + 4, by, pw - 8, 54);
+		ctx.strokeStyle = selected ? "#69f" : "#444";
+		ctx.lineWidth = selected ? 2 : 1;
+		ctx.strokeRect(px + 4, by, pw - 8, 54);
+		ctx.fillStyle = selected ? "#fff" : "#aaa";
+		ctx.font = "12px Microsoft YaHei";
+		ctx.textAlign = "left";
+		ctx.fillText(td.name, px + 10, by + 16);
+		ctx.fillStyle = G.money >= td.cost ? "#ff0" : "#644";
+		ctx.fillText("💰" + td.cost, px + 10, by + 32);
+		// Mini sprite preview
+		if (td.spr && td.spr[0]) {
+			var si = SPR.get(td.spr[0]);
+			if (si && si.complete) {
+				var ss = Math.min(28 / si.naturalWidth, 28 / si.naturalHeight, 1);
+				ctx.drawImage(si, px + pw - 36, by + 8, si.naturalWidth * ss, si.naturalHeight * ss);
+			}
+		}
+	}
+
+	// Wave button
+	var waveBtnY = btnY + TOWER_KEYS.length * 60 + 10;
+	ctx.fillStyle = G.waveInProgress ? "#333" : "#284";
+	ctx.fillRect(px + 4, waveBtnY, pw - 8, 36);
+	ctx.strokeStyle = G.waveInProgress ? "#555" : "#4a8";
+	ctx.strokeRect(px + 4, waveBtnY, pw - 8, 36);
+	ctx.fillStyle = "#fff";
+	ctx.font = "13px Microsoft YaHei";
+	ctx.textAlign = "center";
+	ctx.fillText(G.waveInProgress ? "进行中..." : "下一波", px + pw/2, waveBtnY + 24);
+}
+
+function renderGameOver() {
+	if (!G.gameOver) return;
+	ctx.fillStyle = "rgba(0,0,0,0.6)";
+	ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+	ctx.fillStyle = "#f44";
+	ctx.font = "bold 40px Microsoft YaHei";
+	ctx.textAlign = "center";
+	ctx.fillText("游戏结束", CFG.canvasW / 2, CFG.canvasH / 2 - 20);
+	ctx.fillStyle = "#aaa";
+	ctx.font = "18px Microsoft YaHei";
+	ctx.fillText("坚持到第 " + G.wave + " 波", CFG.canvasW / 2, CFG.canvasH / 2 + 30);
+	ctx.fillStyle = "#ff0";
+	ctx.font = "14px Microsoft YaHei";
+	ctx.fillText("点击重新开始", CFG.canvasW / 2, CFG.canvasH / 2 + 70);
+}
+
+function restartGame() {
+	G.money = 200; G.life = 20; G.score = 0; G.wave = 0;
+	G.step = 0; G.selectedType = null;
+	G.buildings = []; G.monsters = []; G.bullets = [];
+	G.waveTimer = 0; G.spawnQueue = []; G.waveInProgress = false;
+	G.gameOver = false; G.phase = "playing";
+	_bid = 0; _mid = 0; _blid = 0;
+	initMap();
+}
+
+// ===== INPUT =====
+function getEventXY(e) {
+	var rect = canvas.getBoundingClientRect();
+	var scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+	var x = (e.clientX - rect.left) * scaleX;
+	var y = (e.clientY - rect.top) * scaleY;
+	return [x, y];
+}
+
+canvas.addEventListener("mousemove", function(e) {
+	var xy = getEventXY(e);
+	G.mouseX = xy[0]; G.mouseY = xy[1];
+	G.hoverGrid = posToGrid(xy[0], xy[1]);
+});
+
+canvas.addEventListener("click", function(e) {
+	var xy = getEventXY(e);
+	var x = xy[0], y = xy[1];
+
+	// Game over click = restart
+	if (G.gameOver) { restartGame(); return; }
+
+	// Check panel click
+	var px = MX + GS * 16 + 10, py = MY, pw = CFG.canvasW - px - 10;
+	if (x >= px && x <= px + pw) {
+		// Tower buttons
+		var btnY = py + 80;
+		for (var i = 0; i < TOWER_KEYS.length; i++) {
+			var by = btnY + i * 60;
+			if (y >= by && y <= by + 54) {
+				G.selectedType = TOWER_KEYS[i];
+				return;
+			}
+		}
+		// Wave button
+		var waveBtnY = btnY + TOWER_KEYS.length * 60 + 10;
+		if (y >= waveBtnY && y <= waveBtnY + 36 && !G.waveInProgress) {
+			startWave();
+		}
+		return;
+	}
+
+	// Try place building on map
+	if (!G.selectedType || !G.hoverGrid) return;
+	var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
+	var g = mapGrid[gy][gx];
+	if (!g.buildable || g.building) return;
+	var td = TOWER_DATA[G.selectedType];
+	if (!td || G.money < td.cost) return;
+	createBuilding(G.selectedType, gx, gy);
+});
+
+// ===== MAIN LOOP =====
+function gameLoop() {
+	if (G.phase === "loading") { drawLoading(); requestAnimationFrame(gameLoop); return; }
+	update();
+	render();
+	requestAnimationFrame(gameLoop);
+}
+
+function drawLoading() {
+	ctx.fillStyle = "#0a0a0f";
+	ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+	ctx.fillStyle = "#888";
+	ctx.font = "18px Microsoft YaHei";
+	ctx.textAlign = "center";
+	ctx.fillText("加载精灵素材中... " + SPR._loaded + "/" + SPR._total, CFG.canvasW / 2, CFG.canvasH / 2);
+}
+
+// ===== START =====
+initMap();
+SPR.load(function() {
+	document.getElementById("loading").style.display = "none";
+	G.phase = "playing";
+	gameLoop();
+});
+setTimeout(function() {
+	if (G.phase === "loading") {
+		document.getElementById("loading").style.display = "none";
+		G.phase = "playing";
+		gameLoop();
+	}
+}, 5000);
+
+// ===== TESTS =====
+function assert(cond, msg) {
+	if (!cond) console.error("[FAIL] " + msg);
+	else console.log("[PASS] " + msg);
+}
+
+(function runTests() {
+	assert(typeof canvas !== "undefined", "Canvas 存在");
+	assert(CFG.gridSize === 48, "网格尺寸 48");
+	assert(CFG.cols === 16 && CFG.rows === 16, "16x16 网格");
+	assert(Object.keys(SPR.defs).length === 35, "SPR " + Object.keys(SPR.defs).length + " 精灵");
+	assert(ROAD_PATH.length > 0, "道路路径 " + ROAD_PATH.length + " 格");
+	assert(TOWER_KEYS.length === 5, "5 种塔类型");
+	assert(typeof createBuilding === "function", "createBuilding 函数存在");
+	assert(typeof startWave === "function", "startWave 函数存在");
+	assert(typeof spawnMonster === "function", "spawnMonster 函数存在");
+	// Check road path shape
+	var endsAtExit = ROAD_PATH[ROAD_PATH.length-1][0] === 15 && ROAD_PATH[ROAD_PATH.length-1][1] === 15;
+	assert(endsAtExit, "路径终点 (15,15)");
+	// Decor count
+	var decorCount = 0;
+	for (var gy = 0; gy < CFG.rows; gy++)
+		for (var gx = 0; gx < CFG.cols; gx++)
+			if (mapGrid[gy][gx].decor) decorCount++;
+	assert(decorCount > 0, "环境装饰 " + decorCount + " 个");
+	console.log("[INFO] 游戏初始化完成");
+})();
+</script>
+</body>
+</html>
