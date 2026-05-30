@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>合成</title></head>
+<body style="margin:0;background:#111;color:#fff;font-family:monospace">
+<canvas id="c" style="image-rendering:pixelated;max-width:100%"></canvas>
+<pre id="log"></pre>
+<script>
+const T = 16;
+const PLAYER_COL = 32, PLAYER_ROW = 13;
+
+function log(s) { document.getElementById('log').textContent += s + '\n'; }
+
+// 加载 1-bit-pack（从游戏中提取的base64）
+async function load1bit() {
+  const r = await fetch('/tests/割草.html');
+  const html = await r.text();
+  const m = html.match(/id="spr"\s+src="([^"]+)"/);
+  if (!m) throw '找不到spr img';
+  const src = m[1];
+  const img = new Image();
+  return new Promise(resolve => {
+    img.onload = () => resolve(img);
+    img.src = src;
+  });
+}
+
+// 加载 tiny-dungeon tile
+function loadTD(col, row) {
+  const idx = row * 12 + col;
+  const img = new Image();
+  return new Promise(resolve => {
+    img.onload = () => resolve(img);
+    img.src = '/sprites/tiny-dungeon/Tiles/tile_' + String(idx).padStart(4,'0') + '.png';
+  });
+}
+
+(async () => {
+  log('加载 1-bit-pack...');
+  const spr = await load1bit();
+  log('OK: ' + spr.naturalWidth + 'x' + spr.naturalHeight);
+
+  // 随机选一个 tiny-dungeon 人物 tile（行7~9，但row9只到col4）
+  const maxRow = 9, maxColAt9 = 4;
+  const allTiles = [];
+  for (let r = 7; r <= 9; r++) {
+    const maxC = r === 9 ? maxColAt9 : 11;
+    for (let c = 0; c <= maxC; c++) allTiles.push({ col: c, row: r });
+  }
+  const pick = allTiles[Math.floor(Math.random() * allTiles.length)];
+  log('随机选中 tiny-dungeon [' + pick.col + ',' + pick.row + '] idx=' + (pick.row*12+pick.col));
+
+  log('加载 tiny-dungeon tile...');
+  const td = await loadTD(pick.col, pick.row);
+  log('OK');
+
+  // 合成
+  const canvas = document.getElementById('c');
+  canvas.width = spr.naturalWidth;
+  canvas.height = spr.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  // 先画原图
+  ctx.drawImage(spr, 0, 0);
+  // 覆盖玩家位置
+  const sx = PLAYER_COL * T, sy = PLAYER_ROW * T;
+  ctx.clearRect(sx, sy, T, T);
+  ctx.drawImage(td, sx, sy, T, T);
+
+  log('合成完成！玩家位置: [' + PLAYER_COL + ',' + PLAYER_ROW + ']');
+  log('新精灵表 base64 已生成（见下方输出框）');
+
+  // 输出 base64
+  const b64 = canvas.toDataURL('image/png');
+  const out = document.createElement('textarea');
+  out.style.cssText = 'width:100%;height:200px;margin:10px 0;background:#222;color:#0f0;font-size:11px';
+  out.value = b64;
+  document.body.appendChild(out);
+
+  const btn = document.createElement('button');
+  btn.textContent = '复制 base64';
+  btn.style.cssText = 'display:block;margin:10px;padding:10px 20px;font-size:16px';
+  btn.onclick = () => { navigator.clipboard.writeText(b64); btn.textContent = '已复制!'; };
+  document.body.appendChild(btn);
+
+  log('DONE - 坐标: [' + pick.col + ',' + pick.row + ']');
+})();
+</script>
+</body></html>

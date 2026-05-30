@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tiny Dungeon - 精灵表浏览器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #eee; font-family: monospace; padding: 20px; }
+h1 { text-align: center; margin-bottom: 10px; color: #e94560; }
+.info { text-align: center; margin-bottom: 20px; color: #aaa; font-size: 14px; }
+.controls { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+.controls button { padding: 8px 16px; border: 1px solid #e94560; background: transparent; color: #e94560; cursor: pointer; border-radius: 4px; font-size: 14px; }
+.controls button:hover { background: #e94560; color: #fff; }
+.controls button.active { background: #e94560; color: #fff; }
+#container { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+canvas { border: 1px solid #333; image-rendering: pixelated; }
+#fullsheet { max-width: 100%; }
+#info-panel { width: 300px; padding: 15px; background: #16213e; border-radius: 8px; }
+#info-panel h3 { color: #e94560; margin-bottom: 10px; }
+#info-panel .tile-preview { width: 64px; height: 64px; image-rendering: pixelated; border: 1px solid #333; margin: 10px 0; }
+#info-panel p { margin: 5px 0; color: #ccc; font-size: 13px; }
+.grid-overlay { position: relative; display: inline-block; }
+.legend { display: flex; gap: 15px; justify-content: center; margin: 15px 0; flex-wrap: wrap; }
+.legend span { padding: 3px 10px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Tiny Dungeon - 精灵表 (12×11 = 132 tiles, 16×16px)</h1>
+<div class="info">点击精灵表上的格子查看详细信息 | 索引 = row * 12 + col</div>
+
+<div class="controls">
+  <button id="btn-packed" class="active">Packed (无间隙)</button>
+  <button id="btn-gap">带间隙 (1px)</button>
+  <button id="btn-4x">4x 缩放</button>
+</div>
+
+<div class="legend">
+  <span style="background:#e94560">红框=当前选中</span>
+  <span style="background:#0f3460">蓝色=已浏览</span>
+</div>
+
+<div id="container">
+  <div style="text-align:center">
+    <canvas id="fullsheet"></canvas>
+    <p style="margin-top:8px;color:#aaa;font-size:12px" id="coord-hint">点击画布查看坐标</p>
+  </div>
+  <div id="info-panel">
+    <h3>选中精灵信息</h3>
+    <canvas id="tile-preview" class="tile-preview" width="64" height="64"></canvas>
+    <p><b>索引:</b> <span id="info-index">-</span></p>
+    <p><b>坐标:</b> [<span id="info-col">-</span>, <span id="info-row">-</span>]</p>
+    <p><b>ST 格式:</b> <span id="info-st" style="color:#0f0">-</span></p>
+    <p><b>{col}*16, {row}*16:</b> <span id="info-px" style="color:#ff0">-</span></p>
+    <p style="margin-top:10px;color:#aaa;font-size:12px">ST 坐标 = col + row * COLS<br>物理坐标 = col*TILE, row*TILE</p>
+    <p style="margin-top:10px;color:#aaa;font-size:12px">(Packed: sx=col*16, sy=row*16)<br>(Gap: sx=1+col*17, sy=1+row*17)</p>
+  </div>
+</div>
+
+<script>
+const TILE = 16, COLS = 12, ROWS = 11, TOTAL = 132;
+
+const imgPacked = new Image();
+imgPacked.src = 'Tilemap/tilemap_packed.png';
+const imgGap = new Image();
+imgGap.src = 'Tilemap/tilemap.png';
+
+let currentImg = null;
+let usePacked = true;
+let scale = 1;
+let selectedIdx = -1;
+
+const canvas = document.getElementById('fullsheet');
+const ctx = canvas.getContext('2d');
+const previewCanvas = document.getElementById('tile-preview');
+const previewCtx = previewCanvas.getContext('2d');
+
+function drawSheet() {
+  if (!currentImg) return;
+  const W = currentImg.naturalWidth, H = currentImg.naturalHeight;
+  canvas.width = W * scale;
+  canvas.height = H * scale;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(currentImg, 0, 0, W * scale, H * scale);
+
+  if (selectedIdx >= 0) {
+    const col = selectedIdx % COLS;
+    const row = Math.floor(selectedIdx / COLS);
+    let sx, sy;
+    if (usePacked) { sx = col * TILE; sy = row * TILE; }
+    else { sx = 1 + col * (TILE + 1); sy = 1 + row * (TILE + 1); }
+    ctx.strokeStyle = '#e94560';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx * scale, sy * scale, TILE * scale, TILE * scale);
+  }
+}
+
+function showPreview(idx) {
+  selectedIdx = idx;
+  const col = idx % COLS;
+  const row = Math.floor(idx / COLS);
+  let sx, sy;
+  if (usePacked) { sx = col * TILE; sy = row * TILE; }
+  else { sx = 1 + col * (TILE + 1); sy = 1 + row * (TILE + 1); }
+
+  previewCtx.clearRect(0, 0, 64, 64);
+  previewCtx.imageSmoothingEnabled = false;
+  previewCtx.drawImage(currentImg, sx, sy, TILE, TILE, 0, 0, 64, 64);
+
+  document.getElementById('info-index').textContent = idx;
+  document.getElementById('info-col').textContent = col;
+  document.getElementById('info-row').textContent = row;
+  document.getElementById('info-st').textContent = `[${col}, ${row}]`;
+  document.getElementById('info-px').textContent = `${col * TILE}, ${row * TILE}`;
+
+  drawSheet();
+}
+
+canvas.addEventListener('click', (e) => {
+  if (!currentImg) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / scale;
+  const my = (e.clientY - rect.top) / scale;
+
+  let col, row;
+  if (usePacked) { col = Math.floor(mx / TILE); row = Math.floor(my / TILE); }
+  else { col = Math.floor((mx - 1) / (TILE + 1)); row = Math.floor((my - 1) / (TILE + 1)); }
+
+  if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+    const idx = row * COLS + col;
+    showPreview(idx);
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!currentImg) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / scale;
+  const my = (e.clientY - rect.top) / scale;
+  let col, row;
+  if (usePacked) { col = Math.floor(mx / TILE); row = Math.floor(my / TILE); }
+  else { col = Math.floor((mx - 1) / (TILE + 1)); row = Math.floor((my - 1) / (TILE + 1)); }
+  if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+    document.getElementById('coord-hint').textContent = `[${col}, ${row}] | 索引=${row * COLS + col}`;
+  } else {
+    document.getElementById('coord-hint').textContent = '点击画布查看坐标';
+  }
+});
+
+function loadImage(img) {
+  currentImg = img;
+  if (img.complete) drawSheet();
+  else img.onload = drawSheet;
+}
+
+document.getElementById('btn-packed').addEventListener('click', () => {
+  usePacked = true;
+  document.getElementById('btn-packed').classList.add('active');
+  document.getElementById('btn-gap').classList.remove('active');
+  loadImage(imgPacked);
+});
+
+document.getElementById('btn-gap').addEventListener('click', () => {
+  usePacked = false;
+  document.getElementById('btn-gap').classList.add('active');
+  document.getElementById('btn-packed').classList.remove('active');
+  loadImage(imgGap);
+});
+
+document.getElementById('btn-4x').addEventListener('click', () => {
+  scale = scale === 1 ? 4 : 1;
+  document.getElementById('btn-4x').textContent = scale === 4 ? '1x 缩放' : '4x 缩放';
+  document.getElementById('btn-4x').classList.toggle('active');
+  drawSheet();
+});
+
+// 初始加载
+loadImage(imgPacked);
+</script>
+</body>
+</html>
