@@ -83,7 +83,7 @@ function sfxStar(){playTone(990,0.08,'sine',0.08);for(let i=0;i<3;i++)setTimeout
 let sheets={},si=0,spd=1;
 let cv=document.getElementById('c'),cx=cv.getContext('2d');
 let sn=[],food={},items=[],dir={},nd={},go=false,mt=null,sc=0,hs=parseInt(localStorage.getItem('snakeHS')||'0'),loadOK=false,TS=32;
-let effects={},effectTimers={},npcList=[],level=1,phase=1,mode='classic',cLvl=0,campData=JSON.parse(localStorage.getItem('snakeCamp')||'{"stars":[],"scores":[],"unlock":0}');
+let effects={},effectTimers={},npcList=[],level=1,phase=1,mode='classic',cLvl=0,campData=JSON.parse(localStorage.getItem('snakeCamp')||'{"stars":[],"scores":[],"unlock":0}'),npcRespawnTimer=0,npcMoveTick=1;
 
 // ===== HELPERS =====
 function rs(){TS=Math.max(16,Math.min(48,cv.clientWidth/25|0));cv.width=cv.clientWidth-cv.clientWidth%TS;cv.height=cv.clientHeight-cv.clientHeight%TS;}
@@ -131,7 +131,9 @@ function applyItem(type){
 function spawnNPC(type,x,y){
 	let body=[],len=4+Math.random()*3|0;
 	for(let i=len-1;i>=0;i--)body.push({x:x+i,y:y});
-	return {body,dir:{x:1,y:0},type,alive:true,grow:0,cooldown:0};
+	let avail=SKINS.map((_,i)=>i).filter(i=>i!==si);
+	let skinIdx=avail.length>0?avail[Math.random()*avail.length|0]:0;
+	return {body,dir:{x:1,y:0},type,alive:true,grow:0,cooldown:0,skinIdx};
 }
 
 function initNPCs(count,mx,my){
@@ -233,24 +235,16 @@ function checkNPCsCollision(mx,my){
 	for(let npc of npcList){
 		if(!npc.alive)continue;
 		let head=npc.body[0];
-		// NPC head vs player body
-		if(sn.slice(1).some(s=>s.x===head.x&&s.y===head.y)){
-			if(effects.star){
-				npc.alive=false;sc+=20;sfxKill();
-				document.getElementById('sc').textContent=sc;
-			}else{go=true;sfxDie();return true;}
-		}
-		// Player head vs NPC body
 		let ph=sn[0];
-		if(npc.body.some(s=>s.x===ph.x&&s.y===ph.y&&s!==head)){
-			if(effects.star){
-				// Already killing above
-			}else{go=true;sfxDie();return true;}
-		}
-		// Player head vs NPC head
-		if(ph.x===head.x&&ph.y===head.y){
+		let hit=false;
+		if(sn.slice(1).some(s=>s.x===head.x&&s.y===head.y))hit=true;
+		if(!hit&&npc.body.some(s=>s.x===ph.x&&s.y===ph.y&&s!==head))hit=true;
+		if(!hit&&ph.x===head.x&&ph.y===head.y)hit=true;
+		if(hit){
 			if(sn.length>npc.body.length||effects.star){
-				npc.alive=false;sc+=30;sfxKill();
+				npc.alive=false;
+				sc+=20+Math.min(30,npc.body.length*2);
+				sfxKill();
 				document.getElementById('sc').textContent=sc;
 			}else{go=true;sfxDie();return true;}
 		}
@@ -259,8 +253,27 @@ function checkNPCsCollision(mx,my){
 }
 
 function updateNPCs(){
+	
+	// Auto-respawn NPCs in classic mode when count is low
+	// Must come BEFORE early-return check for empty list
+	if(mode==='classic'&&!go){
+		let alive=npcList.filter(n=>n.alive).length;
+		if(alive<2&&sc>=10){
+			npcRespawnTimer++;
+			if(npcRespawnTimer>40){npcRespawnTimer=0;initNPCs(1,cv.width/TS|0,cv.height/TS|0);}
+		}else npcRespawnTimer=0;
+	}
 	if(go||npcList.length===0)return;
 	let mx=cv.width/TS|0,my=cv.height/TS|0;
+
+	// Slow NPC movement: move every 2 ticks
+	npcMoveTick=1-npcMoveTick;
+	if(npcMoveTick===0){
+		// Still check collisions and cleanup on non-move ticks
+		checkNPCsCollision(mx,my);
+		npcList=npcList.filter(n=>n.alive);
+		return;
+	}
 
 	for(let npc of npcList){
 		if(!npc.alive)continue;
@@ -292,47 +305,75 @@ function updateNPCs(){
 	checkNPCsCollision(mx,my);
 
 	// Remove dead NPCs after delay (keep bodies as obstacles)
-	npcList=npcList.filter(n=>n.alive||n.body.length>0);
+	npcList=npcList.filter(n=>n.alive);
+		
 }
-
 function drawNPCs(){
 	if(npcList.length===0)return;
 	let mx=cv.width/TS|0,my=cv.height/TS|0;
-
 	for(let npc of npcList){
 		if(!npc.alive){
-			// Dead NPC fading
 			if(npc.body.length===0)continue;
 			cx.globalAlpha=0.3;
 		}
+		let ns=npc.skinIdx;
 		let col=npc.type==='forager'?'#ffcc00':npc.type==='hunter'?'#ff4444':'#44dd88';
 		npc.body.forEach((seg,i)=>{
-			if(i===0){
-				// Head - brighter with glow
-				cx.shadowColor=col;cx.shadowBlur=TS;
-				cx.fillStyle=col;
-				cx.fillRect(seg.x*TS+1,seg.y*TS+1,TS-2,TS-2);
-				cx.shadowBlur=0;
-				// Eyes
-				cx.fillStyle='#fff';
-				let ed=TS/6;
-				cx.beginPath();cx.arc(seg.x*TS+TS/2-ed,seg.y*TS+TS/2-2,3,0,Math.PI*2);cx.fill();
-				cx.beginPath();cx.arc(seg.x*TS+TS/2+ed,seg.y*TS+TS/2-2,3,0,Math.PI*2);cx.fill();
-			}else{
-				// Body - slightly darker
-				cx.fillStyle=i===npc.body.length-1?col+'88':col+'cc';
-				cx.fillRect(seg.x*TS+1,seg.y*TS+1,TS-2,TS-2);
+			let d={};
+			if(i===0)d={...npc.dir};
+			else{
+				d.x=seg.x-npc.body[i-1].x;d.y=seg.y-npc.body[i-1].y;
+				if(d.x>mx/2)d.x-=mx;if(d.x<-mx/2)d.x+=mx;
+				if(d.y>my/2)d.y-=my;if(d.y<-my/2)d.y+=my;
 			}
+			let f=i===0?H:i===npc.body.length-1?T:B;
+			let turnF=-1;
+			if(i>0&&i<npc.body.length-1){
+				let nx=npc.body[i+1].x-seg.x,ny=npc.body[i+1].y-seg.y;
+				if(nx>mx/2)nx-=mx;if(nx<-mx/2)nx+=mx;
+				if(ny>my/2)ny-=my;if(ny<-my/2)ny+=my;
+				if(d.x!==nx||d.y!==ny){
+					let ex=(-nx)+','+(-ny)+','+(-d.x)+','+(-d.y);
+					let map={'1,0,0,1':6,'0,1,-1,0':10,'-1,0,0,-1':4,'0,-1,1,0':11,'0,1,1,0':4,'-1,0,0,1':11,'1,0,0,-1':10,'0,-1,-1,0':6};
+					turnF=map[ex]||B;
+					if(ns===1&&(ex==='0,-1,1,0'||ex==='-1,0,0,1'))turnF=0;
+				}
+			}
+			cx.save();cx.translate(seg.x*TS+TS/2,seg.y*TS+TS/2);
+			let a=0;
+			if(i===0){
+				if(d.x===1)a=0;else if(d.x===-1)a=Math.PI;else if(d.y===1)a=Math.PI/2;else a=-Math.PI/2;
+			}else if(i===npc.body.length-1){
+				let p=npc.body[i-1];
+				if(p.x<seg.x)a=Math.PI;else if(p.x>seg.x)a=0;else if(p.y<seg.y)a=-Math.PI/2;else a=Math.PI/2;
+			}else if(turnF>=0){
+				a=0;
+			}else{
+				if(d.x===1)a=0;else if(d.x===-1)a=Math.PI;else if(d.y===1)a=Math.PI/2;else a=-Math.PI/2;
+			}
+			cx.rotate(a);
+			if(turnF>=0)df(turnF,-TS/2,-TS/2,TS,ns);
+			else df(f,-TS/2,-TS/2,TS,ns);
+			cx.restore();
 		});
 		cx.globalAlpha=1;
-		// Type indicator on first body segment
-		if(npc.alive&&npc.body.length>1){
-			let seg=npc.body[1];
-			cx.fillStyle='#fff';cx.font='8px sans-serif';cx.textAlign='center';cx.textBaseline='middle';
-			cx.fillText(npc.type==='forager'?'觅':npc.type==='hunter'?'猎':'巡',seg.x*TS+TS/2,seg.y*TS+TS/2);
+		if(npc.alive&&npc.body.length>0){
+			let seg=npc.body[0];
+			let lbl=npc.type==='forager'?'觅':npc.type==='hunter'?'猎':'巡';
+			let fs=Math.ceil(TS*0.5);
+			cx.font='bold '+fs+'px sans-serif';
+			cx.textAlign='center';cx.textBaseline='bottom';
+			let tw=cx.measureText(lbl).width;
+			cx.fillStyle='rgba(0,0,0,0.55)';
+			cx.fillRect(seg.x*TS+TS/2-tw/2-4,seg.y*TS-TS/2+3-fs-2,tw+8,fs+5);
+			cx.fillStyle='#fff';
+			cx.shadowColor='#000';cx.shadowBlur=6;
+			cx.fillText(lbl,seg.x*TS+TS/2,seg.y*TS-TS/2+3);
+			cx.shadowBlur=0;
 		}
 	}
 }
+
 
 // ===== GAME =====
 function ig(lvl,m){
@@ -358,6 +399,7 @@ function ig(lvl,m){
 		document.querySelectorAll('#spdBtns button').forEach(b=>b.className='');
 		mt=setInterval(tk,150/cfg.spd);
 	}else{
+		initNPCs(3,cv.width/TS|0,cv.height/TS|0);
 		spd=1;
 		document.querySelectorAll('#spdBtns button').forEach((b,i)=>b.className=i===0?'on':'');
 		mt=setInterval(tk,150/spd);
@@ -376,7 +418,7 @@ function tk(){
 	sn.unshift({x:nx,y:ny});
 
 	// Food check
-	if(nx===food.x&&ny===food.y){sc+=10;document.getElementById('sc').textContent=sc;sfxEat();sf();if(sc>hs){hs=sc;localStorage.setItem('snakeHS',String(hs));}}
+	if(nx===food.x&&ny===food.y){sc+=10;document.getElementById('sc').textContent=sc;sfxEat();sf();if(sc>hs){hs=sc;localStorage.setItem('snakeHS',String(hs));}if(mode==='classic'&&npcList.length<8&&sc%50===0&&sc>0){initNPCs(1,cv.width/TS|0,cv.height/TS|0);}}
 	else sn.pop();
 
 	// Item check
@@ -400,7 +442,7 @@ function tk(){
 }
 
 // ===== RENDER =====
-function df(f,dx,dy,s){let sheet=sheets[SKINS[si]];if(!sheet)return;cx.drawImage(sheet,(f%4)*32,(f/4|0)*32,32,32,dx,dy,s||TS,s||TS);}
+function df(f,dx,dy,s,sk){let sheet=sheets[SKINS[sk!==void 0?sk:si]];if(!sheet)return;cx.drawImage(sheet,(f%4)*32,(f/4|0)*32,32,32,dx,dy,s||TS,s||TS);}
 
 function rd(){
 	rs();let mx=cv.width/TS|0,my=cv.height/TS|0;
@@ -444,7 +486,7 @@ function rd(){
 				if(nx>mx2/2)nx-=mx2;if(nx<-mx2/2)nx+=mx2;if(ny>my2/2)ny-=my2;if(ny<-my2/2)ny+=my2;
 				if(d.x!==nx||d.y!==ny){
 					let ex=(-nx)+','+(-ny)+','+(-d.x)+','+(-d.y);
-					turnF={'1,0,0,1':6,'0,1,-1,0':10,'-1,0,0,-1':4,'0,-1,1,0':11,'0,1,1,0':4,'-1,0,0,1':11,'1,0,0,-1':10,'0,-1,-1,0':6}[ex]||B;
+					turnF={'1,0,0,1':6,'0,1,-1,0':10,'-1,0,0,-1':4,'0,-1,1,0':11,'0,1,1,0':4,'-1,0,0,1':11,'1,0,0,-1':10,'0,-1,-1,0':6}[ex]||B;if(si===1&&(ex==='0,-1,1,0'||ex==='-1,0,0,1'))turnF=0;
 				}
 			}
 			let f=i===0?H:i===sn.length-1?T:(turnF>=0?turnF:B);cx.save();cx.translate(seg.x*TS+TS/2,seg.y*TS+TS/2);let a=0;
