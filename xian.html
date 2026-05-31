@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>文字修仙</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a12;font-family:"Noto Serif SC","STKaiti","KaiTi","楷体",serif}
+#game-container{position:relative;width:100%;height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column}
+#bgCanvas{position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
+
+/* Top status bar */
+#status-bar{position:relative;z-index:1;padding:8px 12px;background:linear-gradient(180deg,rgba(10,10,20,0.95),rgba(10,10,20,0.85));border-bottom:1px solid rgba(212,175,55,0.3);flex-shrink:0}
+#status-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+#realm-display{color:#d4af37;font-size:15px;font-weight:bold;text-shadow:0 0 8px rgba(212,175,55,0.4)}
+#age-display{color:#a0a0b0;font-size:13px}
+#status-details{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:12px;color:#b0b0c0}
+#status-details span{white-space:nowrap}
+.stat-value{color:#d4af37}
+.stat-danger{color:#e05050}
+.highlight-gold{color:#ffd700}
+
+/* Cultivation bar */
+#cultivation-bar-wrap{position:relative;z-index:1;height:6px;background:rgba(255,255,255,0.1);margin:4px 12px 2px;border-radius:3px;overflow:hidden;flex-shrink:0}
+#cultivation-bar-fill{height:100%;background:linear-gradient(90deg,#4a90d9,#7ec8e3,#d4af37);border-radius:3px;transition:width 0.3s}
+#cultivation-bar-label{position:absolute;top:-14px;right:0;font-size:10px;color:#888;pointer-events:none}
+
+/* Text output area */
+#output-wrap{position:relative;z-index:1;flex:1;overflow:hidden;margin:4px 8px;border-radius:6px;background:rgba(0,0,0,0.6);border:1px solid rgba(212,175,55,0.15)}
+#output-scroll{height:100%;overflow-y:auto;padding:12px 14px;scroll-behavior:smooth}
+#output-scroll::-webkit-scrollbar{width:4px}
+#output-scroll::-webkit-scrollbar-thumb{background:rgba(212,175,55,0.3);border-radius:2px}
+#output-scroll::-webkit-scrollbar-track{background:transparent}
+.text-line{color:#c8c8d0;font-size:14px;line-height:1.8;margin-bottom:4px;opacity:0;animation:fadeIn 0.3s forwards}
+.text-line:last-child{margin-bottom:0}
+.text-line .highlight{color:#ffd700}
+.text-line .danger{color:#e05050}
+.text-line .success{color:#50e080}
+.text-line .info{color:#70b0ff}
+.text-line .title{color:#d4af37;font-size:16px;font-weight:bold}
+.text-line .subtitle{color:#b09060;font-size:13px}
+@keyframes fadeIn{to{opacity:1}}
+
+/* Action buttons */
+#action-bar{position:relative;z-index:1;padding:8px;background:linear-gradient(0deg,rgba(10,10,20,0.95),rgba(10,10,20,0.85));border-top:1px solid rgba(212,175,55,0.2);flex-shrink:0}
+#action-buttons{display:flex;flex-wrap:wrap;gap:6px}
+.action-btn{flex:1;min-width:60px;padding:10px 4px;border:1px solid rgba(212,175,55,0.4);border-radius:6px;background:linear-gradient(135deg,rgba(30,25,40,0.9),rgba(50,40,60,0.9));color:#d4af37;font-size:13px;font-family:inherit;cursor:pointer;transition:all 0.2s;text-align:center}
+.action-btn:active{transform:scale(0.95);background:rgba(212,175,55,0.2)}
+.action-btn:disabled{opacity:0.3;cursor:not-allowed;transform:none}
+.action-btn .sub{display:block;font-size:10px;color:#888;margin-top:2px}
+#choice-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.choice-btn{flex:1;min-width:80px;padding:10px 6px;border:1px solid rgba(100,180,255,0.4);border-radius:6px;background:linear-gradient(135deg,rgba(20,30,50,0.9),rgba(30,50,80,0.9));color:#70b0ff;font-size:13px;font-family:inherit;cursor:pointer;transition:all 0.2s;text-align:center}
+.choice-btn:active{transform:scale(0.95);background:rgba(70,130,255,0.2)}
+.choice-btn .sub{display:block;font-size:10px;color:#888;margin-top:2px}
+
+/* Event choice overlay */
+#event-overlay{position:absolute;z-index:10;bottom:0;left:0;right:0;padding:12px;background:linear-gradient(0deg,rgba(0,0,0,0.95),rgba(0,0,0,0.85));border-top:2px solid rgba(212,175,55,0.4);display:none}
+
+/* Responsive */
+@media(max-width:400px){
+  .action-btn{font-size:12px;padding:8px 2px;min-width:50px}
+  .choice-btn{font-size:12px;padding:8px 4px;min-width:70px}
+  #status-details{font-size:11px;gap:2px 6px}
+  #realm-display{font-size:14px}
+}
+</style>
+</head>
+<body>
+
+<div id="game-container">
+  <canvas id="bgCanvas"></canvas>
+
+  <div id="status-bar">
+    <div id="status-top">
+      <span id="realm-display">凡人</span>
+      <span id="age-display">年龄：15岁 | 寿命：<span id="lifespan-display">60</span>/<span id="maxlifespan-display">60</span></span>
+    </div>
+    <div id="status-details">
+      <span>修为：<span class="stat-value" id="cultivation-display">0</span></span>
+      <span>灵石：<span class="stat-value" id="spiritstone-display">0</span></span>
+      <span>灵草：<span class="stat-value" id="herb-display">0</span></span>
+      <span>状态：<span class="stat-value" id="status-effect-display">健康</span></span>
+      <span>年份：<span class="stat-value" id="year-display">庆元十七年</span></span>
+    </div>
+  </div>
+
+  <div id="cultivation-bar-wrap">
+    <div id="cultivation-bar-fill" style="width:0%"></div>
+  </div>
+
+  <div id="output-wrap">
+    <div id="output-scroll"></div>
+  </div>
+
+  <div id="action-bar">
+    <div id="action-buttons"></div>
+    <div id="choice-buttons"></div>
+  </div>
+
+  <div id="event-overlay"></div>
+</div>
+
+<script>
+// ============================================================
+// DATA: Realms
+// ============================================================
+const REALMS = [
+  { id:'mortal', name:'凡人', index:0, baseLifespan:60, cultivationReq:0, atkBonus:0, defBonus:0, qiBonus:0, tribulation:false },
+  { id:'qi1', name:'练气一层', index:1, baseLifespan:60, cultivationReq:100, atkBonus:2, defBonus:1, qiBonus:1, tribulation:false, breakthroughText:'你盘膝坐在山崖边，引导那一缕微弱的气感在经脉中游走。一个周天，两个周天……到第七个周天时，你忽然感到丹田微微一热——一股气流自行旋转起来，化作一团云雾般的气旋。你睁眼，整个世界都不同了。你能看见风中流动的灵气，如萤火虫般飘散在空气中。' },
+  { id:'qi2', name:'练气二层', index:2, baseLifespan:60, cultivationReq:300, atkBonus:4, defBonus:2, qiBonus:2, tribulation:false },
+  { id:'qi3', name:'练气三层', index:3, baseLifespan:60, cultivationReq:600, atkBonus:6, defBonus:3, qiBonus:3, tribulation:false },
+  { id:'qi4', name:'练气四层', index:4, baseLifespan:60, cultivationReq:1000, atkBonus:8, defBonus:4, qiBonus:4, tribulation:false, pill:'培元丹' },
+  { id:'qi5', name:'练气五层', index:5, baseLifespan:60, cultivationReq:1500, atkBonus:10, defBonus:5, qiBonus:5, tribulation:false },
+  { id:'qi6', name:'练气六层', index:6, baseLifespan:60, cultivationReq:2100, atkBonus:12, defBonus:6, qiBonus:6, tribulation:false, pill:'聚气丹' },
+  { id:'qi7', name:'练气七层', index:7, baseLifespan:65, cultivationReq:2800, atkBonus:14, defBonus:7, qiBonus:7, tribulation:false },
+  { id:'qi8', name:'练气八层', index:8, baseLifespan:65, cultivationReq:3600, atkBonus:16, defBonus:8, qiBonus:8, tribulation:false, pill:'凝气丹' },
+  { id:'qi9', name:'练气九层', index:9, baseLifespan:65, cultivationReq:4500, atkBonus:18, defBonus:9, qiBonus:9, tribulation:false },
+  { id:'foundation', name:'筑基', index:10, baseLifespan:110, cultivationReq:6000, atkBonus:30, defBonus:20, qiBonus:15, tribulation:true, pill:'筑基丹', breakthroughText:'你服下筑基丹，药力如岩浆般涌入四肢百骸。丹田中的气旋开始剧烈旋转，越缩越小，越来越密实。剧烈的痛楚从丹田传遍全身——经脉在一寸寸撕裂，又在药力下重新愈合。三天三夜过去了。当你再次睁眼时，丹田中的气旋已化作一滴液态的灵气，晶莹剔透，缓缓旋转。筑基成。从此，御剑乘风，不再是梦。' },
+  { id:'goldenCore', name:'金丹', index:11, baseLifespan:310, cultivationReq:15000, atkBonus:60, defBonus:40, qiBonus:25, tribulation:true, pill:'金丹玉液', breakthroughText:'你盘坐于闭关密室之中，面前悬浮着一瓶金丹玉液。你饮下玉液，磅礴的灵力在体内炸开。你引导所有灵力涌向丹田，疯狂压缩。一个月过去了。两个月过去了。在第三个月的某个深夜，你的丹田中忽然亮起一道金光——一枚龙眼大小的金色丹丸，悬浮在丹田正中，缓缓自转。丹成，金丹。方圆十里内的灵气都因你而震颤。' },
+  { id:'nascentSoul', name:'元婴', index:12, baseLifespan:810, cultivationReq:50000, atkBonus:100, defBonus:80, qiBonus:35, tribulation:true, pill:'婴变丹', breakthroughText:'金丹在丹田中已运转了无数个周天，表面出现了细微的裂纹。你服下婴变丹，将全部神识沉入金丹之中。某一刻，金丹碎了。碎裂的金丹中，端坐着一个小小的、和你一模一样的婴儿。元婴睁开了眼睛，你的神识在这一刻暴涨了十倍。方圆百里的风吹草动，尽在你的感知之中。你终于明白——何为"超凡入圣"。' },
+  { id:'divineTransform', name:'化神', index:13, baseLifespan:1810, cultivationReq:150000, atkBonus:300, defBonus:200, qiBonus:50, tribulation:true, pill:'化神仙丹', breakthroughText:'你站在云端之上，俯瞰众生。百年修炼，弹指一挥间。你将元婴散入四肢百骸，让每一滴鲜血、每一寸骨骼都染上神性。化神——意味着"化凡为神"。你的身体开始发光。不是金光，是一种温润如玉的、属于人的光芒。化神，成。' },
+  { id:'ascension', name:'飞升', index:14, baseLifespan:99999, cultivationReq:999999, atkBonus:999, defBonus:999, qiBonus:100, tribulation:false }
+];
+
+// ============================================================
+// DATA: Pills / Recipes
+// ============================================================
+const PILLS = {
+  '培元丹':{ herbs:2, cultivation:100, baseRate:0.7, desc:'增进修为' },
+  '聚气丹':{ herbs:3, cultivation:250, baseRate:0.6, desc:'增进修为' },
+  '凝气丹':{ herbs:3, requires:'聚气丹', cultivation:500, baseRate:0.5, desc:'大幅增进修为' },
+  '筑基丹':{ herbs:5, requires:'凝气丹', special:'筑基花', cultivation:0, baseRate:0.4, desc:'突破筑基必需' },
+  '金丹玉液':{ herbs:8, requires:'凝气丹', requiresCount:3, special:'金丹果', cultivation:0, baseRate:0.3, desc:'突破金丹必需' },
+  '婴变丹':{ herbs:12, requires:'金丹玉液', special:'万年灵芝', cultivation:0, baseRate:0.2, desc:'突破元婴必需' },
+  '化神仙丹':{ herbs:20, requires:'婴变丹', special:'虚空之核', cultivation:0, baseRate:0.1, desc:'突破化神必需' },
+  '疗伤丹':{ herbs:1, cultivation:0, baseRate:0.8, desc:'恢复伤势' }
+};
+
+// ============================================================
+// DATA: Events
+// ============================================================
+const EVENTS = [
+  {
+    id:'mysterious_merchant', name:'神秘商贩', weight:8,
+    condition:()=>true,
+    text:'一个黑衣老头忽然出现在你面前，咧嘴一笑，露出一口黄牙。"小友，老夫这里有件好东西，保你满意。"',
+    choices:[
+      { text:'买下（灵石-200）', effect:p=>{ if(p.spiritStone>=200){ p.spiritStone-=200; let r=Math.random(); if(r<0.3){ p.pills.push('培元丹'); addText('获得【培元丹】×3','success') } else if(r<0.6){ addText('是一块废铁……上当了。','danger') } else { p.cultivation+=200; addText('获得一块灵玉，修为+200','success') } } else { addText('灵石不够，老头嗤笑一声消失了。','danger') } }},
+      { text:'先看看再说', effect:p=>{ if(p.spiritStone>=150){ p.spiritStone-=150; p.qiAffinity+=1; addText('买下一枚古玉，灵气亲和+1','success') } else { addText('灵石不够。','danger') } }},
+      { text:'不感兴趣', effect:()=>{ addText('老头嘟囔着消失。无事发生。') } }
+    ]
+  },
+  {
+    id:'beast_attack', name:'妖兽攻城', weight:5,
+    condition:()=>P().realmIndex>=3,
+    text:'远方传来兽吼和惨叫——大量妖兽正在围攻附近的村庄！你犹豫了一瞬：救，还是不救？',
+    choices:[
+      { text:'前往救援', effect:p=>{ let win=combatCheck(p,80); if(win){ p.spiritStone+=150; p.qiAffinity+=1; addText('你击退妖兽群，村民感激涕零。获得灵石150，灵气亲和+1','success') } else { p.status='重伤'; addText('你被妖兽重伤，侥幸逃回。状态变为【重伤】','danger') } }},
+      { text:'趁乱搜刮', effect:p=>{ p.spiritStone+=100; p.herb+=2; p.xinMo+=10; addText('你在无人的房屋中翻找，获得灵石100、灵草×2。但事后被村民指责，心魔+10','danger') }},
+      { text:'袖手旁观', effect:p=>{ p.xinMo+=20; addText('村庄被毁，幸存者流离失所。心魔+20','danger') }}
+    ]
+  },
+  {
+    id:'hot_spring', name:'灵泉沐浴', weight:4,
+    condition:()=>true,
+    text:'你在山林深处发现一泓冒着热气的灵泉，泉水泛着淡蓝色的荧光。四周无人，也没有妖兽的气息。',
+    choices:[
+      { text:'沐浴修炼', effect:p=>{ if(!p.usedHotSpring){ p.cultivation+=150; p.qiAffinity+=1; p.usedHotSpring=true; addText('修为+150，灵气亲和+1','success') } else { addText('灵泉对你已无效果。') } }},
+      { text:'取水带走', effect:p=>{ p.items.push('灵泉水'); addText('获得【灵泉水】×3（炼丹辅料）','success') }},
+      { text:'设阵圈占', effect:p=>{ if(p.spiritStone>=100){ p.spiritStone-=100; p.hotSpringOwned=true; addText('消耗灵石100布置阵法，此后每年可来修炼一次。','success') } else { addText('灵石不足。') } }}
+    ]
+  },
+  {
+    id:'bandit_ambush', name:'魔修突袭', weight:6,
+    condition:()=>P().realmIndex>=5,
+    text:'你在路上被三个黑衣魔修拦住了去路。"交出你的储物袋，饶你不死。"',
+    choices:[
+      { text:'应战', effect:p=>{ let win=combatCheck(p,100+p.realmIndex*10); if(win){ p.spiritStone+=300; addText('你反杀魔修，获得灵石300','success') } else { p.status='重伤'; p.spiritStone=Math.max(0,p.spiritStone-100); addText('被击败，灵石被抢走一些。状态变为【重伤】','danger') }}},
+      { text:'报出师门名号', effect:p=>{ if(p.sect){ addText('对方忌惮你的宗门，退走了。','success') } else { addText('"散修也敢唬你爷爷？"战斗不可避免。','danger'); let win=combatCheck(p,100+p.realmIndex*10); if(!win){ p.status='重伤'; p.spiritStone=Math.max(0,p.spiritStone-100) } else { p.spiritStone+=200 } }}},
+      { text:'假装投降伺机反杀', effect:p=>{ if(p.qiAffinity>30){ p.spiritStone+=250; addText('你偷袭得手，杀一人后逃走。获得灵石250。','success') } else { p.status='重伤'; addText('偷袭失败，被打成重伤。','danger') }}}
+    ]
+  },
+  {
+    id:'falling_meteor', name:'天降陨石', weight:2,
+    condition:()=>true,
+    text:'夜空中忽然划过一道流光，坠落在远处的山中，发出巨响。不少修士向坠落处赶去。',
+    choices:[
+      { text:'立刻前往', effect:p=>{ addText('你先到一步，获得【陨铁】×1（可炼器或售500灵石）','success'); p.items.push('陨铁') }},
+      { text:'观察后再去', effect:p=>{ addText('到的时候已被瓜分，只捡到碎片（售50灵石）'); p.spiritStone+=50 }},
+      { text:'不去掺和', effect:()=>{ addText('三天后听说那里发生了争夺战，死了好几个修士。你庆幸自己没去。') }}
+    ]
+  },
+  {
+    id:'old_friend_distress', name:'旧识求救', weight:3,
+    condition:()=>P().age<60,
+    text:'你收到一封染血的信——是当年青石村一起长大的玩伴写来的。"救救我！我被一个修士抓了，他说我是什么炉鼎……"',
+    choices:[
+      { text:'去救', effect:p=>{ let win=combatCheck(p,120+p.realmIndex*8); if(win){ addText('你成功救出故人。他感激不尽，每年送一次灵草。','success'); p.herb+=3 } else { p.status='重伤'; addText('不敌对手，自己也被重伤。','danger') }}},
+      { text:'报官找宗门执法', effect:p=>{ if(p.sect){ addText('宗门派人剿灭山寨，故人得救。但你心中愧疚，灵气亲和-3，心魔+15','danger'); p.qiAffinity=Math.max(0,p.qiAffinity-3); p.xinMo+=15 } else { addText('你无门无派，无处申冤……心魔+30','danger'); p.xinMo+=30 }}},
+      { text:'不理凡尘', effect:p=>{ p.xinMo+=30; addText('你选择了修仙之路。但偶尔会梦见小时候一起抓鱼的日子。心魔+30','danger') }}
+    ]
+  },
+  {
+    id:'alchemy_wonder', name:'丹道奇遇', weight:5,
+    condition:()=>true,
+    text:'你正在炼丹，丹炉忽然发出奇异的嗡鸣声。炉盖掀开，一道七彩霞光冲天而起——这一炉丹药品质远超预期！',
+    choices:[
+      { text:'查看丹药', effect:p=>{ p.pills.push('极品丹药'); addText('获得【极品丹药】×1（效果为普通版3倍）','success') }},
+      { text:'研究丹方', effect:p=>{ p.alchemyMastery+=5; addText('你记下了这次的火候和配方，炼丹成功率永久+5%','success') }}
+    ]
+  },
+  {
+    id:'xinmo_trial', name:'心魔试炼', weight:5,
+    condition:()=>P().xinMo>=30,
+    text:'你入定时，忽然发现自己站在一片血海之中。无数面孔从血海中浮起——都是你伤害过、辜负过的人。一个声音在你脑中响起："你配修仙吗？"',
+    choices:[
+      { text:'正视心魔', effect:p=>{ p.xinMo=Math.max(0,p.xinMo-20); p.qiAffinity+=1; addText('你直面过去的勇气，心魔-20，灵气亲和+1','success') }},
+      { text:'诵念清心咒', effect:p=>{ if(p.hasClearHeart){ p.xinMo=0; addText('心魔清零。','success') } else { addText('你不会清心咒……心魔加重。','danger'); p.xinMo+=10 }}},
+      { text:'以杀止念', effect:p=>{ p.xinMo=Math.max(0,p.xinMo-10); p.xinMoDebt=(p.xinMoDebt||0)+20; addText('暂时压下心魔，但下次心魔翻倍反弹。','danger') }}
+    ]
+  },
+  {
+    id:'treasure_cave', name:'洞府传承', weight:3,
+    condition:()=>true,
+    text:'你在秘境中发现了一具枯骨。骨骼晶莹如玉，显然是一位前辈修士。他身前的地上刻着字："得吾传承者，需答三问。"',
+    choices:[
+      { text:'尝试答题', effect:p=>{ let score=0; for(let i=0;i<3;i++){ if(Math.random()<0.5) score++ } if(score===3){ p.cultivation+=500; p.items.push('玄阶功法'); addText('全部答对！获得玄阶功法+前辈遗宝！','success') } else if(score>=1){ p.status='轻伤'; addText('答错'+(3-score)+'道，被禁制所伤。','danger') } else { p.status='重伤'; addText('全部答错，重伤！','danger') }}},
+      { text:'搜索遗物不答题', effect:p=>{ p.spiritStone+=100; p.status='轻伤'; addText('获得灵石100，但触发微弱禁制。','danger') }},
+      { text:'恭敬埋骨不取一物', effect:p=>{ p.buryBonus=true; addText('获得【善心】buff，未来三个月奇遇概率翻倍。','success') }}
+    ]
+  },
+  {
+    id:'spirit_beast', name:'灵兽认主', weight:2,
+    condition:()=>P().realmIndex>=5,
+    text:'你在林中发现一只受伤的小兽，通体雪白，额生独角。它看见你，呜咽了一声。',
+    choices:[
+      { text:'救治并收服', effect:p=>{ p.hasBeast=true; addText('获得灵兽伙伴！探索时额外发现宝物的概率+10%','success') }},
+      { text:'放任不管', effect:()=>{ addText('小兽被其他妖兽吃掉。你继续赶路。') }},
+      { text:'抓去卖掉', effect:p=>{ p.spiritStone+=500; p.xinMo+=5; addText('灵石+500。但后来听说这是某大能走失的宠物……心魔+5','danger') }}
+    ]
+  },
+  {
+    id:'falling_spring', name:'青梅竹马', weight:4,
+    condition:()=>P().age<45,
+    text:'你回青石村探望，遇到了小时候一起玩的小花。她已经嫁人了，怀里抱着个孩子，脸上有风霜之色。她看见你，愣了一下："你……一点都没变。"',
+    choices:[
+      { text:'叙旧留下银子', effect:p=>{ p.spiritStone=Math.max(0,p.spiritStone-20); p.flySuccessBonus=10; addText('灵石-20。小花感激不尽。飞升时额外+10%成功率。','success') }},
+      { text:'感叹各自有路', effect:p=>{ p.xinMo=Math.max(0,p.xinMo-5); addText('心魔-5。你更加坚定了修仙的决心。') }},
+      { text:'问她愿不愿意修仙', effect:p=>{ addText('她苦笑着摇头："我有孩子了。"你暗中留了一枚培元丹，可保她十年无病。') }}
+    ]
+  },
+  {
+    id:'mysterious_transfer', name:'神秘老者传功', weight:3,
+    condition:()=>P().age<50,
+    text:'你正在打坐，忽然一只枯瘦的手掌按在你天灵盖上。你大惊，却动弹不得。一股纯厚的灵力涌入你的经脉——"闭嘴，凝神，引导这股灵力。"一个苍老的声音在你脑中响起。',
+    choices:[
+      { text:'听从引导', effect:p=>{ p.cultivation+=500; p.hiddenMark=true; addText('修为+500，但体内被种下一道暗劲。','success') }},
+      { text:'奋力抵抗', effect:p=>{ p.status='轻伤'; addText('老者哼了一声收手。你经脉受损，但保留了自主权。','danger') }},
+      { text:'询问身份', effect:p=>{ addText('老者不语消失。你记住了他的灵力气息。') }}
+    ]
+  },
+  {
+    id:'ghost_market', name:'山中鬼市', weight:3,
+    condition:()=>P().realmIndex>=5,
+    text:'你在深山中发现了一个隐秘的夜市——酉时开张，卯时收摊。这里卖的东西千奇百怪。',
+    choices:[
+      { text:'逛一圈买东西', effect:p=>{ if(p.spiritStone>=300){ p.spiritStone-=300; let r=Math.random(); if(r<0.4){ p.cultivation+=400; addText('淘到一瓶古丹药，修为+400','success') } else if(r<0.7){ p.items.push('神秘果实'); addText('买到一个不知名的果实。','info') } else { addText('买到了假货……','danger') } } else { addText('灵石不够。') }}},
+      { text:'摆摊卖东西', effect:p=>{ let earn=Math.floor(p.herb*1.5); p.spiritStone+=earn; addText('出售多余物品，获得灵石'+earn,'success') }},
+      { text:'找鬼市主人打听消息', effect:p=>{ p.exploreBonus=50; addText('获得一条秘境情报，后续探索收益+50%。','success') }}
+    ]
+  },
+  {
+    id:'demon_seeker', name:'道心种魔', weight:4,
+    condition:()=>P().xinMo>=40,
+    text:'你在修炼时，忽然"听"到心底有一个声音在说话。"你以为你修的是正道？你杀过人，贪过财，见死不救过——你和我有什么分别？"那是你自己的声音。',
+    choices:[
+      { text:'与心魔对话', effect:p=>{ p.xinMo=Math.max(0,p.xinMo-15); p.qiAffinity+=1; addText('了解心魔的根源。心魔-15，灵气亲和+1','success') }},
+      { text:'强行镇压', effect:p=>{ p.xinMo=Math.max(0,p.xinMo-10); p.xinMoDebt=(p.xinMoDebt||0)+20; addText('心魔暂时压制，但三个月后反弹+20。','danger') }},
+      { text:'接受心魔', effect:p=>{ p.xinMo=0; p.atk+=15; p.embraceDemon=true; addText('心魔归零，ATK+15，但走火入魔结局概率+10%。','danger') }}
+    ]
+  },
+  {
+    id:'old_rival', name:'昔日对手', weight:3,
+    condition:()=>P().age>50,
+    text:'你在坊市遇到了当年和你争过资源的一位修士。他断了一条手臂，境界停滞多年，满脸风霜。他看见你，愣住，然后苦笑："你……已经到这个境界了？"',
+    choices:[
+      { text:'请他喝酒叙旧', effect:p=>{ p.spiritStone=Math.max(0,p.spiritStone-50); p.xinMo=Math.max(0,p.xinMo-10); addText('你给了他一些帮助。心魔-10','success') }},
+      { text:'冷漠路过', effect:p=>{ p.xinMo+=5; addText('你心里有些不是滋味。心魔+5','danger') }},
+      { text:'嘲讽几句', effect:p=>{ addText('他眼中闪过恨意。三个月后你被人暗算，轻伤。','danger'); p.status='轻伤' }}
+    ]
+  },
+  {
+    id:'disciple_apprentice', name:'弟子拜师', weight:3,
+    condition:()=>P().realmIndex>=11,
+    text:'一个少年跪在你的洞府前，已经三天了。他衣衫褴褛，但眼神中有一种你熟悉的光芒。像当年的你。',
+    choices:[
+      { text:'收为弟子', effect:p=>{ p.hasDisciple=true; addText('获得弟子。每10年弟子会献上孝敬（灵石+200），但修炼效率-10%。','info') }},
+      { text:'指一条明路', effect:p=>{ p.merits+=10; addText('推荐他去你认识的地方。功德+10','success') }},
+      { text:'拒之门外', effect:p=>{ p.xinMo+=15; addText('少年黯然离去。你后来听说他误入魔道……心魔+15','danger') }}
+    ]
+  },
+  {
+    id:'heresy_scroll', name:'禁忌之术', weight:3,
+    condition:()=>P().xinMo>=30,
+    text:'你在一个废弃的洞府中发现了一卷古籍。上面记载着一种被修仙界明令禁止的功法——"噬灵大法"。修炼此术，可通过吞噬他人灵力快速提升修为。代价是永坠魔道。',
+    choices:[
+      { text:'记住法门绝不修炼', effect:p=>{ p.xinMo+=10; addText('你知道了这条捷径……心魔+10','danger') }},
+      { text:'立即销毁', effect:p=>{ p.xinMo=Math.max(0,p.xinMo-15); addText('你毁了古籍，心中一片澄明。心魔-15','success') }},
+      { text:'修炼', effect:p=>{ p.cultivation+=3000; p.atk+=50; p.embraceDemon=true; addText('修为+3000，ATK+50，但已堕入魔道……','danger') }}
+    ]
+  },
+  {
+    id:'friend_decline', name:'老友凋零', weight:6,
+    condition:()=>P().age>70,
+    text:'你收到了一封褪色的信。是你年轻时的一位故友写来的——准确地说，是他/她的后人代写的。"家祖已于三年前仙逝。临终前，他让我务必把这封信交到您手上。"',
+    choices:[
+      { text:'去坟前祭拜', effect:p=>{ p.xinMo=Math.max(0,p.xinMo-20); p.qiAffinity+=2; addText('你站在故友墓前，回忆涌上心头。心魔-20，灵气亲和+2','success') }},
+      { text:'厚待后人', effect:p=>{ p.spiritStone=Math.max(0,p.spiritStone-100); p.merits+=15; addText('灵石-100，故友后人得到妥善安置。功德+15','success') }},
+      { text:'看淡生死', effect:p=>{ p.xinMo+=10; addText('你继续赶路。但那天晚上，你罕见地失眠了。心魔+10','danger') }}
+    ]
+  },
+  {
+    id:'last_meeting', name:'最后一面', weight:100,
+    condition:()=>P().lifespan<=5 && !P().metMasterFinal,
+    text:'你在山中漫步，忽然看到了一个熟悉的身影。青崖子。他老了。曾经挺拔的身躯有些佝偻，修为也只有筑基期的水平。他看见你，笑了："你还在啊。"',
+    choices:[
+      { text:'跪下行礼', effect:p=>{ p.metMasterFinal=true; p.items.push('化劫令'); addText('师徒二人坐在山崖边，像当年一样。青崖子给了你一枚【化劫令】（可抵消一次致命伤害）。','success'); p.metMasterFinal=true }},
+      { text:'问他这些年去了哪', effect:p=>{ p.metMasterFinal=true; addText('青崖子沉默良久："为师……做一些该做的事。"他没有细说，但你感到他体内有一股隐晦的暗伤。','info'); p.metMasterFinal=true }},
+      { text:'渡给他灵力续命', effect:p=>{ p.cultivation=Math.max(0,p.cultivation-500); p.metMasterFinal=true; addText('消耗500修为换取师父1年寿命。他不会说谢谢，但你看到他眼中闪过的光。','info'); p.metMasterFinal=true }}
+    ]
+  },
+  {
+    id:'heavenly_rain', name:'天降甘露', weight:2,
+    condition:()=>P().realmIndex<10,
+    text:'深夜，一场蕴含灵气的细雨悄然降临。雨滴落在皮肤上，带来清凉的舒适感。空气中的灵气浓度飙升。',
+    choices:[
+      { text:'露天修炼', effect:p=>{ p.cultivation+=300; p.qiAffinity+=1; addText('修为+300，灵气亲和+1','success') }},
+      { text:'收集灵雨', effect:p=>{ p.items.push('灵雨露'); addText('获得【灵雨露】×5（炼丹辅料，成功率+15%）','success') }},
+      { text:'让灵雨滋润灵草', effect:p=>{ p.herbDouble=true; addText('灵草产量将在下次探索时翻倍。','success') }}
+    ]
+  }
+];
+
+// ============================================================
+// DATA: Era Events (every 10 years)
+// ============================================================
+const ERA_EVENTS = [
+  { year:10, text:'你第一次听说修仙界并不太平——正魔两道纷争不断。', effects:['你选择独善其身，潜心修炼。'] },
+  { year:20, text:'百里外的苍云秘境每百年一开。你决定结伴而行，探索秘境。', effects:['你在秘境中获得了不少机缘，修为+300，灵石+200。'] },
+  { year:30, text:'正道与魔道爆发全面冲突。你选择避世不出，专心修炼。', effects:['战争波及广泛，但你安然度过。'] },
+  { year:40, text:'天地异变，灵气潮汐异动，修炼效率翻倍持续三年。', effects:['你抓住机会全力修炼，修为大增！'] },
+  { year:50, text:'修仙界百年论道大会召开。你旁观学习，收获颇丰。', effects:['你从论道中获得感悟，修为+500。'] },
+  { year:60, text:'域外陨石坠入南海。你前往一探。', effects:['你获得了一些陨铁碎片。'] },
+  { year:70, text:'失落的上古宗门遗迹被发现。你将情报卖给天机阁，获得灵石1000。', effects:['灵石+1000。'] },
+  { year:80, text:'封印千年的魔尊重现世间。你选择寻找上古封印之法。', effects:['你发现了一份古老卷轴，记录了封印之法。'] },
+  { year:90, text:'天道降下考验，所有修士心魔翻倍。你清心寡欲闭关三年。', effects:['你安全度过了考验，心境更加通明。'] },
+  { year:100, text:'天裂异象，飞升通道短暂开启。你观摩通道，获得大道感悟。', effects:['修为+5000，突破感悟。'] }
+];
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let G = null;
+
+function P(){ return G.player }
+
+function createInitialState(){
+  return {
+    phase:'intro', // intro | action | event | breakthrough | ending
+    year:17,
+    month:9,
+    turn:0,
+    player:{
+      name:'沈默',
+      age:15,
+      lifespan:60,
+      maxLifespan:60,
+      realm:'mortal',
+      realmIndex:0,
+      cultivation:0,
+      qiAffinity:10,
+      root:10,
+      atk:5,
+      def:3,
+      spiritStone:0,
+      herb:0,
+      pills:[],
+      items:[],
+      xinMo:0,
+      xinMoDebt:0,
+      merits:0,
+      status:'健康',
+      sect:null,
+      sectContribution:0,
+      cultivationEfficiency:1.0,
+      skill:'引气诀',
+      skillLevel:1,
+      alchemyCount:0,
+      alchemyMastery:0,
+      hasClearHeart:false,
+      hasBeast:false,
+      hasDisciple:false,
+      embraceDemon:false,
+      metMasterFinal:false,
+      hotSpringOwned:false,
+      usedHotSpring:false,
+      buryBonus:false,
+      exploreBonus:0,
+      herbDouble:false,
+      hiddenMark:false,
+      flySuccessBonus:0,
+      breakthroughBoost:0,
+      eventCooldown:0,
+      eraIndex:-1,
+      inSeclusion:false,
+      seclusionMonths:0,
+      seclusionDuration:0,
+    }
+  };
+}
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+const outputEl = document.getElementById('output-scroll');
+let textLines = [];
+
+function addText(text, cls=''){
+  const d=document.createElement('div');
+  d.className='text-line'+(cls?'':'');
+  if(cls) d.innerHTML='<span class="'+cls+'">'+text+'</span>';
+  else d.textContent=text;
+  outputEl.appendChild(d);
+  textLines.push({text,cls});
+  outputEl.scrollTop=outputEl.scrollHeight;
+}
+
+function showActions(btns){
+  const c=document.getElementById('action-buttons');
+  c.innerHTML='';
+  document.getElementById('choice-buttons').innerHTML='';
+  document.getElementById('event-overlay').style.display='none';
+  btns.forEach(b=>{
+    const el=document.createElement('button');
+    el.className='action-btn';
+    el.innerHTML=b.text+(b.sub?' <span class="sub">'+b.sub+'</span>':'');
+    el.onclick=b.onclick;
+    if(b.disabled){ el.disabled=true }
+    c.appendChild(el);
+  });
+}
+
+function showChoices(choices){
+  const c=document.getElementById('choice-buttons');
+  c.innerHTML='';
+  document.getElementById('action-buttons').innerHTML='';
+  document.getElementById('event-overlay').style.display='none';
+  choices.forEach(ch=>{
+    const el=document.createElement('button');
+    el.className='choice-btn';
+    el.textContent=ch.text;
+    el.onclick=()=>{
+      document.getElementById('choice-buttons').innerHTML='';
+      ch.effect(G.player);
+      if(G.phase==='event') finishEvent();
+    };
+    c.appendChild(el);
+  });
+}
+
+function updateUI(){
+  const p=G.player;
+  const realm=REALMS[p.realmIndex];
+  const nextRealm=REALMS[p.realmIndex+1];
+  document.getElementById('realm-display').textContent=realm.name;
+  document.getElementById('age-display').innerHTML='年龄：'+p.age+'岁 | 寿命：<span id="lifespan-display">'+p.lifespan+'</span>/<span id="maxlifespan-display">'+p.maxLifespan+'</span>';
+  document.getElementById('cultivation-display').textContent=Math.floor(p.cultivation)+(nextRealm?'/'+nextRealm.cultivationReq:' MAX');
+  document.getElementById('spiritstone-display').textContent=p.spiritStone;
+  document.getElementById('herb-display').textContent=p.herb;
+  document.getElementById('status-effect-display').textContent=p.status;
+  document.getElementById('year-display').textContent='修仙第'+(Math.floor(p.turn/12)+1)+'年'+((G.month%12||12)+'月');
+  if(nextRealm){
+    const pct=Math.min(100,Math.floor(p.cultivation/nextRealm.cultivationReq*100));
+    document.getElementById('cultivation-bar-fill').style.width=pct+'%';
+  } else {
+    document.getElementById('cultivation-bar-fill').style.width='100%';
+  }
+}
+
+// ============================================================
+// COMBAT SYSTEM
+// ============================================================
+function calcPower(p){
+  const r=REALMS[p.realmIndex];
+  let realmBonus=0;
+  if(p.realmIndex<=9) realmBonus=p.realmIndex*5;
+  else if(p.realmIndex===10) realmBonus=80;
+  else if(p.realmIndex===11) realmBonus=300;
+  else if(p.realmIndex===12) realmBonus=1000;
+  else if(p.realmIndex>=13) realmBonus=3000;
+  let atk=p.atk+r.atkBonus;
+  let def=p.def+r.defBonus;
+  return atk*1.5+def*0.8+p.qiAffinity*0.3+realmBonus;
+}
+
+function combatCheck(p, enemyPower){
+  let myPower=calcPower(p);
+  let ratio=myPower/enemyPower;
+  if(ratio>1.5){ addText('你碾压了对手！无伤胜利。','success'); return true }
+  if(ratio>1.0){ addText('你苦战得胜，受了些轻伤。','info'); p.status='轻伤'; return true }
+  if(ratio>0.7){ addText('你惨胜对手，身负重伤。','danger'); p.status='重伤'; return true }
+  addText('你不敌对手！','danger');
+  return false;
+}
+
+// ============================================================
+// AGE / ERA SYSTEM
+// ============================================================
+function getEra(turns){
+  let years = Math.floor(turns / 12);
+  if(years<=5) return {name:'少年',eff:1.3,label:'sprout'};
+  if(years<=15) return {name:'青年',eff:1.5,label:'prime'};
+  if(years<=30) return {name:'中年',eff:1.2,label:'mellow'};
+  return {name:'晚年',eff:1.0,label:'twilight'};
+}
+
+function checkEraTransition(p){
+  let gameYears = Math.floor(p.turn / 12);
+  if(gameYears>=5 && !G.eraTrans5){
+    G.eraTrans5=true;
+    addText('—— 五载修行，你已脱胎换骨。 ——','title');
+    addText('你踏入修仙界的黄金岁月，修炼效率大幅提升。','success');
+    if(p.cultivation>=REALMS[p.realmIndex+1]?.cultivationReq * 1.5){
+      let rate=0.3+p.qiAffinity*0.005;
+      if(Math.random()<rate){ advanceRealm(p); addText('瓶颈松动，顺势突破！','success') }
+      else addText('瓶颈有所松动，但还差一些火候。','info');
+    }
+  }
+  if(gameYears>=15 && !G.eraTrans15){
+    G.eraTrans15=true;
+    addText('—— 十五载春秋，心境愈发沉稳。 ——','title');
+    addText('你开始理解——"修仙，修的不是术，是心。"','subtitle');
+    p.xinMo=Math.max(0,p.xinMo-20);
+  }
+  if(gameYears>=30 && !G.eraTrans30){
+    G.eraTrans30=true;
+    addText('—— 大道就在前方。你伸出手，几乎能触碰到了。 ——','title');
+    addText('你进入了修仙的成熟期，炼丹成功率+15%。','info');
+  }
+}
+
+// ============================================================
+// REALM / BREAKTHROUGH
+// ============================================================
+function advanceRealm(p){
+  let next=REALMS[p.realmIndex+1];
+  if(!next) return;
+  p.realm=next.id;
+  p.realmIndex=next.index;
+  p.maxLifespan=next.baseLifespan;
+  if(next.breakthroughText) addText(next.breakthroughText,'success');
+  if(next.tribulation){
+    addText('天劫降临！','danger');
+    if(Math.random()<0.6+p.qiAffinity*0.005+p.breakthroughBoost){
+      addText('你扛过了天劫！晋升'+next.name+'！','success');
+      p.qiAffinity+=5;
+      p.atk+=10;
+      p.def+=5;
+      if(next.pill){
+        p.pills=p.pills.filter(x=>x!==next.pill);
+      }
+    } else {
+      addText('天劫失败……修为倒退50%，重伤。','danger');
+      p.cultivation=Math.floor(p.cultivation*0.5);
+      p.status='重伤';
+      if(p.cultivation<50){ triggerEnding('soul_destroyed'); return }
+      return;
+    }
+  } else {
+    addText('你成功突破至'+next.name+'！','success');
+    p.qiAffinity+=3;
+    if(next.pill){
+      p.pills=p.pills.filter(x=>x!==next.pill);
+    }
+  }
+  if(next.id==='qi1'){
+    addText('从今日起，你不再是凡人了。','title');
+  }
+  if(next.id==='ascension'){
+    triggerEnding('ascension');
+    return;
+  }
+}
+
+function tryBreakthrough(){
+  const p=G.player;
+  const next=REALMS[p.realmIndex+1];
+  if(!next){ addText('你已达最高境界。'); return false; }
+  if(p.cultivation<next.cultivationReq){ addText('修为不足。需要'+next.cultivationReq+'修为（当前'+Math.floor(p.cultivation)+'）','danger'); return false; }
+  if(next.pill && !p.pills.includes(next.pill) && next.pill){
+    addText('突破需要【'+next.pill+'】，你没有。','danger');
+    return false;
+  }
+  let rate=0.6+p.qiAffinity*0.005;
+  if(p.inSeclusion) rate+=0.15;
+  rate+=p.breakthroughBoost;
+  if(p.skill==='青云诀') rate+=0.05;
+  if(Math.random()<rate){
+    advanceRealm(p);
+    p.inSeclusion=false;
+    return true;
+  } else {
+    addText('突破失败……修为倒退。','danger');
+    p.cultivation=Math.floor(p.cultivation*(0.8+Math.random()*0.1));
+    if(next.tribulation){
+      addText('天劫反噬，你身负重伤。','danger');
+      p.status='重伤';
+    }
+    if(Math.random()<0.05){
+      addText('你走火入魔了！','danger');
+      p.xinMo+=50;
+    }
+    p.inSeclusion=false;
+    return false;
+  }
+}
+
+// ============================================================
+// ACTIONS
+// ============================================================
+function actionCultivate(){
+  const p=G.player;
+  if(p.inSeclusion){
+    addText('你正在闭关中。选择【结束闭关】或【继续闭关】。','info');
+    return;
+  }
+  let base=10+p.qiAffinity*0.5;
+  let era=getEra(p.age);
+  let eff=p.cultivationEfficiency;
+  if(p.skill==='引气诀') eff*=1.1;
+  else if(p.skill==='青云诀') eff*=1.25;
+  else eff*=1.0;
+  if(era.label==='sprout') eff*=1.3;
+  else if(era.label==='prime') eff*=1.5;
+  else if(era.label==='twilight') eff*=0.8;
+  if(p.status==='重伤') eff*=0.5;
+  else if(p.status==='轻伤') eff*=0.8;
+  let gain=Math.floor(base*eff)+Math.floor(p.skillLevel*5);
+  p.cultivation+=gain;
+  addText('你盘膝打坐，引灵气入体。修为 +'+gain,'success');
+  let r=Math.random();
+  if(r<0.03){
+    let extra=100+Math.floor(Math.random()*100);
+    p.cultivation+=extra;
+    p.qiAffinity+=1;
+    addText('顿悟！修为额外+'+extra+'，灵气亲和+1！','title');
+  } else if(r<0.05 && p.xinMo>30){
+    p.cultivation=Math.max(0,p.cultivation-50);
+    p.status='轻伤';
+    addText('你心中杂念丛生，险些走火入魔。修为-50。','danger');
+  } else if(r<0.055){
+    addText('灵气潮汐涌动！本月修炼效率翻倍！','info');
+    p.cultivation+=gain;
+  }
+  if(p.hotSpringOwned) { p.cultivation+=50; addText('灵泉加持，额外+50修为。','success'); }
+  advanceMonth();
+}
+
+function actionExplore(){
+  const p=G.player;
+  if(p.inSeclusion){ addText('闭关中无法探索。','danger'); return; }
+  let area='青石后山';
+  let herbGain=1+Math.floor(Math.random()*3);
+  let stoneGain=5+Math.floor(Math.random()*16);
+  let danger=20;
+  if(p.realmIndex>=10){ area='迷雾沼泽'; herbGain=3+Math.floor(Math.random()*4); stoneGain=50+Math.floor(Math.random()*150); danger=120; }
+  else if(p.realmIndex>=7){ area='落霞遗迹'; herbGain=2+Math.floor(Math.random()*3); stoneGain=20+Math.floor(Math.random()*80); danger=70; }
+  else if(p.realmIndex>=3){ area='幽冥密林'; herbGain=2+Math.floor(Math.random()*3); stoneGain=10+Math.floor(Math.random()*40); danger=50; }
+  if(p.herbDouble){ herbGain*=2; p.herbDouble=false; }
+  addText('你前往'+area+'探索……','info');
+  if(Math.random()<0.4){
+    addText('你遇到了妖兽！','danger');
+    if(combatCheck(p,danger+Math.floor(p.realmIndex*10))){
+      p.herb+=herbGain;
+      p.spiritStone+=stoneGain+Math.floor(Math.random()*50);
+      addText('获得灵草×'+herbGain+'，灵石'+stoneGain,'success');
+      if(p.hasBeast) addText('灵兽帮你发现了一处隐藏宝物！额外获得灵石100。','success'), p.spiritStone+=100;
+    } else {
+      addText('你仓皇逃回，一无所获。','danger');
+      if(Math.random()<0.3){ p.status='重伤'; addText('你受了重伤。','danger'); }
+    }
+  } else {
+    p.herb+=herbGain;
+    p.spiritStone+=stoneGain;
+    addText('安全探索，获得灵草×'+herbGain+'，灵石'+stoneGain,'success');
+  }
+  if(p.skillLevel<9) p.skillLevel+=0.1;
+  advanceMonth();
+}
+
+function actionAlchemy(){
+  const p=G.player;
+  if(p.inSeclusion){ addText('闭关中无法炼丹。','danger'); return; }
+  // Show available recipes
+  let recipes=[];
+  for(let [name, recipe] of Object.entries(PILLS)){
+    if(name==='筑基丹' && p.realmIndex<9) continue;
+    if(name==='金丹玉液' && p.realmIndex<10) continue;
+    if(name==='婴变丹' && p.realmIndex<11) continue;
+    if(name==='化神仙丹' && p.realmIndex<12) continue;
+    recipes.push({name, recipe});
+  }
+  showChoices(recipes.map(r=>({
+    text:r.name,
+    sub:'灵草×'+r.recipe.herbs+(r.recipe.requires?' + '+r.recipe.requires:'')+' | '+(r.recipe.cultivation>0?'修为+'+r.recipe.cultivation:r.recipe.desc),
+    effect:()=>{
+      let recipe=r.recipe;
+      if(p.herb<recipe.herbs){ addText('灵草不够。需要'+recipe.herbs+'株。','danger'); return; }
+      if(recipe.requires && !p.pills.includes(recipe.requires)){ addText('需要'+recipe.requires+'作为辅料。','danger'); return; }
+      p.herb-=recipe.herbs;
+      if(recipe.requires){ p.pills=p.pills.filter(x=>x!==recipe.requires); }
+      let rate=recipe.baseRate+p.alchemyMastery*0.01;
+      rate=Math.min(rate,0.95);
+      p.alchemyCount++;
+      if(Math.random()<rate){
+        let quality='中品';
+        if(rate>=0.9 && Math.random()<0.05) quality='极品';
+        else if(rate>=0.8 && Math.random()<0.2) quality='上品';
+        let mult={下品:0.7,中品:1.0,上品:1.5,极品:3.0}[quality]||1;
+        if(recipe.cultivation>0){
+          p.cultivation+=Math.floor(recipe.cultivation*mult);
+          addText('炼成'+quality+r.name+'！修为+'+Math.floor(recipe.cultivation*mult),'success');
+        } else {
+          p.pills.push(r.name);
+          addText('炼成'+quality+r.name+'！','success');
+        }
+      } else {
+        addText('炼丹失败，'+r.name+'的材料化为灰烬。','danger');
+        if(recipe.baseRate<=0.5) p.status='轻伤';
+        if(Math.random()<0.1){ p.status='重伤'; addText('丹毒入体！','danger'); }
+      }
+      advanceMonth();
+    }
+  })));
+}
+
+function actionSeclusion(){
+  const p=G.player;
+  if(p.inSeclusion){
+    addText('你结束了闭关。','info');
+    p.inSeclusion=false;
+    tryBreakthrough();
+    advanceMonth();
+    return;
+  }
+  showChoices([
+    {text:'短期闭关(3个月)', sub:'突破成功率+15%，每月修为+15', effect:()=>{
+      p.inSeclusion=true; p.seclusionMonths=0; p.seclusionDuration=3;
+      advanceMonth();
+    }},
+    {text:'中期闭关(6个月)', sub:'突破成功率+20%，每月修为+25', effect:()=>{
+      p.inSeclusion=true; p.seclusionMonths=0; p.seclusionDuration=6;
+      advanceMonth();
+    }},
+    {text:'长期闭关(12个月)', sub:'突破成功率+30%，每月修为+40', effect:()=>{
+      p.inSeclusion=true; p.seclusionMonths=0; p.seclusionDuration=12;
+      advanceMonth();
+    }}
+  ]);
+}
+
+function actionBreakthrough(){
+  tryBreakthrough();
+  advanceMonth();
+}
+
+// ============================================================
+// TURN ADVANCEMENT
+// ============================================================
+function advanceMonth(){
+  const p=G.player;
+  p.turn++;
+  G.month++;
+  if(G.month>12){
+    G.month=1;
+    G.year++;
+    p.age++;
+    p.lifespan--;
+  }
+  if(p.inSeclusion){
+    p.seclusionMonths++;
+    let seclGain=15;
+    if(p.seclusionDuration===6) seclGain=25;
+    else if(p.seclusionDuration===12) seclGain=40;
+    p.cultivation+=seclGain;
+    addText('闭关第'+p.seclusionMonths+'个月，修为+'+seclGain,'info');
+    if(p.seclusionMonths>=p.seclusionDuration){
+      addText('闭关结束。','title');
+      p.inSeclusion=false;
+      let rate=0.6+p.qiAffinity*0.005+0.15;
+      let next=REALMS[p.realmIndex+1];
+      if(next && p.cultivation>=next.cultivationReq){
+        if(Math.random()<rate){
+          advanceRealm(p);
+        } else {
+          addText('闭关突破失败……','danger');
+          p.cultivation=Math.floor(p.cultivation*0.9);
+        }
+      } else {
+        addText('你结束了闭关。','info');
+      }
+    }
+  }
+  checkEraTransition(p);
+  updateUI();
+  if(p.lifespan<=0){
+    triggerEnding('lifespan_end');
+    return;
+  }
+  if(p.xinMo>=100 || (p.xinMo>=80 && p.embraceDemon)){
+    triggerEnding('demon_road');
+    return;
+  }
+  if(p.status==='重伤' && Math.random()<0.05){
+    triggerEnding('beast_kill');
+    return;
+  }
+  // Check decade events (based on years elapsed since game start)
+  let gameYears = Math.floor(p.turn / 12);
+  let eraIdx = -1;
+  for(let i=0;i<ERA_EVENTS.length;i++){
+    if(gameYears >= ERA_EVENTS[i].year && i>p.eraIndex){ eraIdx=i; break; }
+  }
+  if(eraIdx>=0){
+    p.eraIndex=eraIdx;
+    let ee=ERA_EVENTS[eraIdx];
+    addText('【第'+(eraIdx+1)*10+'年 · 时代大事件】','title');
+    addText(ee.text);
+    ee.effects.forEach(e=>addText(e,'info'));
+    if(eraIdx===0||eraIdx===1) p.cultivation+=300;
+    else if(eraIdx===3||eraIdx===4) p.cultivation+=500;
+    else if(eraIdx===6) p.spiritStone+=1000;
+    else if(eraIdx===8) p.cultivation+=5000;
+    updateUI();
+  }
+  // Random events
+  p.eventCooldown=Math.max(0,p.eventCooldown-1);
+  if(p.eventCooldown<=0 && Math.random()<0.3){
+    triggerRandomEvent();
+    return;
+  }
+  // Breakthrough prompt
+  let next=REALMS[p.realmIndex+1];
+  if(next && p.cultivation>=next.cultivationReq && !p.inSeclusion && G.phase!=='event'){
+    addText('你的修为已满，可以考虑突破了。','info');
+    showChoices([
+      {text:'尝试突破', effect:()=>{ tryBreakthrough(); endTurn(); }},
+      {text:'再积累一段时间', effect:()=>{ endTurn(); }}
+    ]);
+    return;
+  }
+  endTurn();
+}
+
+function endTurn(){
+  G.phase='action';
+  updateUI();
+  renderActions();
+}
+
+function renderActions(){
+  const p=G.player;
+  let btns=[];
+  if(p.realmIndex===0){
+    btns.push({text:'修炼',sub:'打坐吐纳',onclick:()=>{
+      if(G.phase!=='action') return;
+      G.phase='busy'; actionCultivate();
+    }});
+    btns.push({text:'探索',sub:'后山',onclick:()=>{
+      if(G.phase!=='action') return;
+      G.phase='busy'; actionExplore();
+    }});
+  } else {
+    btns.push({text:'修炼',sub:'打坐吐纳',onclick:()=>{
+      if(G.phase!=='action') return;
+      G.phase='busy'; actionCultivate();
+    }});
+    btns.push({text:'探索',sub:getExploreArea(),onclick:()=>{
+      if(G.phase!=='action') return;
+      G.phase='busy'; actionExplore();
+    }});
+    btns.push({text:'炼丹',sub:'炼药',onclick:()=>{
+      if(G.phase!=='action') return;
+      G.phase='busy'; actionAlchemy();
+    }});
+    btns.push({text:p.inSeclusion?'结束闭关':'闭关',sub:p.inSeclusion?'出关':'集中突破',onclick:()=>{
+      if(G.phase!=='action') return;
+      G.phase='busy'; actionSeclusion();
+    }});
+    if(nextRealmCheck()){
+      btns.push({text:'突破',sub:'冲击境界',onclick:()=>{
+        if(G.phase!=='action') return;
+        G.phase='busy'; actionBreakthrough();
+      }});
+    }
+  }
+  showActions(btns);
+}
+
+function getExploreArea(){
+  const p=G.player;
+  if(p.realmIndex>=10) return '迷雾沼泽';
+  if(p.realmIndex>=7) return '落霞遗迹';
+  if(p.realmIndex>=3) return '幽冥密林';
+  return '青石后山';
+}
+
+function nextRealmCheck(){
+  const p=G.player;
+  let next=REALMS[p.realmIndex+1];
+  return next && p.cultivation>=next.cultivationReq*0.8;
+}
+
+// ============================================================
+// EVENT SYSTEM
+// ============================================================
+function triggerRandomEvent(){
+  const p=G.player;
+  let available=EVENTS.filter(e=>e.condition());
+  if(available.length===0){ endTurn(); return; }
+  let totalWeight=available.reduce((s,e)=>s+e.weight,0);
+  let roll=Math.random()*totalWeight;
+  let cum=0;
+  let chosen=available[0];
+  for(let e of available){
+    cum+=e.weight;
+    if(roll<=cum){ chosen=e; break; }
+  }
+  G.phase='event';
+  addText('—— 【'+chosen.name+'】 ——','title');
+  addText(chosen.text);
+  showChoices(chosen.choices);
+  p.eventCooldown=3;
+}
+
+function finishEvent(){
+  G.phase='action';
+  updateUI();
+  renderActions();
+}
+
+// ============================================================
+// ENDINGS
+// ============================================================
+function triggerEnding(type){
+  G.phase='ending';
+  const p=G.player;
+  addText('','');
+  addText('━━━━━━━━━━━━━━━━━━━━━━━━','title');
+
+  if(type==='lifespan_end'){
+    addText('最后一个月。','title');
+    addText('你坐在青崖山的悬崖边，和当年拜师时一样的位置。夕阳西下，晚风拂过你满是皱纹的脸。');
+    addText('你这一生，修炼了'+Math.floor(p.turn/12)+'年，达到了【'+REALMS[p.realmIndex].name+'】境界。');
+    addText('曾斩妖兽，会高人，历奇遇，也受过重伤，走过弯路。');
+    addText('你闭上眼，感受着体内渐渐消散的灵气。');
+    addText('"师父，我尽力了。"');
+    addText('最后一缕灵气散去。你嘴角带着一丝微笑，在山风中坐化。');
+    addText('——【坐化·道未尽】——','title');
+  } else if(type==='demon_road'){
+    addText('你感觉到体内的灵力开始失控。','title');
+    addText('最初只是一丝躁动——你以为是修炼太急，没在意。');
+    addText('直到那一天，你打坐时忽然吐出一口黑血。你低头，看见自己的手背上浮现出黑色的纹路——那是魔气侵蚀的痕迹。');
+    addText('灵气在经脉中倒流，丹田中的灵力化作漆黑的漩涡。你的意识逐渐被暴戾吞噬。');
+    addText('那一夜，方圆百里的生灵，无一幸免。');
+    addText('——【入魔·万劫不复】——','title');
+  } else if(type==='beast_kill'){
+    addText('你倒在地上，看着那只妖兽一步步逼近。它的獠牙上沾着你的血。','title');
+    addText('你的剑断了，灵力枯竭。');
+    addText('你想起了青石村的晨雾，想起了青崖子的背影，想起了那个问你"你可愿一试"的秋天。');
+    addText('"我……不愿。"');
+    addText('妖兽扑了上来。最后映入你眼帘的，是天空中飘落的、不知从何而来的白色花瓣。');
+    addText('——【殒命·仙途断绝】——','title');
+  } else if(type==='soul_destroyed'){
+    addText('天雷落下。你拼尽全力，将最后一丝灵力凝聚在掌心，迎向那道雷光。','title');
+    addText('不够。远远不够。');
+    addText('天雷贯穿了你的身体，击碎了你的丹田。');
+    addText('你感觉自己在消散——像风中的沙粒一样。');
+    addText('——【殒灭·魂飞魄散】——','title');
+  } else if(type==='ascension'){
+    addText('你踏入光门的那一刻，世界安静了。','title');
+    addText('身后是凡间的千山万水、百年恩怨。眼前是仙界的万里云海、琼楼玉宇。');
+    addText('你的身体在光芒中重塑——凡骨蜕仙骨，凡血化琼浆。');
+    addText('你回头看了一眼人间。那遥远的青石村外，炊烟袅袅。');
+    addText('你微微一笑，转身，走向云海深处。');
+    addText('——【飞升·证道长生】——','title');
+  }
+
+  addText('','');
+  addText('修炼了 '+Math.floor(p.turn/12)+' 年'+p.turn%12+' 个月');
+  addText('最终境界：'+REALMS[p.realmIndex].name);
+  addText('最终修为：'+Math.floor(p.cultivation));
+
+  const btns=document.getElementById('action-buttons');
+  btns.innerHTML='';
+  const el=document.createElement('button');
+  el.className='action-btn';
+  el.textContent='重新开始';
+  el.style.cssText='flex:1;padding:14px;font-size:16px;background:linear-gradient(135deg,rgba(212,175,55,0.3),rgba(180,140,40,0.3));border-color:#d4af37;color:#d4af37';
+  el.onclick=()=>{ initGame(); };
+  btns.appendChild(el);
+  document.getElementById('choice-buttons').innerHTML='';
+  document.getElementById('event-overlay').style.display='none';
+}
+
+// ============================================================
+// GAME INITIALIZATION
+// ============================================================
+function initGame(){
+  G=createInitialState();
+  outputEl.innerHTML='';
+  textLines=[];
+  G.phase='intro';
+  updateUI();
+  // Opening
+  addText('大虞王朝，庆元十七年，秋。','title');
+  addText('');
+  addText('你叫沈默，是青石村一个普通少年。父母早亡，靠村里接济长大。');
+  addText('这日清晨，你照例去后山砍柴。山间薄雾未散，你忽然瞧见一道青光亮起——');
+  addText('悬崖边上，一位白衣老者盘膝而坐，周身灵气如潮，衣袍无风自动。');
+  addText('你呆立当场。');
+  addText('老人睁眼，目光如电："小子，你我有缘。"');
+  addText('"你根骨平平，但灵台尚清。修仙之路千难万险——"');
+  addText('"你可愿一试？"');
+  addText('');
+
+  showChoices([
+    {text:'叩首拜师', sub:'灵气亲和+10，获得引气诀', effect:()=>{
+      const p=G.player;
+      p.qiAffinity+=10;
+      p.skill='引气诀';
+      p.hasClearHeart=false;
+      addText('你跪地叩首，额头抵在泥土上。');
+      addText('"弟子沈默，拜见师父！"');
+      addText('青崖子捋须而笑："好。从今日起，你就是我青崖子的弟子了。"');
+      addText('他抬手，一指轻点你眉心——一股温热的气流涌入体内，沿经脉游走。');
+      addText('"感觉到了吗？这就是灵气。"');
+      addText('获得【引气诀·基础篇】，灵气亲和+10','success');
+      startGame();
+    }},
+    {text:'犹豫不决', sub:'灵气亲和+5，获得半部残卷', effect:()=>{
+      const p=G.player;
+      p.qiAffinity+=5;
+      p.skill='引气诀';
+      addText('你犹豫了片刻。老者见状，也不勉强，从怀中取出一本残卷放在石上。');
+      addText('"罢了，缘分未到。此书留给你，练与不练，在你。"');
+      addText('他转身，一步踏出，人已在百丈之外。');
+      addText('你捡起残卷，扉页写着三个字：引气诀。');
+      addText('获得【引气诀·残卷】，灵气亲和+5','success');
+      startGame();
+    }},
+    {text:'求问长生', sub:'寿命+5年，但灵气亲和-3', effect:()=>{
+      const p=G.player;
+      p.lifespan+=5;
+      p.maxLifespan+=5;
+      p.qiAffinity=Math.max(0,p.qiAffinity-3);
+      p.skill='引气诀';
+      addText('"仙人！长生真的存在吗？"你脱口而出。');
+      addText('青崖子叹了口气，摇头："心太急。修仙先修心——你连门都没入，就想着长生？"');
+      addText('话虽如此，他还是教了你基本的吐纳法门。');
+      addText('寿命上限+5，灵气亲和-3','info');
+      startGame();
+    }}
+  ]);
+}
+
+function startGame(){
+  const p=G.player;
+  p.realm='qi1';
+  p.realmIndex=1;
+  p.cultivation=0;
+  p.maxLifespan=60;
+  // Auto-advance through qi1
+  addText('');
+  addText('三个月后……','title');
+  addText('你已能感应到丹田中一缕微弱的气感。但那股气怎么也凝聚不起来。');
+  addText('青崖子递来一株泛着微光的草药——"含在舌下，再试一次。"');
+  addText('获得【培元草】，修为+50。','success');
+  p.cultivation=50;
+  G.month=12; // skip to month 12
+  addText('');
+  addText('一年后……','title');
+  addText('年关将至，青崖子叫你到跟前。');
+  addText('"一年了，你已摸到修仙的门槛。"');
+  addText('他顿了顿："修仙界不太平。你若想活下去，就得比他们更强。"');
+  updateUI();
+  G.phase='action';
+  renderActions();
+  addText('','');
+  addText('你可以开始行动了。选择一项行动开始你的修仙之路。','subtitle');
+}
+
+// ============================================================
+// CANVAS BACKGROUND
+// ============================================================
+const canvas=document.getElementById('bgCanvas');
+const ctx=canvas.getContext('2d');
+let cloudParticles=[];
+let starParticles=[];
+
+function resizeCanvas(){
+  const rect=document.getElementById('game-container').getBoundingClientRect();
+  canvas.width=rect.width;
+  canvas.height=rect.height;
+}
+
+function initParticles(){
+  cloudParticles=[];
+  starParticles=[];
+  for(let i=0;i<15;i++){
+    cloudParticles.push({
+      x:Math.random()*canvas.width,
+      y:Math.random()*canvas.height*0.7,
+      w:60+Math.random()*120,
+      h:20+Math.random()*30,
+      speed:0.1+Math.random()*0.2,
+      opacity:0.05+Math.random()*0.1
+    });
+  }
+  for(let i=0;i<40;i++){
+    starParticles.push({
+      x:Math.random()*canvas.width,
+      y:Math.random()*canvas.height*0.6,
+      r:0.5+Math.random()*1.5,
+      twinkle:Math.random()*Math.PI*2,
+      speed:0.02+Math.random()*0.03
+    });
+  }
+}
+
+function drawBackground(time){
+  const w=canvas.width, h=canvas.height;
+  // Sky gradient
+  let grad=ctx.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,'#0a0a20');
+  grad.addColorStop(0.3,'#141430');
+  grad.addColorStop(0.5,'#1a1a38');
+  grad.addColorStop(0.7,'#201830');
+  grad.addColorStop(1,'#0d0d18');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,w,h);
+
+  // Stars
+  starParticles.forEach(s=>{
+    s.twinkle+=s.speed;
+    let alpha=0.4+Math.sin(s.twinkle)*0.3;
+    ctx.fillStyle='rgba(255,255,255,'+alpha+')';
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // Moon
+  let moonX=w*0.8, moonY=h*0.1, moonR=20;
+  ctx.fillStyle='rgba(200,190,160,0.3)';
+  ctx.beginPath();
+  ctx.arc(moonX,moonY,moonR+4,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle='rgba(220,210,180,0.15)';
+  ctx.beginPath();
+  ctx.arc(moonX,moonY,moonR+10,0,Math.PI*2);
+  ctx.fill();
+
+  // Mountains
+  ctx.fillStyle='rgba(20,20,40,0.6)';
+  ctx.beginPath();
+  ctx.moveTo(0,h*0.6);
+  for(let x=0;x<=w;x+=20){
+    let y=h*0.55-Math.sin(x*0.003)*h*0.08-Math.sin(x*0.007)*h*0.04-Math.sin(x*0.015)*h*0.02;
+    ctx.lineTo(x,y);
+  }
+  ctx.lineTo(w,h);
+  ctx.lineTo(0,h);
+  ctx.closePath();
+  ctx.fill();
+
+  // Second mountain layer
+  ctx.fillStyle='rgba(30,25,45,0.4)';
+  ctx.beginPath();
+  ctx.moveTo(0,h*0.7);
+  for(let x=0;x<=w;x+=15){
+    let y=h*0.65-Math.sin(x*0.002+1)*h*0.1-Math.sin(x*0.005+2)*h*0.05-Math.sin(x*0.012+3)*h*0.03;
+    ctx.lineTo(x,y);
+  }
+  ctx.lineTo(w,h);
+  ctx.lineTo(0,h);
+  ctx.closePath();
+  ctx.fill();
+
+  // Clouds
+  cloudParticles.forEach(c=>{
+    c.x+=c.speed;
+    if(c.x>w+100) c.x=-c.w-100;
+    ctx.fillStyle='rgba(200,190,220,'+c.opacity+')';
+    ctx.beginPath();
+    ctx.ellipse(c.x,c.y,c.w/2,c.h/2,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(c.x-c.w*0.3,c.y-c.h*0.2,c.w*0.3,c.h*0.4,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(c.x+c.w*0.25,c.y-c.h*0.1,c.w*0.35,c.h*0.35,0,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // Ground glow
+  let gGrad=ctx.createLinearGradient(0,h*0.85,0,h);
+  gGrad.addColorStop(0,'rgba(40,30,50,0)');
+  gGrad.addColorStop(1,'rgba(40,30,50,0.3)');
+  ctx.fillStyle=gGrad;
+  ctx.fillRect(0,h*0.85,w,h*0.15);
+}
+
+function animateCanvas(time){
+  drawBackground(time);
+  requestAnimationFrame(animateCanvas);
+}
+
+// ============================================================
+// START
+// ============================================================
+resizeCanvas();
+initParticles();
+animateCanvas(0);
+window.addEventListener('resize',()=>{
+  resizeCanvas();
+  initParticles();
+});
+initGame();
+</script>
+</body>
+</html>
