@@ -1436,6 +1436,18 @@ function renderMap() {
         if (!isOnRoad(gx, gy + 1)) { ctx.beginPath(); ctx.moveTo(px, py + GS); ctx.lineTo(px + GS, py + GS); ctx.stroke(); }
     }
 
+    // Non-buildable area overlay (non-road)
+    for (var nbgy = 0; nbgy < CFG.rows; nbgy++) {
+        for (var nbgx = 0; nbgx < CFG.cols; nbgx++) {
+            var nbCell = mapGrid[nbgy] && mapGrid[nbgy][nbgx];
+            if (nbCell && !nbCell.buildable && !isOnRoad(nbgx, nbgy)) {
+                var nbpx = mx + nbgx * GS, nbpy = my + nbgy * GS;
+                ctx.fillStyle = "rgba(0,0,0,0.35)";
+                ctx.fillRect(nbpx, nbpy, GS, GS);
+            }
+        }
+    }
+
     // Spawn point indicator
     if (ROAD_PATH.length > 0) {
         var sp = ROAD_PATH[0];
@@ -1592,6 +1604,14 @@ function renderBuildings() {
             ctx.strokeStyle = "#ff0";
             ctx.lineWidth = 2;
             ctx.strokeRect(b.cx - GS/2, b.cy - GS/2, GS, GS);
+            // Range circle
+            ctx.beginPath();
+            ctx.arc(b.cx, b.cy, b.range, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(255,255,0,0.08)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255,255,0,0.25)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
         }
     }
 }
@@ -1843,10 +1863,11 @@ function renderUI() {
     if (G.selectedBuilding) {
         var sb = G.selectedBuilding;
         var nextLvl = sb.level + 1;
-        var td = TOWER_DATA[sb.type];
+        var tdInfo = TOWER_DATA[sb.type];
         var maxLvl = Math.min(G.maxTowerLevel, 3);
-        if (nextLvl <= maxLvl && td) {
-            var uc = td.upgradeCost[nextLvl - 1] || 999999;
+        // Upgrade button (if upgrade available)
+        if (nextLvl <= maxLvl && tdInfo) {
+            var uc = tdInfo.upgradeCost[nextLvl - 1] || 999999;
             var canAfford = G.money >= uc;
             ctx.fillStyle = canAfford ? "#284" : "#222";
             ctx.fillRect(px + 4, upgradeBtnY, pw - 8, 30);
@@ -1857,13 +1878,40 @@ function renderUI() {
             ctx.font = "11px Microsoft YaHei";
             ctx.textAlign = "center";
             ctx.fillText("升级 Lv" + sb.level + "→Lv" + nextLvl + " 💰" + uc, px + pw/2, upgradeBtnY + 20);
-            // Building info
-            ctx.fillStyle = "#aaa";
-            ctx.font = "10px Microsoft YaHei";
-            ctx.textAlign = "left";
-            ctx.fillText(sb.type + " Lv" + sb.level, px + 8, upgradeBtnY + 36);
+            upgradeBtnY += 34;
         }
-        upgradeBtnY += 36;
+        // Tower stats info (always shown when selected)
+        var infoY = upgradeBtnY + 8;
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "bold 12px Microsoft YaHei";
+        ctx.textAlign = "left";
+        ctx.fillText(tdInfo.name + " Lv" + sb.level, px + 8, infoY);
+        infoY += 16;
+        ctx.fillStyle = "#ccc";
+        ctx.font = "10px Microsoft YaHei";
+        ctx.fillText("伤害: " + sb.dmg, px + 8, infoY);
+        infoY += 13;
+        var atkSpeed = sb.rate > 0 ? (60 / sb.rate).toFixed(1) + "/s" : "-";
+        ctx.fillText("攻速: " + atkSpeed, px + 8, infoY);
+        infoY += 13;
+        ctx.fillText("射程: " + sb.range, px + 8, infoY);
+        if (sb.splash > 0) {
+            infoY += 13;
+            ctx.fillStyle = "#fa0";
+            ctx.fillText("溅射范围: " + sb.splash, px + 8, infoY);
+        }
+        var effectText = "";
+        if (sb.type === "frost") effectText = "冰冻减速";
+        else if (sb.type === "fire") effectText = "火焰溅射";
+        else if (sb.type === "wizard") effectText = "奥术眩晕";
+        else if (sb.type === "barrack") effectText = "近战攻击";
+        else if (sb.type === "crystal") effectText = "高能水晶";
+        if (effectText) {
+            infoY += 13;
+            ctx.fillStyle = "#88ddff";
+            ctx.fillText("⚡ " + effectText, px + 8, infoY);
+        }
+        upgradeBtnY = infoY + 6;
     }
 
     // Back to menu button
@@ -2230,19 +2278,21 @@ function handleCanvasClick(x, y) {
     }
 
     // Map click - place building
-    if (!G.selectedType || !G.hoverGrid) return;
+    if (!G.hoverGrid) return;
     var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
     var g = mapGrid[gy] && mapGrid[gy][gx];
     if (!g) return;
 
-    // Check if clicking on existing building (upgrade)
+    // If no tower type selected, clicking on ground deselects building
+    if (!G.selectedType) {
+        G.selectedBuilding = null;
+        return;
+    }
+
+    // Check if clicking on existing building
     if (g.building) {
         var b = g.building;
         G.selectedBuilding = (G.selectedBuilding === b) ? null : b;
-        // If upgrade clicked, try to upgrade
-        if (G.selectedBuilding === b) {
-            // Just select; upgrade happens on second click or via UI
-        }
         return;
     }
 
