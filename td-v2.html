@@ -6,10 +6,10 @@
 <title>塔防保卫战 v2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{overflow:hidden;background:#0a0a0f;font-family:"Microsoft YaHei",sans-serif;-webkit-user-select:none;user-select:none}
-#game-board{position:relative;margin:0 auto;width:640px}
-#game-board canvas{display:block;image-rendering:pixelated;cursor:crosshair}
-#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;font-size:18px}
+body{overflow:hidden;background:#0a0a0f;font-family:"Microsoft YaHei",sans-serif;-webkit-user-select:none;user-select:none;touch-action:none;-ms-touch-action:none}
+#game-board{position:relative;display:flex;justify-content:center;align-items:center;width:100%;height:100vh}
+#game-board canvas{display:block;image-rendering:pixelated;cursor:crosshair;touch-action:none}
+#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;font-size:18px;z-index:10;pointer-events:none}
 </style>
 </head>
 <body>
@@ -30,8 +30,7 @@ var CFG = {
 var canvas = document.getElementById("gc");
 canvas.width = CFG.canvasW;
 canvas.height = CFG.canvasH;
-canvas.style.width = (CFG.canvasW / CFG.retina) + "px";
-canvas.style.height = (CFG.canvasH / CFG.retina) + "px";
+// CSS size set by resizeCanvas()
 var ctx = canvas.getContext("2d");
 
 // ===== COORD HELPERS =====
@@ -45,7 +44,7 @@ function posToGrid(px, py) {
 // ===== SPRITE SYSTEM (spritesheet-based) =====
 var SPR = { img: null, ready: false };
 
-// Sprite coordinates [col, row] in 16x16 spritesheet (assets/暗影幸存者/spritesheet.png)
+// Sprite coordinates [col, row] in 16x16 spritesheet (assets/spritesheet-tdv2.png)
 var SC = {
 	archer_lv1: [2, 5],
 	archer_lv2: [3, 5],
@@ -93,14 +92,30 @@ SPR.load = function(cb) {
 	SPR.img = new Image();
 	SPR.img.onload = function() {
 		SPR.ready = true;
+		console.log("[TDv2] sprite loaded");
 		if (cb) cb();
 	};
 	SPR.img.onerror = function() {
+		console.error("[TDv2] sprite load failed:", SPR.img.src);
 		setTimeout(function() {
-			if (!SPR.ready) { SPR.ready = true; if (cb) cb(); }
-		}, 3000);
+			if (!SPR.ready) {
+				console.log("[TDv2] retrying sprite load...");
+				var oldSrc = SPR.img.src;
+				SPR.img = new Image();
+				SPR.img.onload = function() {
+					SPR.ready = true;
+					console.log("[TDv2] retry succeeded");
+					if (cb) cb();
+				};
+				SPR.img.onerror = function() {
+					console.error("[TDv2] both loads failed, showing error");
+					document.getElementById("loading").textContent = "素材加载失败，请刷新重试";
+				};
+				SPR.img.src = oldSrc;
+			}
+		}, 2000);
 	};
-	SPR.img.src = (location.pathname.includes('/tests/') ? '../' : '') + "assets/暗影幸存者/spritesheet.png";
+	SPR.img.src = (location.pathname.includes('/tests/') ? '../' : '') + "assets/spritesheet-tdv2.png";
 };
 
 SPR.get = function(n) {
@@ -867,24 +882,19 @@ function restartGame() {
 }
 
 // ===== INPUT =====
+var touchActive = false;
+
 function getEventXY(e) {
 	var rect = canvas.getBoundingClientRect();
 	var scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
-	var x = (e.clientX - rect.left) * scaleX;
-	var y = (e.clientY - rect.top) * scaleY;
+	var clientX = e.clientX !== undefined ? e.clientX : e.pageX;
+	var clientY = e.clientY !== undefined ? e.clientY : e.pageY;
+	var x = (clientX - rect.left) * scaleX;
+	var y = (clientY - rect.top) * scaleY;
 	return [x, y];
 }
 
-canvas.addEventListener("mousemove", function(e) {
-	var xy = getEventXY(e);
-	G.mouseX = xy[0]; G.mouseY = xy[1];
-	G.hoverGrid = posToGrid(xy[0], xy[1]);
-});
-
-canvas.addEventListener("click", function(e) {
-	var xy = getEventXY(e);
-	var x = xy[0], y = xy[1];
-
+function handleCanvasClick(x, y) {
 	// Game over click = restart
 	if (G.gameOver) { restartGame(); return; }
 
@@ -916,7 +926,68 @@ canvas.addEventListener("click", function(e) {
 	var td = TOWER_DATA[G.selectedType];
 	if (!td || G.money < td.cost) return;
 	createBuilding(G.selectedType, gx, gy);
+}
+
+function handleCanvasMove(x, y) {
+	G.mouseX = x; G.mouseY = y;
+	G.hoverGrid = posToGrid(x, y);
+}
+
+canvas.addEventListener("mousemove", function(e) {
+	var xy = getEventXY(e);
+	handleCanvasMove(xy[0], xy[1]);
 });
+
+canvas.addEventListener("click", function(e) {
+	if (touchActive) { touchActive = false; return; }
+	var xy = getEventXY(e);
+	handleCanvasClick(xy[0], xy[1]);
+});
+
+// Touch events
+canvas.addEventListener("touchstart", function(e) {
+	e.preventDefault();
+	touchActive = true;
+	var touch = e.touches[0];
+	var xy = getEventXY(touch);
+	handleCanvasMove(xy[0], xy[1]);
+	handleCanvasClick(xy[0], xy[1]);
+}, { passive: false });
+
+canvas.addEventListener("touchmove", function(e) {
+	e.preventDefault();
+	var touch = e.touches[0];
+	var xy = getEventXY(touch);
+	handleCanvasMove(xy[0], xy[1]);
+}, { passive: false });
+
+canvas.addEventListener("touchend", function(e) {
+	e.preventDefault();
+	touchActive = false;
+}, { passive: false });
+
+// ===== RESIZE HANDLER =====
+function resizeCanvas() {
+	var aspect = CFG.canvasW / CFG.canvasH;
+	var maxW = window.innerWidth;
+	var maxH = window.innerHeight;
+	var w, h;
+	if (maxW / maxH > aspect) {
+		h = maxH;
+		w = h * aspect;
+	} else {
+		w = maxW;
+		h = w / aspect;
+	}
+	canvas.style.width = Math.floor(w) + "px";
+	canvas.style.height = Math.floor(h) + "px";
+}
+
+window.addEventListener("resize", resizeCanvas);
+window.addEventListener("orientationchange", function() {
+	setTimeout(resizeCanvas, 200);
+});
+resizeCanvas();
 
 // ===== MAIN LOOP =====
 function gameLoop() {
@@ -946,9 +1017,13 @@ SPR.load(function() {
 });
 setTimeout(function() {
 	if (G.phase === "loading") {
-		document.getElementById("loading").style.display = "none";
-		G.phase = "playing";
-		gameLoop();
+		if (SPR.ready) {
+			document.getElementById("loading").style.display = "none";
+			G.phase = "playing";
+			gameLoop();
+		} else {
+			document.getElementById("loading").textContent = "素材加载超时，请刷新重试";
+		}
 	}
 }, 5000);
 
