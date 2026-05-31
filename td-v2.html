@@ -14,1045 +14,2375 @@ body{overflow:hidden;background:#0a0a0f;font-family:"Microsoft YaHei",sans-serif
 </head>
 <body>
 <div id="game-board">
-	<canvas id="gc"></canvas>
-	<div id="loading">加载中...</div>
+    <canvas id="gc"></canvas>
+    <div id="loading">加载中...</div>
 </div>
 <script>
-// ===== 配置 =====
+// ===== CONFIG =====
 var CFG = {
-	canvasW: 960, canvasH: 840,
-	retina: 1.5,
-	cols: 16, rows: 16,
-	gridSize: 48,
-	padding: 15
+    canvasW: 960, canvasH: 840,
+    retina: 1.5,
+    cols: 16, rows: 16,
+    gridSize: 48,
+    padding: 15
 };
+var TOTAL_LEVELS = 8;
 
 var canvas = document.getElementById("gc");
 canvas.width = CFG.canvasW;
 canvas.height = CFG.canvasH;
-// CSS size set by resizeCanvas()
 var ctx = canvas.getContext("2d");
 
 // ===== COORD HELPERS =====
 var MX = CFG.padding, MY = CFG.padding, GS = CFG.gridSize;
 function gridCenter(gx, gy) { return [MX + gx * GS + GS / 2, MY + gy * GS + GS / 2]; }
 function posToGrid(px, py) {
-	var gx = Math.floor((px - MX) / GS), gy = Math.floor((py - MY) / GS);
-	return (gx >= 0 && gx < CFG.cols && gy >= 0 && gy < CFG.rows) ? [gx, gy] : null;
+    var gx = Math.floor((px - MX) / GS), gy = Math.floor((py - MY) / GS);
+    return (gx >= 0 && gx < CFG.cols && gy >= 0 && gy < CFG.rows) ? [gx, gy] : null;
 }
 
-// ===== SPRITE SYSTEM (spritesheet-based) =====
+// ===== SPRITE SYSTEM =====
 var SPR = { img: null, ready: false };
 
-// Sprite coordinates [col, row] in 16x16 spritesheet (assets/spritesheet-tdv2.png)
 var SC = {
-	archer_lv1: [2, 5],
-	archer_lv2: [3, 5],
-	archer_lv3: [4, 5],
-	barrack_lv1: [9, 3],
-	barrack_lv2: [10, 3],
-	barrack_lv3: [11, 3],
-	building_place: [16, 9],
-	bullet_arrow: [8, 8],
-	bullet_fire: [10, 7],
-	bullet_frost: [9, 7],
-	bullet_wizard: [8, 7],
-	crystal_lv1: [5, 0],
-	crystal_lv2: [6, 0],
-	crystal_lv3: [7, 0],
-	fire_lv1: [8, 4],
-	fire_lv2: [9, 4],
-	fire_lv3: [10, 4],
-	frost_lv1: [5, 4],
-	frost_lv2: [6, 4],
-	frost_lv3: [7, 4],
-	grass: [15, 7],
-	grass_deco: [2, 1],
-	knight_lv1: [12, 3],
-	knight_lv2: [13, 3],
-	knight_lv3: [14, 3],
-	monster_1: [13, 7],
-	monster_2: [13, 0],
-	monster_3: [14, 0],
-	monster_4: [0, 1],
-	monster_5: [1, 1],
-	monster_6: [1, 2],
-	monster_7: [16, 1],
-	road: [18, 8],
-	stone: [19, 10],
-	tree_1: [17, 10],
-	tree_2: [18, 10],
-	wall: [3, 9],
-	wizard_lv1: [5, 6],
-	wizard_lv2: [6, 6],
-	wizard_lv3: [7, 6]
+    archer_lv1: [2, 5], archer_lv2: [3, 5], archer_lv3: [4, 5],
+    barrack_lv1: [9, 3], barrack_lv2: [10, 3], barrack_lv3: [11, 3],
+    building_place: [16, 9],
+    bullet_arrow: [8, 8], bullet_fire: [10, 7], bullet_frost: [9, 7], bullet_wizard: [8, 7],
+    crystal_lv1: [5, 0], crystal_lv2: [6, 0], crystal_lv3: [7, 0],
+    fire_lv1: [8, 4], fire_lv2: [9, 4], fire_lv3: [10, 4],
+    frost_lv1: [5, 4], frost_lv2: [6, 4], frost_lv3: [7, 4],
+    grass: [15, 7], grass_deco: [2, 1],
+    knight_lv1: [12, 3], knight_lv2: [13, 3], knight_lv3: [14, 3],
+    monster_1: [13, 7], monster_2: [13, 0], monster_3: [14, 0],
+    monster_4: [0, 1], monster_5: [1, 1], monster_6: [1, 2], monster_7: [16, 1],
+    road: [18, 8], stone: [19, 10], tree_1: [17, 10], tree_2: [18, 10],
+    wall: [3, 9], wizard_lv1: [5, 6], wizard_lv2: [6, 6], wizard_lv3: [7, 6]
 };
 
 SPR.load = function(cb) {
-	SPR.img = new Image();
-	SPR.img.onload = function() {
-		SPR.ready = true;
-		console.log("[TDv2] sprite loaded");
-		if (cb) cb();
-	};
-	SPR.img.onerror = function() {
-		console.error("[TDv2] sprite load failed:", SPR.img.src);
-		setTimeout(function() {
-			if (!SPR.ready) {
-				console.log("[TDv2] retrying sprite load...");
-				var oldSrc = SPR.img.src;
-				SPR.img = new Image();
-				SPR.img.onload = function() {
-					SPR.ready = true;
-					console.log("[TDv2] retry succeeded");
-					if (cb) cb();
-				};
-				SPR.img.onerror = function() {
-					console.error("[TDv2] both loads failed, showing error");
-					document.getElementById("loading").textContent = "素材加载失败，请刷新重试";
-				};
-				SPR.img.src = oldSrc;
-			}
-		}, 2000);
-	};
-	SPR.img.src = (location.pathname.includes('/tests/') ? '../' : '') + "assets/spritesheet-tdv2.png";
+    SPR.img = new Image();
+    SPR.img.onload = function() {
+        SPR.ready = true;
+        console.log("[TDv2] sprite loaded");
+        if (cb) cb();
+    };
+    SPR.img.onerror = function() {
+        console.error("[TDv2] sprite load failed:", SPR.img.src);
+        setTimeout(function() {
+            if (!SPR.ready) {
+                console.log("[TDv2] retrying sprite load...");
+                var oldSrc = SPR.img.src;
+                SPR.img = new Image();
+                SPR.img.onload = function() {
+                    SPR.ready = true;
+                    console.log("[TDv2] retry succeeded");
+                    if (cb) cb();
+                };
+                SPR.img.onerror = function() {
+                    console.error("[TDv2] both loads failed, showing error");
+                    document.getElementById("loading").textContent = "素材加载失败，请刷新重试";
+                };
+                SPR.img.src = oldSrc;
+            }
+        }, 2000);
+    };
+    SPR.img.src = (location.pathname.includes('/tests/') ? '../' : '') + "assets/spritesheet-tdv2.png";
 };
 
 SPR.get = function(n) {
-	var c = SC[n];
-	if (!c || !SPR.ready || !SPR.img || !SPR.img.complete) return null;
-	return { img: SPR.img, col: c[0], row: c[1], sx: c[0]*16, sy: c[1]*16, sw: 16, sh: 16, complete: true, naturalWidth: 16, naturalHeight: 16 };
+    var c = SC[n];
+    if (!c || !SPR.ready || !SPR.img || !SPR.img.complete) return null;
+    return { img: SPR.img, col: c[0], row: c[1], sx: c[0]*16, sy: c[1]*16, sw: 16, sh: 16 };
 };
 
-// ===== GRID / MAP =====
-var mapGrid = []; // [gy][gx] = { passable, buildable, building, decoration }
-var ROAD_PATH = []; // precomputed way
+// ===== MONSTER TYPE DATA (15 types from design doc) =====
+var MONSTER_TYPES = [
+    { hp: 80, speed: 0.67, reward: 5, spr: 1 },    // 0 史莱姆
+    { hp: 50, speed: 1.0, reward: 5, spr: 2 },      // 1 兔子
+    { hp: 120, speed: 1.17, reward: 8, spr: 3 },    // 2 野狼
+    { hp: 100, speed: 0.92, reward: 8, spr: 4 },    // 3 哥布林
+    { hp: 180, speed: 0.83, reward: 10, spr: 5 },   // 4 蝎子
+    { hp: 150, speed: 1.08, reward: 10, spr: 6 },   // 5 沙虫
+    { hp: 160, speed: 0.75, reward: 12, spr: 7 },   // 6 毒蛙
+    { hp: 200, speed: 0.92, reward: 12, spr: 1 },   // 7 蛇妖
+    { hp: 250, speed: 0.67, reward: 15, spr: 2 },   // 8 火元素
+    { hp: 300, speed: 0.83, reward: 15, spr: 3 },   // 9 恶魔
+    { hp: 350, speed: 0.58, reward: 18, spr: 4 },   // 10 冰精灵
+    { hp: 500, speed: 0.42, reward: 18, spr: 5 },   // 11 雪巨人
+    { hp: 400, speed: 1.17, reward: 20, spr: 6 },   // 12 暗影骑士
+    { hp: 350, speed: 1.0, reward: 20, spr: 7 },    // 13 死灵
+    { hp: 450, speed: 1.08, reward: 20, spr: 1 }    // 14 虚空仆从
+];
 
-function initMap() {
-	mapGrid = [];
-	for (var gy = 0; gy < CFG.rows; gy++) {
-		mapGrid[gy] = [];
-		for (var gx = 0; gx < CFG.cols; gx++) {
-			mapGrid[gy][gx] = { passable: true, buildable: true, building: null, decor: null };
-		}
-	}
-	// Build S-path from (0,0) to (15,15)
-	// Path: go right to (10,0), down to (10,12), right to (15,12), down to (15,15)
-	buildRoadPath();
-	// Mark path cells as non-buildable
-	for (var i = 0; i < ROAD_PATH.length; i++) {
-		var gx = ROAD_PATH[i][0], gy = ROAD_PATH[i][1];
-		mapGrid[gy][gx].buildable = false;
-	}
-	// Place environment decorations
-	placeDecorations();
-}
+// ===== BOSS DATA (8 bosses) =====
+var BOSS_DATA = [
+    {
+        name: "巨型史莱姆", hp: 3000, atk: 30, speed: 0.5, reward: 80,
+        skill: "split", skillDesc: "死亡后分裂为3只小型史莱姆",
+        skillTimer: 0, spr: 1
+    },
+    {
+        name: "狼王", hp: 4000, atk: 45, speed: 1.33, reward: 80,
+        skill: "sprint", skillDesc: "每10秒加速100%持续3秒",
+        skillTimer: 0, spr: 2
+    },
+    {
+        name: "沙虫王", hp: 5000, atk: 40, speed: 0.67, reward: 100,
+        skill: "burrow", skillDesc: "每8秒钻地无敌2.5秒",
+        skillTimer: 0, spr: 3
+    },
+    {
+        name: "蛇妖女王", hp: 6000, atk: 50, speed: 0.58, reward: 120,
+        skill: "poison", skillDesc: "每12秒释放毒雾",
+        skillTimer: 0, spr: 4
+    },
+    {
+        name: "炎魔", hp: 8000, atk: 70, speed: 0.5, reward: 150,
+        skill: "inferno", skillDesc: "每10秒火焰AOE",
+        skillTimer: 0, spr: 5
+    },
+    {
+        name: "冰霜巨人", hp: 10000, atk: 55, speed: 0.33, reward: 200,
+        skill: "frostAura", skillDesc: "减速光环半径120px",
+        skillTimer: 0, spr: 6
+    },
+    {
+        name: "暗影领主", hp: 12000, atk: 65, speed: 1.0, reward: 250,
+        skill: "teleport", skillDesc: "每5秒瞬移，每15秒召唤",
+        skillTimer: 0, spr: 7
+    },
+    {
+        name: "虚空之主", hp: 20000, atk: 80, speed: 0.75, reward: 500,
+        skill: "voidLord", skillDesc: "三阶段形态",
+        skillTimer: 0, spr: 1
+    }
+];
 
-function buildRoadPath() {
-	ROAD_PATH = [];
-	// Segment 1: (0,0) to (10,0) along top
-	for (var x = 0; x <= 10; x++) ROAD_PATH.push([x, 0]);
-	// Segment 2: (10,1) to (10,12) down
-	for (var y = 1; y <= 12; y++) ROAD_PATH.push([10, y]);
-	// Segment 3: (11,12) to (15,12) right
-	for (var x = 11; x <= 15; x++) ROAD_PATH.push([x, 12]);
-	// Segment 4: (15,13) to (15,15) down
-	for (var y = 13; y <= 15; y++) ROAD_PATH.push([15, y]);
-}
+// ===== LEVEL DATA (8 levels) =====
+// Wave format: { mobs: [[typeIdx, count], ...], spawnInterval: frames }
+// Boss wave: { boss: bossIdx }
+// levelWaveDelay: frames between waves
+// Each level tracks its own waves; globalWaveIndex is cumulative across ALL levels
 
-function placeDecorations() {
-	var decorItems = ["stone","stone","stone","stone","grass_deco","grass_deco","tree_1","tree_2"];
-	for (var gy = 0; gy < CFG.rows; gy++) {
-		for (var gx = 0; gx < CFG.cols; gx++) {
-			var g = mapGrid[gy][gx];
-			if (!g.buildable || g.building) continue;
-			// ~20% chance based on position
-			var h = (gx * 13 + gy * 7 + 3) % 19;
-			if (h >= decorItems.length) continue;
-			g.decor = decorItems[h];
-		}
-	}
-}
+var LEVEL_DATA = [
+    // Level 1 - Spring Plains
+    {
+        id: 1, name: "春风平原", desc: "开阔平原，笔直道路",
+        startMoney: 200, goldReward: 100, life: 20,
+        path: (function(){var p=[];for(var x=0;x<=15;x++)p.push([x,7]);return p;})(),
+        noBuild: [],
+        theme: "plain",
+        levelWaveDelay: 1800, // 30s between waves
+        towerUnlock: ["archer"],
+        waves: [
+            { mobs: [[0,5]], spawnInterval: 120 },
+            { mobs: [[1,5]], spawnInterval: 120 },
+            { mobs: [[0,3],[1,2]], spawnInterval: 120 },
+            { mobs: [[0,8]], spawnInterval: 108 },
+            { mobs: [[1,4],[0,4]], spawnInterval: 108 },
+            { boss: 0 }
+        ]
+    },
+    // Level 2 - Dark Forest
+    {
+        id: 2, name: "幽暗森林", desc: "密林S型曲径",
+        startMoney: 250, goldReward: 150, life: 20,
+        path: [
+            [0,0],[1,0],[2,0],[3,0],[4,0],[5,0],
+            [5,1],[5,2],[5,3],
+            [6,3],[7,3],[8,3],[9,3],[10,3],
+            [10,4],[10,5],[10,6],
+            [11,6],[12,6],[13,6],[14,6],[15,6]
+        ],
+        noBuild: [[0,1],[0,2],[0,3],[0,4],[0,5],[0,6],[1,1],[1,2],[1,3],[1,4],[1,5],[1,6],
+                  [2,1],[2,2],[2,3],[2,4],[2,5],[2,6],[3,1],[3,2],[3,3],[3,4],[3,5],[3,6],
+                  [4,1],[4,2],[4,3],[4,4],[4,5],[4,6],
+                  [13,0],[13,1],[13,2],[13,3],[13,4],[13,5],
+                  [14,0],[14,1],[14,2],[14,3],[14,4],[14,5],
+                  [15,0],[15,1],[15,2],[15,3],[15,4],[15,5],
+                  [6,4],[6,5],[6,6],[7,4],[7,5],[7,6],[8,4],[8,5],[8,6],[9,4],[9,5],[9,6],
+                  [0,7],[1,7],[2,7],[3,7],[4,7],[5,7],[6,7],[7,7],[8,7],[9,7]],
+        theme: "forest",
+        levelWaveDelay: 1800,
+        towerUnlock: ["wizard"],
+        waves: [
+            { mobs: [[2,4]], spawnInterval: 120 },
+            { mobs: [[3,4]], spawnInterval: 120 },
+            { mobs: [[2,2],[3,2]], spawnInterval: 120 },
+            { mobs: [[2,6]], spawnInterval: 108 },
+            { mobs: [[3,3],[2,3]], spawnInterval: 108 },
+            { mobs: [[2,8]], spawnInterval: 108 },
+            { mobs: [[3,4],[2,4]], spawnInterval: 90 },
+            { boss: 1 }
+        ]
+    },
+    // Level 3 - Sand Desert
+    {
+        id: 3, name: "流沙荒漠", desc: "沙漠L型险道",
+        startMoney: 300, goldReward: 200, life: 20,
+        path: (function(){
+            var p=[];
+            for(var x=0;x<=10;x++) p.push([x,0]);
+            for(var y=1;y<=15;y++) p.push([10,y]);
+            return p;
+        })(),
+        noBuild: [[5,1],[5,2],[5,3],[6,1],[6,2],[6,3],[7,1],[7,2],[7,3],[8,1],[8,2],[8,3]],
+        theme: "desert",
+        levelWaveDelay: 1800,
+        towerUnlock: ["frost"],
+        waves: [
+            { mobs: [[4,4]], spawnInterval: 120 },
+            { mobs: [[5,4]], spawnInterval: 120 },
+            { mobs: [[4,3]], spawnInterval: 120 },
+            { mobs: [[5,3],[4,2]], spawnInterval: 120 },
+            { mobs: [[4,6]], spawnInterval: 108 },
+            { mobs: [[5,4],[4,4]], spawnInterval: 108 },
+            { mobs: [[4,5],[5,3]], spawnInterval: 108 },
+            { mobs: [[5,8]], spawnInterval: 90 },
+            { mobs: [[4,5],[5,5]], spawnInterval: 90 },
+            { boss: 2 }
+        ]
+    },
+    // Level 4 - Misty Swamp
+    {
+        id: 4, name: "迷雾沼泽", desc: "沼泽U型回路",
+        startMoney: 350, goldReward: 300, life: 20,
+        path: [
+            [0,0],[1,0],[2,0],[3,0],
+            [3,1],[3,2],[3,3],[3,4],[3,5],
+            [4,5],[5,5],[6,5],[7,5],[8,5],[9,5],[10,5],[11,5],[12,5],
+            [12,6],[12,7],[12,8],[12,9],[12,10],[12,11],[12,12],
+            [13,12],[14,12],[15,12]
+        ],
+        noBuild: [[5,1],[5,2],[5,3],[5,4],[6,1],[6,2],[6,3],[6,4],
+                  [7,1],[7,2],[7,3],[7,4],[8,1],[8,2],[8,3],[8,4],
+                  [9,1],[9,2],[9,3],[9,4],[10,1],[10,2],[10,3],[10,4]],
+        theme: "swamp",
+        levelWaveDelay: 1680,
+        towerUnlock: ["fire"],
+        waves: [
+            { mobs: [[6,4]], spawnInterval: 120 },
+            { mobs: [[7,3]], spawnInterval: 120 },
+            { mobs: [[6,3],[7,1]], spawnInterval: 120 },
+            { mobs: [[6,3],[7,2]], spawnInterval: 108 },
+            { mobs: [[7,5]], spawnInterval: 108 },
+            { mobs: [[6,4],[7,3]], spawnInterval: 108 },
+            { mobs: [[6,5],[7,3]], spawnInterval: 108 },
+            { mobs: [[7,4],[6,4]], spawnInterval: 90 },
+            { mobs: [[6,6],[7,4]], spawnInterval: 90 },
+            { mobs: [[7,5],[6,5]], spawnInterval: 90 },
+            { mobs: [[6,6],[7,6]], spawnInterval: 90 },
+            { boss: 3 }
+        ]
+    },
+    // Level 5 - Lava Canyon
+    {
+        id: 5, name: "熔岩峡谷", desc: "之字形窄路回折",
+        startMoney: 400, goldReward: 400, life: 20,
+        path: [
+            [0,0],[0,1],[0,2],[0,3],[0,4],
+            [1,4],[2,4],[3,4],[4,4],
+            [4,5],[4,6],[4,7],[4,8],
+            [5,8],[6,8],[7,8],[8,8],
+            [8,9],[8,10],[8,11],[8,12],
+            [9,12],[10,12],[11,12],[12,12],[13,12],[14,12],[15,12]
+        ],
+        noBuild: [[0,5],[0,6],[0,7],[0,8],[0,9],[0,10],[0,11],[0,12],[0,13],[0,14],[0,15],
+                  [1,0],[1,1],[1,2],[1,3],[1,5],[1,6],[1,7],[1,8],[1,9],[1,10],[1,11],[1,12],[1,13],[1,14],[1,15],
+                  [2,0],[2,1],[2,2],[2,3],[2,5],[2,6],[2,7],[2,8],[2,9],[2,10],[2,11],[2,12],[2,13],[2,14],[2,15],
+                  [3,0],[3,1],[3,2],[3,3],[3,5],[3,6],[3,7],[3,8],[3,9],[3,10],[3,11],[3,12],[3,13],[3,14],[3,15],
+                  [5,0],[5,1],[5,2],[5,3],[5,4],[5,5],[5,6],[5,7],[5,9],[5,10],[5,11],[5,12],[5,13],[5,14],[5,15],
+                  [6,0],[6,1],[6,2],[6,3],[6,4],[6,5],[6,6],[6,7],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[6,15],
+                  [7,0],[7,1],[7,2],[7,3],[7,4],[7,5],[7,6],[7,7],[7,9],[7,10],[7,11],[7,12],[7,13],[7,14],[7,15]],
+        theme: "volcano",
+        levelWaveDelay: 1680,
+        towerUnlock: ["upgrade_lv2"],
+        waves: [
+            { mobs: [[8,3]], spawnInterval: 120 },
+            { mobs: [[9,3]], spawnInterval: 120 },
+            { mobs: [[8,2],[9,1]], spawnInterval: 120 },
+            { mobs: [[8,3],[9,2]], spawnInterval: 108 },
+            { mobs: [[9,5]], spawnInterval: 108 },
+            { mobs: [[8,4],[9,3]], spawnInterval: 108 },
+            { mobs: [[8,4],[9,4]], spawnInterval: 108 },
+            { mobs: [[9,5],[8,3]], spawnInterval: 90 },
+            { mobs: [[8,5],[9,5]], spawnInterval: 90 },
+            { mobs: [[9,6],[8,5]], spawnInterval: 90 },
+            { mobs: [[8,6],[9,6]], spawnInterval: 90 },
+            { mobs: [[9,7],[8,6]], spawnInterval: 90 },
+            { mobs: [[8,7],[9,7]], spawnInterval: 72 },
+            { boss: 4 }
+        ]
+    },
+    // Level 6 - Frost Tower
+    {
+        id: 6, name: "冰霜高塔", desc: "螺旋回旋长路",
+        startMoney: 450, goldReward: 500, life: 20,
+        path: [
+            [0,0],[1,0],[2,0],[3,0],[4,0],
+            [4,1],[4,2],[4,3],[4,4],[4,5],[4,6],[4,7],[4,8],
+            [3,8],[2,8],[1,8],
+            [1,9],[1,10],[1,11],
+            [2,11],[3,11],[4,11],[5,11],[6,11],[7,11],[8,11],[9,11],[10,11],[11,11],[12,11],[13,11],[14,11],[15,11]
+        ],
+        noBuild: [[0,3],[0,4],[0,5],[0,6],[0,7],[0,8],[0,9],[0,10],
+                  [1,3],[1,4],[1,5],[1,6],[1,7],
+                  [2,3],[2,4],[2,5],[2,6],[2,7],
+                  [3,3],[3,4],[3,5],[3,6],[3,7],
+                  [5,3],[5,4],[5,5],[5,6],[5,7],
+                  [6,3],[6,4],[6,5],[6,6],[6,7],
+                  [7,3],[7,4],[7,5],[7,6],[7,7],
+                  [8,3],[8,4],[8,5],[8,6],[8,7],
+                  [9,3],[9,4],[9,5],[9,6],[9,7],
+                  [10,3],[10,4],[10,5],[10,6],[10,7]],
+        theme: "frost",
+        levelWaveDelay: 1500,
+        towerUnlock: ["barrack"],
+        waves: [
+            { mobs: [[10,4]], spawnInterval: 120 },
+            { mobs: [[11,2]], spawnInterval: 150 },
+            { mobs: [[10,3],[11,1]], spawnInterval: 120 },
+            { mobs: [[10,4]], spawnInterval: 120 },
+            { mobs: [[11,2],[10,2]], spawnInterval: 120 },
+            { mobs: [[10,5],[11,2]], spawnInterval: 108 },
+            { mobs: [[11,3],[10,4]], spawnInterval: 108 },
+            { mobs: [[10,6],[11,3]], spawnInterval: 108 },
+            { mobs: [[11,4],[10,5]], spawnInterval: 90 },
+            { mobs: [[10,7],[11,4]], spawnInterval: 90 },
+            { mobs: [[11,5],[10,6]], spawnInterval: 90 },
+            { mobs: [[10,8],[11,5]], spawnInterval: 90 },
+            { mobs: [[11,6],[10,7]], spawnInterval: 72 },
+            { mobs: [[10,9],[11,6]], spawnInterval: 72 },
+            { mobs: [[11,7],[10,8]], spawnInterval: 72 },
+            { boss: 5 }
+        ]
+    },
+    // Level 7 - Shadow Castle
+    {
+        id: 7, name: "暗影城堡", desc: "城堡内蜿蜒岔路",
+        startMoney: 500, goldReward: 600, life: 20,
+        path: [
+            [0,3],[1,3],[2,3],[3,3],[4,3],[5,3],[6,3],[7,3],[8,3],
+            [8,4],[8,5],[8,6],[8,7],
+            [9,7],[10,7],[11,7],[12,7],[13,7],[14,7],[15,7]
+        ],
+        noBuild: [[0,0],[0,1],[0,2],[0,4],[0,5],[0,6],[0,7],[0,8],[0,9],[0,10],[0,11],[0,12],[0,13],[0,14],[0,15],
+                  [15,0],[15,1],[15,2],[15,3],[15,4],[15,5],[15,6],[15,8],[15,9],[15,10],[15,11],[15,12],[15,13],[15,14],[15,15],
+                  [1,0],[2,0],[3,0],[4,0],[5,0],[6,0],[7,0],
+                  [1,1],[2,1],[3,1],[4,1],[5,1],[6,1],[7,1],
+                  [1,2],[2,2],[3,2],[4,2],[5,2],[6,2],[7,2],
+                  [1,4],[2,4],[3,4],[4,4],[5,4],[6,4],[7,4],
+                  [1,5],[2,5],[3,5],[4,5],[5,5],[6,5],[7,5],
+                  [1,6],[2,6],[3,6],[4,6],[5,6],[6,6],[7,6],
+                  [1,7],[2,7],[3,7],[4,7],[5,7],[6,7],[7,7],
+                  [9,0],[10,0],[11,0],[12,0],[13,0],[14,0],
+                  [9,1],[10,1],[11,1],[12,1],[13,1],[14,1],
+                  [9,2],[10,2],[11,2],[12,2],[13,2],[14,2],
+                  [9,3],[10,3],[11,3],[12,3],[13,3],[14,3],
+                  [9,4],[10,4],[11,4],[12,4],[13,4],[14,4],
+                  [9,5],[10,5],[11,5],[12,5],[13,5],[14,5],
+                  [9,6],[10,6],[11,6],[12,6],[13,6],[14,6]],
+        theme: "shadow",
+        levelWaveDelay: 1320,
+        towerUnlock: ["crystal"],
+        waves: [
+            { mobs: [[12,3]], spawnInterval: 120 },
+            { mobs: [[13,3]], spawnInterval: 120 },
+            { mobs: [[12,2],[13,2]], spawnInterval: 120 },
+            { mobs: [[12,3],[13,2]], spawnInterval: 108 },
+            { mobs: [[13,4]], spawnInterval: 108 },
+            { mobs: [[12,4],[13,3]], spawnInterval: 108 },
+            { mobs: [[13,4],[12,4]], spawnInterval: 108 },
+            { mobs: [[12,5],[13,4]], spawnInterval: 108 },
+            { mobs: [[13,5],[12,5]], spawnInterval: 90 },
+            { mobs: [[12,6],[13,5]], spawnInterval: 90 },
+            { mobs: [[13,6],[12,6]], spawnInterval: 90 },
+            { mobs: [[12,7],[13,6]], spawnInterval: 90 },
+            { mobs: [[13,7],[12,7]], spawnInterval: 90 },
+            { mobs: [[12,8],[13,7]], spawnInterval: 72 },
+            { mobs: [[13,8],[12,8]], spawnInterval: 72 },
+            { mobs: [[12,9],[13,8]], spawnInterval: 72 },
+            { mobs: [[13,9],[12,9]], spawnInterval: 72 },
+            { boss: 6 }
+        ]
+    },
+    // Level 8 - Void Gate
+    {
+        id: 8, name: "虚空之门", desc: "混沌虚空终极战",
+        startMoney: 600, goldReward: 1000, life: 20,
+        path: [
+            [0,0],[0,1],[0,2],
+            [1,2],[2,2],[3,2],[4,2],[5,2],[6,2],[7,2],[8,2],[9,2],[10,2],
+            [10,3],[10,4],[10,5],[10,6],
+            [11,6],[12,6],[13,6],[14,6],[15,6]
+        ],
+        noBuild: [[0,3],[0,4],[0,5],[0,6],[0,7],[0,8],[0,9],[0,10],[0,11],[0,12],[0,13],[0,14],[0,15],
+                  [1,0],[1,1],[1,3],[1,4],[1,5],[1,6],[1,7],[1,8],[1,9],[1,10],[1,11],[1,12],[1,13],[1,14],[1,15],
+                  [2,1],[2,3],[2,4],[2,5],[2,6],[2,7],[2,8],[2,9],[2,10],[2,11],[2,12],[2,13],[2,14],[2,15],
+                  [3,1],[3,3],[3,4],[3,5],[3,6],[3,7],[3,8],[3,9],[3,10],[3,11],[3,12],[3,13],[3,14],[3,15],
+                  [4,1],[4,3],[4,4],[4,5],[4,6],[4,7],[4,8],[4,9],[4,10],[4,11],[4,12],[4,13],[4,14],[4,15],
+                  [5,1],[5,3],[5,4],[5,5],[5,6],[5,7],[5,8],[5,9],[5,10],[5,11],[5,12],[5,13],[5,14],[5,15],
+                  [6,1],[6,3],[6,4],[6,5],[6,6],[6,7],[6,8],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[6,15],
+                  [7,1],[7,3],[7,4],[7,5],[7,6],[7,7],[7,8],[7,9],[7,10],[7,11],[7,12],[7,13],[7,14],[7,15],
+                  [8,1],[8,3],[8,4],[8,5],[8,6],[8,7],[8,8],[8,9],[8,10],[8,11],[8,12],[8,13],[8,14],[8,15],
+                  [9,1],[9,3],[9,4],[9,5],[9,6],[9,7],[9,8],[9,9],[9,10],[9,11],[9,12],[9,13],[9,14],[9,15],
+                  [11,0],[11,1],[11,2],[11,3],[11,4],[11,5],[11,7],[11,8],[11,9],[11,10],[11,11],[11,12],[11,13],[11,14],[11,15],
+                  [12,0],[12,1],[12,2],[12,3],[12,4],[12,5],[12,7],[12,8],[12,9],[12,10],[12,11],[12,12],[12,13],[12,14],[12,15],
+                  [13,0],[13,1],[13,2],[13,3],[13,4],[13,5],[13,7],[13,8],[13,9],[13,10],[13,11],[13,12],[13,13],[13,14],[13,15],
+                  [14,0],[14,1],[14,2],[14,3],[14,4],[14,5],[14,7],[14,8],[14,9],[14,10],[14,11],[14,12],[14,13],[14,14],[14,15],
+                  [15,0],[15,1],[15,2],[15,3],[15,4],[15,5],[15,7],[15,8],[15,9],[15,10],[15,11],[15,12],[15,13],[15,14],[15,15]],
+        theme: "void",
+        levelWaveDelay: 1200,
+        towerUnlock: [],
+        waves: [
+            { mobs: [[14,5]], spawnInterval: 90 },
+            { mobs: [[14,3],[12,3]], spawnInterval: 90 },
+            { mobs: [[14,4],[13,3]], spawnInterval: 90 },
+            { mobs: [[8,3],[9,3],[14,2]], spawnInterval: 90 },
+            { mobs: [[10,4],[11,2]], spawnInterval: 90 },
+            { mobs: [[12,4],[14,4]], spawnInterval: 90 },
+            { mobs: [[13,4],[6,4]], spawnInterval: 90 },
+            { mobs: [[14,5],[8,5]], spawnInterval: 90 },
+            { mobs: [[9,4],[10,4],[11,2]], spawnInterval: 90 },
+            { mobs: [[12,5],[13,5],[14,3]], spawnInterval: 72 },
+            { mobs: [[4,4],[5,4],[6,4]], spawnInterval: 72 },
+            { mobs: [[14,6],[8,5],[9,5]], spawnInterval: 72 },
+            { mobs: [[10,6],[11,5],[12,5]], spawnInterval: 72 },
+            { mobs: [[13,6],[14,6],[4,4]], spawnInterval: 72 },
+            { mobs: [[14,4],[12,4],[8,4],[6,4]], spawnInterval: 72 },
+            { mobs: [[14,8],[12,7],[13,7]], spawnInterval: 72 },
+            { mobs: [[8,7],[9,7],[10,6],[14,6]], spawnInterval: 72 },
+            { mobs: [[14,5],[12,5],[8,5],[6,5],[4,5]], spawnInterval: 72 },
+            { mobs: [[14,10],[13,10],[12,10],[11,10]], spawnInterval: 72 },
+            { boss: 7 }
+        ]
+    }
+];
 
-// ===== BUILDING TYPES =====
+// ===== TOWER DATA (design doc values) =====
+// cost = build cost for level 1, upgradeCost = cost to upgrade to next level
+// rate in frames (60 = 1s at 60fps)
 var TOWER_DATA = {
-	archer: { name: "射手", cost: 50, range: 150, dmg: 10, rate: 20, spr: ["archer_lv1","archer_lv2","archer_lv3"], bullet: "bullet_arrow", splash: 0 },
-	wizard: { name: "法师", cost: 80, range: 130, dmg: 20, rate: 35, spr: ["wizard_lv1","wizard_lv2","wizard_lv3"], bullet: "bullet_wizard", splash: 40 },
-	barrack: { name: "骑士营", cost: 60, range: 60, dmg: 15, rate: 15, spr: ["barrack_lv1","barrack_lv2","barrack_lv3"], bullet: null, splash: 0 },
-	crystal: { name: "水晶塔", cost: 100, range: 140, dmg: 8, rate: 25, spr: ["crystal_lv1","crystal_lv2","crystal_lv3"], bullet: "bullet_wizard", splash: 30 },
-	wall: { name: "屏障", cost: 30, range: 0, dmg: 0, rate: 0, spr: null, bullet: null, splash: 0 },
-	frost: { name: "冰霜塔", cost: 120, range: 200, dmg: 8, rate: 72, spr: ["frost_lv1","frost_lv2","frost_lv3"], bullet: "bullet_frost", splash: 0 },
-	fire: { name: "火焰塔", cost: 150, range: 180, dmg: 15, rate: 108, spr: ["fire_lv1","fire_lv2","fire_lv3"], bullet: "bullet_fire", splash: 72 }
+    archer: {
+        name: "箭塔", cost: 100, bullet: "bullet_arrow", unlockLevel: 1,
+        levels: [
+            { dmg: 25, rate: 60, range: 150, splash: 0 },
+            { dmg: 40, rate: 48, range: 170, splash: 0 },
+            { dmg: 65, rate: 42, range: 190, splash: 0 }
+        ],
+        upgradeCost: [0, 150, 250]
+    },
+    wizard: {
+        name: "法师塔", cost: 150, bullet: "bullet_wizard", unlockLevel: 2,
+        levels: [
+            { dmg: 35, rate: 72, range: 140, splash: 40 },
+            { dmg: 55, rate: 60, range: 160, splash: 50 },
+            { dmg: 85, rate: 54, range: 180, splash: 60 }
+        ],
+        upgradeCost: [0, 200, 300]
+    },
+    frost: {
+        name: "冰霜塔", cost: 120, bullet: "bullet_frost", unlockLevel: 3,
+        levels: [
+            { dmg: 15, rate: 90, range: 160, splash: 0 },
+            { dmg: 25, rate: 78, range: 180, splash: 0 },
+            { dmg: 40, rate: 66, range: 200, splash: 0 }
+        ],
+        upgradeCost: [0, 180, 280]
+    },
+    fire: {
+        name: "火焰塔", cost: 180, bullet: "bullet_fire", unlockLevel: 4,
+        levels: [
+            { dmg: 30, rate: 78, range: 130, splash: 40 },
+            { dmg: 50, rate: 66, range: 150, splash: 50 },
+            { dmg: 80, rate: 60, range: 170, splash: 60 }
+        ],
+        upgradeCost: [0, 250, 350]
+    },
+    barrack: {
+        name: "骑士营", cost: 250, bullet: null, unlockLevel: 6,
+        levels: [
+            { dmg: 60, rate: 15, range: 60, splash: 0 },
+            { dmg: 90, rate: 12, range: 70, splash: 0 },
+            { dmg: 130, rate: 10, range: 80, splash: 0 }
+        ],
+        upgradeCost: [0, 350, 500]
+    },
+    crystal: {
+        name: "水晶塔", cost: 300, bullet: "bullet_arrow", unlockLevel: 7,
+        levels: [
+            { dmg: 70, rate: 120, range: 200, splash: 0 },
+            { dmg: 110, rate: 102, range: 220, splash: 0 },
+            { dmg: 160, rate: 90, range: 240, splash: 0 }
+        ],
+        upgradeCost: [0, 400, 550]
+    },
+    wall: {
+        name: "屏障", cost: 30, bullet: null, unlockLevel: 1,
+        levels: [
+            { dmg: 0, rate: 0, range: 0, splash: 0 },
+            { dmg: 0, rate: 0, range: 0, splash: 0 },
+            { dmg: 0, rate: 0, range: 0, splash: 0 }
+        ],
+        upgradeCost: [0, 0, 0]
+    }
 };
-var TOWER_KEYS = ["archer","wizard","barrack","crystal","wall","frost","fire"];
+var TOWER_KEYS = ["archer","wizard","frost","fire","barrack","crystal","wall"];
+
+// ===== TOWER UNLOCK TRACKING =====
+// By default only archer and wall are unlocked (level 1)
+// Other towers unlock as player completes levels
+function getUnlockedTowerKeys(currentLevel) {
+    var unlocked = ["archer", "wall"];
+    for (var i = 0; i <= currentLevel; i++) {
+        var levelData = LEVEL_DATA[i];
+        if (levelData && levelData.towerUnlock) {
+            for (var t = 0; t < levelData.towerUnlock.length; t++) {
+                var tk = levelData.towerUnlock[t];
+                if (tk !== "upgrade_lv2" && unlocked.indexOf(tk) === -1) {
+                    unlocked.push(tk);
+                }
+            }
+        }
+    }
+    return unlocked;
+}
+
+function getMaxTowerLevel(currentLevel) {
+    var lv5Unlocked = false;
+    for (var i = 4; i < currentLevel; i++) {
+        var levelData = LEVEL_DATA[i];
+        if (levelData && levelData.towerUnlock) {
+            for (var t = 0; t < levelData.towerUnlock.length; t++) {
+                if (levelData.towerUnlock[t] === "upgrade_lv2") lv5Unlocked = true;
+            }
+        }
+    }
+    // Level 1-4: max level 1, Level 5-7: max level 2, Level 8+: max level 3
+    if (currentLevel >= 8) return 3;
+    if (currentLevel >= 5) return 2;
+    return 1;
+}
 
 // ===== GAME STATE =====
 var G = {
-	money: 200, life: 20, score: 0, wave: 0, phase: "loading",
-	step: 0, selectedType: null, // selected tower type key
-	buildings: [], monsters: [], bullets: [],
-	waveTimer: 0, spawnQueue: [], waveInProgress: false,
-	gameOver: false, mouseX: 0, mouseY: 0, hoverGrid: null,
-	particles: []
+    money: 200, life: 20, score: 0,
+    wave: 0, // current wave index (0-based, within this level)
+    globalWaveIndex: 0, // cumulative wave index across all levels (1-based)
+    step: 0,
+    selectedType: null,
+    buildMode: false, // if true, clicking places a tower; if false clicking selects
+    buildings: [], monsters: [], bullets: [],
+    waveTimer: 0, spawnQueue: [], waveInProgress: false,
+    gameOver: false, mouseX: 0, mouseY: 0, hoverGrid: null,
+    particles: [],
+    currentLevel: 0, // 0-indexed
+    maxUnlockedLevel: 0, // 0-indexed, saved to localStorage
+    gamePhase: "loading", // "loading" | "menu" | "playing" | "levelComplete" | "gameover"
+    wavesCleared: 0,
+    levelStartMoney: 0,
+    levelLivesLost: 0,
+    bossActive: false,
+    selectedBuilding: null, // for upgrade UI
+    maxTowerLevel: 1,
+    autoWaveTimer: 0,
+    waveCooldown: 0,
+    nextWaveReady: false
 };
+
+// ===== SAVE / LOAD =====
+function saveProgress() {
+    try {
+        localStorage.setItem("tdv2_progress", JSON.stringify({
+            maxUnlockedLevel: G.maxUnlockedLevel,
+            version: 1
+        }));
+    } catch(e) {}
+}
+
+function loadProgress() {
+    try {
+        var d = JSON.parse(localStorage.getItem("tdv2_progress"));
+        if (d && d.maxUnlockedLevel !== undefined) {
+            G.maxUnlockedLevel = d.maxUnlockedLevel;
+        }
+    } catch(e) {}
+}
+
+// ===== GRID / MAP (level-specific) =====
+var mapGrid = [];
+var ROAD_PATH = [];
+
+function initLevel(levelIdx) {
+    var ld = LEVEL_DATA[levelIdx];
+    if (!ld) { console.error("Invalid level:", levelIdx); return; }
+
+    // Clear all
+    G.buildings = []; G.monsters = []; G.bullets = []; G.particles = [];
+    G.wave = 0; G.wavesCleared = 0;
+    G.waveTimer = 0; G.spawnQueue = [];
+    G.waveInProgress = false; G.gameOver = false;
+    G.selectedType = null; G.selectedBuilding = null;
+    G.bossActive = false;
+    G.autoWaveTimer = 0; G.waveCooldown = 0; G.nextWaveReady = false;
+
+    // Set state
+    G.currentLevel = levelIdx;
+    G.money = ld.startMoney || 200;
+    G.life = ld.life || 20;
+    G.levelStartMoney = G.money;
+    G.levelLivesLost = 0;
+    G.score = 0;
+    G.maxTowerLevel = getMaxTowerLevel(levelIdx);
+
+    // Reset globalWaveIndex to cumulative waves before this level
+    var cumWaves = 0;
+    for (var i = 0; i < levelIdx; i++) {
+        cumWaves += LEVEL_DATA[i].waves.length;
+    }
+    G.globalWaveIndex = cumWaves;
+
+    // Build grid
+    ROAD_PATH = ld.path.slice();
+    mapGrid = [];
+    for (var gy = 0; gy < CFG.rows; gy++) {
+        mapGrid[gy] = [];
+        for (var gx = 0; gx < CFG.cols; gx++) {
+            mapGrid[gy][gx] = { passable: true, buildable: true, building: null, decor: null };
+        }
+    }
+    // Mark road cells as non-buildable
+    for (var i = 0; i < ROAD_PATH.length; i++) {
+        var p = ROAD_PATH[i];
+        mapGrid[p[1]][p[0]].buildable = false;
+    }
+    // Mark no-build cells
+    var nb = ld.noBuild;
+    if (nb) {
+        for (var ni = 0; ni < nb.length; ni++) {
+            var np = nb[ni];
+            if (np[1] < CFG.rows && np[0] < CFG.cols) {
+                mapGrid[np[1]][np[0]].buildable = false;
+            }
+        }
+    }
+    // Place decorations
+    placeDecorationsByTheme(levelIdx);
+}
+
+function placeDecorationsByTheme(levelIdx) {
+    var themes = ["plain", "forest", "desert", "swamp", "volcano", "frost", "shadow", "void"];
+    var theme = (LEVEL_DATA[levelIdx] && LEVEL_DATA[levelIdx].theme) || "plain";
+    var decorSet = [];
+    if (theme === "plain") decorSet = ["stone","grass_deco","tree_1","tree_2"];
+    else if (theme === "forest") decorSet = ["tree_1","tree_2","tree_1","tree_2","grass_deco"];
+    else if (theme === "desert") decorSet = ["stone","stone","stone","stone"];
+    else if (theme === "swamp") decorSet = ["grass_deco","grass_deco","stone"];
+    else if (theme === "volcano") decorSet = ["stone","stone","stone","stone"];
+    else if (theme === "frost") decorSet = ["stone","grass_deco","stone"];
+    else if (theme === "shadow") decorSet = ["stone","stone"];
+    else if (theme === "void") decorSet = ["stone","stone","stone","stone"];
+
+    for (var gy = 0; gy < CFG.rows; gy++) {
+        for (var gx = 0; gx < CFG.cols; gx++) {
+            var g = mapGrid[gy][gx];
+            if (!g.buildable || g.building) continue;
+            var h = (gx * 13 + gy * 7 + 3) % 19;
+            if (h >= decorSet.length) continue;
+            g.decor = decorSet[h];
+        }
+    }
+}
+
+function isOnRoad(gx, gy) {
+    return ROAD_PATH.some(function(p) { return p[0] === gx && p[1] === gy; });
+}
 
 // ===== BUILDING =====
 var _bid = 0;
 function createBuilding(type, gx, gy) {
-	var td = TOWER_DATA[type];
-	if (!td) return null;
-	var b = {
-		id: "b" + (_bid++),
-		type: type, level: 1, gx: gx, gy: gy,
-		cx: 0, cy: 0, // computed from grid
-		range: td.range, dmg: td.dmg, rate: td.rate,
-		cooldown: 0, target: null,
-		spr: td.spr, bullet: td.bullet, splash: td.splash,
-		cost: td.cost, exp: 0, expNext: 2 // 2 kills to level up
-	};
-	var c = gridCenter(gx, gy);
-	b.cx = c[0]; b.cy = c[1];
-	mapGrid[gy][gx].building = b;
-	G.buildings.push(b);
-	G.money -= td.cost;
-	// Reset cooldown so it doesn't fire immediately
-	b.cooldown = b.rate;
-	return b;
+    var td = TOWER_DATA[type];
+    if (!td) return null;
+    var lvData = td.levels[0];
+    var b = {
+        id: "b" + (_bid++),
+        type: type, level: 1, gx: gx, gy: gy,
+        cx: 0, cy: 0,
+        range: lvData.range, dmg: lvData.dmg, rate: lvData.rate,
+        cooldown: 0, target: null,
+        spr: type + "_lv1", // base sprite key
+        bullet: td.bullet, splash: lvData.splash,
+        cost: td.cost, exp: 0, expNext: 5
+    };
+    // Assign level-specific sprite
+    b.spr = type + "_lv" + b.level;
+    var c = gridCenter(gx, gy);
+    b.cx = c[0]; b.cy = c[1];
+    mapGrid[gy][gx].building = b;
+    G.buildings.push(b);
+    G.money -= td.cost;
+    b.cooldown = b.rate;
+    return b;
 }
 
 function getTowerSprite(b) {
-	if (!b.spr || b.spr.length === 0) return null;
-	var idx = Math.min(b.level - 1, b.spr.length - 1);
-	return b.spr[idx];
+    if (!b.spr) return null;
+    // Map tower type + level to sprite key
+    var type = b.type;
+    var lvl = Math.min(b.level, 3);
+    return type + "_lv" + lvl;
+}
+
+function upgradeBuilding(b) {
+    if (!b) return false;
+    var td = TOWER_DATA[b.type];
+    if (!td) return false;
+    var nextLevel = b.level;
+    if (nextLevel >= 3) return false;
+    if (nextLevel >= G.maxTowerLevel) return false;
+    var cost = td.upgradeCost[nextLevel];
+    if (G.money < cost) return false;
+    G.money -= cost;
+    b.level++;
+    var lvData = td.levels[b.level - 1];
+    b.dmg = lvData.dmg;
+    b.rate = lvData.rate;
+    b.range = lvData.range;
+    b.splash = lvData.splash;
+    b.spr = b.type + "_lv" + b.level;
+    b.exp = 0;
+    b.expNext = b.level === 2 ? 8 : 12;
+    return true;
 }
 
 // ===== MONSTER =====
 var _mid = 0;
-function spawnMonster(type, hp, speed, reward, tint) {
-	if (!ROAD_PATH.length) return null;
-	var start = ROAD_PATH[0];
-	var c = gridCenter(start[0], start[1]);
-	var m = {
-		id: "m" + (_mid++),
-		type: type, hp: hp, maxHp: hp, speed: speed, reward: reward,
-		tint: tint || null, baseSpeed: speed, slowTimer: 0, pathIdx: 0, // position along ROAD_PATH
-		gx: start[0], gy: start[1],
-		cx: c[0], cy: c[1], alive: true, hitFlash: 0,
-		animFrame: 0
-	};
-	G.monsters.push(m);
-	return m;
+function spawnMonster(typeIdx, hp, speed, reward) {
+    if (!ROAD_PATH.length) return null;
+    var start = ROAD_PATH[0];
+    var c = gridCenter(start[0], start[1]);
+    var sprIdx = (MONSTER_TYPES[typeIdx] && MONSTER_TYPES[typeIdx].spr) || 1;
+    var m = {
+        id: "m" + (_mid++),
+        typeIdx: typeIdx, hp: hp, maxHp: hp,
+        speed: speed, baseSpeed: speed,
+        reward: reward,
+        gx: start[0], gy: start[1],
+        cx: c[0], cy: c[1], alive: true, hitFlash: 0,
+        animFrame: 0, pathIdx: 0,
+        slowTimer: 0, stunTimer: 0,
+        sprIdx: sprIdx,
+        isBoss: false,
+        bossIdx: -1,
+        // boss-specific state
+        bossSkillTimer: 0,
+        burrowed: false,
+        sprintActive: false,
+        sprintTimer: 0,
+        invisible: false,
+        phaseSwitch: false
+    };
+    G.monsters.push(m);
+    return m;
 }
 
-function monsterTint(typeIdx) {
-	var tints = [
-		null, "rgba(255,255,255,0.3)", "rgba(255,100,100,0.3)", "rgba(100,255,100,0.3)",
-		"rgba(200,100,255,0.3)", "rgba(100,150,255,0.3)", "rgba(255,200,50,0.4)"
-	];
-	return tints[typeIdx] || null;
+function spawnBoss(bossIdx) {
+    var bd = BOSS_DATA[bossIdx];
+    if (!bd || !ROAD_PATH.length) return null;
+    var start = ROAD_PATH[0];
+    var c = gridCenter(start[0], start[1]);
+    var m = {
+        id: "boss_" + (_mid++),
+        typeIdx: -1,
+        hp: bd.hp, maxHp: bd.hp,
+        speed: bd.speed, baseSpeed: bd.speed,
+        reward: bd.reward,
+        gx: start[0], gy: start[1],
+        cx: c[0], cy: c[1], alive: true, hitFlash: 0,
+        animFrame: 0, pathIdx: 0,
+        slowTimer: 0, stunTimer: 0,
+        sprIdx: bd.spr,
+        isBoss: true,
+        bossIdx: bossIdx,
+        bossName: bd.name,
+        bossSkill: bd.skill,
+        bossSkillTimer: 600,
+        burrowed: false,
+        sprintActive: false,
+        sprintTimer: 0,
+        invisible: false,
+        phaseSwitch: false,
+        extraHp: 0,
+        summonTimer: 0
+    };
+    G.monsters.push(m);
+    G.bossActive = true;
+    return m;
 }
 
 // ===== BULLET =====
 var _blid = 0;
 function createBullet(fromBx, fromBy, target, speed, dmg, sprName, splash, fromBld) {
-	var b = {
-		id: "bl" + (_blid++),
-		x: fromBx, y: fromBy, target: target,
-		speed: speed || 4, dmg: dmg, spr: sprName || "bullet_arrow",
-		splash: splash || 0, fromBld: fromBld || null, alive: true
-	};
-	G.bullets.push(b);
-	return b;
+    var b = {
+        id: "bl" + (_blid++),
+        x: fromBx, y: fromBy, target: target,
+        speed: speed || 4, dmg: dmg, spr: sprName || "bullet_arrow",
+        splash: splash || 0, fromBld: fromBld || null, alive: true
+    };
+    G.bullets.push(b);
+    return b;
 }
 
 // ===== WAVE SYSTEM =====
-var WAVE_DEFS = [
-	// wave 1: 5 normal
-	{ count: 5, types: [0], hpMul: 1, speedMul: 1, rewardMul: 1 },
-	// wave 2: 8 mixed
-	{ count: 8, types: [0,1], hpMul: 1, speedMul: 1, rewardMul: 1 },
-	// wave 3: 10 + fast
-	{ count: 10, types: [0,1,2], hpMul: 1.2, speedMul: 1, rewardMul: 1 },
-	// wave 4: 12 tanky
-	{ count: 12, types: [0,1,3], hpMul: 1.5, speedMul: 1, rewardMul: 1.2 },
-	// wave 5: boss
-	{ count: 15, types: [0,1,2,3,6], hpMul: 2, speedMul: 1, rewardMul: 1.5 }
-];
+function isLevelComplete() {
+    var ld = LEVEL_DATA[G.currentLevel];
+    if (!ld) return false;
+    var totalWaves = ld.waves.length;
+    if (G.wave >= totalWaves && !G.waveInProgress &&
+        G.monsters.every(function(m) { return !m.alive; })) {
+        return true;
+    }
+    return false;
+}
 
-var MONSTER_TYPES = [
-	{ hp: 30, speed: 1.2, reward: 10 },   // 0 normal
-	{ hp: 60, speed: 0.9, reward: 15 },   // 1 strong
-	{ hp: 20, speed: 2.0, reward: 12 },   // 2 fast
-	{ hp: 120, speed: 0.7, reward: 20 },  // 3 tank
-	{ hp: 50, speed: 1.0, reward: 18 },   // 4 shield (not used directly)
-	{ hp: 40, speed: 1.5, reward: 14 },   // 5 agile
-	{ hp: 300, speed: 0.6, reward: 50 }   // 6 boss
-];
+function getLevelTotalWaves() {
+    var ld = LEVEL_DATA[G.currentLevel];
+    return ld ? ld.waves.length : 0;
+}
 
 function startWave() {
-	if (G.waveInProgress || G.gameOver) return;
-	G.wave++;
-	var def = WAVE_DEFS[Math.min(G.wave - 1, WAVE_DEFS.length - 1)];
-	G.spawnQueue = [];
-	for (var i = 0; i < def.count; i++) {
-		var ti = def.types[i % def.types.length];
-		var mt = MONSTER_TYPES[ti];
-		var delay = 30 + i * 20; // frames between spawns
-		G.spawnQueue.push({
-			type: ti,
-			hp: mt.hp * def.hpMul,
-			speed: mt.speed * def.speedMul,
-			reward: Math.round(mt.reward * def.rewardMul),
-			tint: monsterTint(ti),
-			delay: delay
-		});
-	}
-	G.waveTimer = 0;
-	G.waveInProgress = true;
-	G.money += 20; // wave bonus
+    var ld = LEVEL_DATA[G.currentLevel];
+    if (!ld) return;
+    if (G.waveInProgress || G.gameOver) return;
+    if (G.wave >= ld.waves.length) return;
+
+    var waveDef = ld.waves[G.wave];
+    G.spawnQueue = [];
+
+    if (waveDef.boss !== undefined) {
+        // Boss wave
+        G.spawnQueue.push({
+            isBoss: true,
+            bossIdx: waveDef.boss,
+            delay: 60
+        });
+    } else {
+        var spawnInterval = waveDef.spawnInterval || 120;
+        var count = 0;
+        for (var mi = 0; mi < waveDef.mobs.length; mi++) {
+            count += waveDef.mobs[mi][1];
+        }
+        var spawnIdx = 0;
+        for (var mi = 0; mi < waveDef.mobs.length; mi++) {
+            var typeIdx = waveDef.mobs[mi][0];
+            var amount = waveDef.mobs[mi][1];
+            var mt = MONSTER_TYPES[typeIdx];
+            var waveInLevel = G.wave;
+            var baseMul = Math.pow(1.15, waveInLevel);
+            var hpMul = Math.min(baseMul, 10);
+            var rewardMul = (1 + 0.1 * G.currentLevel);
+            for (var c = 0; c < amount; c++) {
+                G.spawnQueue.push({
+                    isBoss: false,
+                    typeIdx: typeIdx,
+                    hp: Math.round(mt.hp * hpMul),
+                    speed: mt.speed,
+                    reward: Math.round(mt.reward * rewardMul),
+                    delay: 60 + spawnIdx * spawnInterval
+                });
+                spawnIdx++;
+            }
+        }
+    }
+
+    G.waveTimer = 0;
+    G.waveInProgress = true;
+    G.nextWaveReady = false;
+    G.waveCooldown = ld.levelWaveDelay || 1800;
+    G.autoWaveTimer = 0;
+    console.log("[TDv2] Wave " + (G.wave + 1) + " started (global #" + (G.globalWaveIndex + 1) + ")");
 }
 
 // ===== PARTICLE SYSTEM =====
 function spawnParticle(x, y, vx, vy, life, color, size) {
-	G.particles.push({ x: x, y: y, vx: vx, vy: vy, life: life, maxLife: life, color: color, size: size || 3 });
+    G.particles.push({ x: x, y: y, vx: vx, vy: vy, life: life, maxLife: life, color: color, size: size || 3 });
 }
 
 function spawnExplosion(x, y, count, color, speed, life, size) {
-	for (var i = 0; i < count; i++) {
-		var angle = Math.random() * Math.PI * 2;
-		var spd = (0.5 + Math.random() * 0.5) * (speed || 3);
-		spawnParticle(x, y, Math.cos(angle) * spd, Math.sin(angle) * spd, life || 20, color, size || 3);
-	}
+    for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var spd = (0.5 + Math.random() * 0.5) * (speed || 3);
+        spawnParticle(x, y, Math.cos(angle) * spd, Math.sin(angle) * spd, life || 20, color, size || 3);
+    }
 }
 
 // ===== UPDATE =====
 function update() {
-	G.step++;
+    G.step++;
 
-	// Spawn queue
-	if (G.waveInProgress) {
-		if (G.spawnQueue.length > 0) {
-			G.waveTimer++;
-			while (G.spawnQueue.length > 0 && G.waveTimer >= G.spawnQueue[0].delay) {
-				var sq = G.spawnQueue.shift();
-				var c = gridCenter(ROAD_PATH[0][0], ROAD_PATH[0][1]);
-				spawnMonster(sq.type, sq.hp, sq.speed, sq.reward, sq.tint);
-			}
-		}
-		if (G.spawnQueue.length === 0 && G.monsters.every(function(m) { return !m.alive; })) {
-			G.waveInProgress = false;
-		}
-	}
+    // Spawn queue
+    if (G.waveInProgress) {
+        if (G.spawnQueue.length > 0) {
+            G.waveTimer++;
+            while (G.spawnQueue.length > 0 && G.waveTimer >= G.spawnQueue[0].delay) {
+                var sq = G.spawnQueue.shift();
+                if (sq.isBoss) {
+                    spawnBoss(sq.bossIdx);
+                    console.log("[TDv2] BOSS spawned: " + BOSS_DATA[sq.bossIdx].name);
+                } else {
+                    spawnMonster(sq.typeIdx, sq.hp, sq.speed, sq.reward);
+                }
+            }
+        }
+        // Check if wave completed (all spawned and all dead)
+        if (G.spawnQueue.length === 0 && G.monsters.every(function(m) { return !m.alive; })) {
+            G.waveInProgress = false;
+            G.wavesCleared++;
+            G.wave++;
+            G.globalWaveIndex++;
+            G.bossActive = false;
 
-	// Auto-start next wave when no wave in progress and monsters cleared
-	if (!G.waveInProgress && !G.gameOver && G.monsters.every(function(m) { return !m.alive; })) {
-		if (G.wave === 0 || G.step > 60) { // small delay between waves
-			startWave();
-		}
-	}
+            // Check level complete
+            if (isLevelComplete()) {
+                G.gamePhase = "levelComplete";
+                if (G.currentLevel + 1 > G.maxUnlockedLevel) {
+                    G.maxUnlockedLevel = G.currentLevel + 1;
+                }
+                saveProgress();
+                return;
+            }
+        }
+    }
 
-	// Update monsters
-	for (var mi = G.monsters.length - 1; mi >= 0; mi--) {
-		var m = G.monsters[mi];
-		if (!m.alive) { G.monsters.splice(mi, 1); continue; }
+    // Auto-start next wave
+    if (!G.waveInProgress && !G.gameOver && G.gamePhase === "playing") {
+        if (G.monsters.every(function(m) { return !m.alive; }) && G.spawnQueue.length === 0) {
+            G.autoWaveTimer++;
+            if (G.autoWaveTimer > 120) { // 2s auto delay before next wave
+                G.nextWaveReady = true;
+            }
+        }
+    }
 
-		// Move along path
-		m.animFrame++;
-		if (m.pathIdx < ROAD_PATH.length - 1) {
-			var next = ROAD_PATH[m.pathIdx + 1];
-			var targetPos = gridCenter(next[0], next[1]);
-			var dx = targetPos[0] - m.cx, dy = targetPos[1] - m.cy;
-			var dist = Math.sqrt(dx * dx + dy * dy);
-			var effectiveSpeed = m.speed * (m.slowTimer > 0 ? 0.6 : 1.0);
-			if (m.slowTimer > 0) m.slowTimer--;
-			if (dist < effectiveSpeed) {
-				m.pathIdx++;
-				m.gx = next[0]; m.gy = next[1];
-				m.cx = targetPos[0]; m.cy = targetPos[1];
-			} else {
-				m.cx += (dx / dist) * effectiveSpeed;
-				m.cy += (dy / dist) * effectiveSpeed;
-			}
-		} else {
-			// Reached exit
-			m.alive = false;
-			G.life--;
-			if (G.life <= 0) { G.life = 0; G.gameOver = true; G.phase = "gameover"; }
-			continue;
-		}
-		if (m.hitFlash > 0) m.hitFlash--;
-	}
+    // Update monsters
+    for (var mi = G.monsters.length - 1; mi >= 0; mi--) {
+        var m = G.monsters[mi];
+        if (!m.alive) { G.monsters.splice(mi, 1); continue; }
 
-	// Update buildings
-	for (var bi = 0; bi < G.buildings.length; bi++) {
-		var b = G.buildings[bi];
-		if (b.cooldown > 0) b.cooldown--;
+        m.animFrame++;
 
-		// Find target
-		b.target = null;
-		var bestDist = Infinity;
-		for (var mi2 = 0; mi2 < G.monsters.length; mi2++) {
-			var m2 = G.monsters[mi2];
-			if (!m2.alive) continue;
-			var dx = m2.cx - b.cx, dy = m2.cy - b.cy;
-			var d = Math.sqrt(dx * dx + dy * dy);
-			if (d < b.range && d < bestDist) {
-				bestDist = d;
-				b.target = m2;
-			}
-		}
+        // Boss abilities
+        if (m.isBoss) {
+            updateBossAbility(m);
+        }
 
-		// Fire if ready
-		if (b.target && b.cooldown <= 0) {
-			b.cooldown = b.rate;
-			if (b.type === "barrack") {
-				// Melee: instant damage to target in range
-				b.target.hp -= b.dmg;
-				b.target.hitFlash = 5;
-				if (b.target.hp <= 0) {
-					b.target.alive = false;
-					G.money += b.target.reward;
-					G.score++;
-					b.exp++;
-					if (b.exp >= b.expNext && b.level < 3) {
-						b.level++;
-						b.exp = 0;
-						b.dmg = Math.round(b.dmg * 1.5);
-						b.rate = Math.max(5, Math.round(b.rate * 0.8));
-					}
-				}
-			} else if (b.bullet) {
-				createBullet(b.cx, b.cy, b.target, 4, b.dmg, b.bullet, b.splash, b);
-			}
-		}
-	}
+        // Slow/stun
+        var effectiveSpeed = m.speed;
+        if (m.slowTimer > 0) {
+            effectiveSpeed *= (m.isBoss ? 0.7 : 0.4);
+            m.slowTimer--;
+        }
+        if (m.stunTimer > 0) {
+            m.stunTimer--;
+            continue; // Skip movement while stunned
+        }
+        if (m.burrowed || m.invisible) continue; // Skip movement when burrowed
 
-	// Update bullets
-	for (var bli = G.bullets.length - 1; bli >= 0; bli--) {
-		var bl = G.bullets[bli];
-		if (!bl.alive) { G.bullets.splice(bli, 1); continue; }
-		if (!bl.target || !bl.target.alive) {
-			bl.alive = false;
-			G.bullets.splice(bli, 1);
-			continue;
-		}
-		var dx = bl.target.cx - bl.x, dy = bl.target.cy - bl.y;
-		var d = Math.sqrt(dx * dx + dy * dy);
-		if (d < bl.speed + 5) {
-			// Hit
-			bl.target.hp -= bl.dmg;
-			bl.target.hitFlash = 5;
-			// Frost slow
-			if (bl.spr === "bullet_frost") {
-				for (var fi = 0; fi < G.monsters.length; fi++) {
-					var fm = G.monsters[fi];
-					if (!fm.alive) continue;
-					var fdx = fm.cx - bl.target.cx, fdy = fm.cy - bl.target.cy;
-					if (Math.sqrt(fdx * fdx + fdy * fdy) < 50) {
-						fm.slowTimer = 90;
-					}
-				}
-				spawnExplosion(bl.target.cx, bl.target.cy, 12, "#88ddff", 2, 25, 4);
-			} else if (bl.spr === "bullet_fire") {
-				spawnExplosion(bl.target.cx, bl.target.cy, 16, "#ff6622", 2.5, 25, 5);
-			}
-			// Splash damage
-			if (bl.splash > 0) {
-				for (var si = 0; si < G.monsters.length; si++) {
-					var sm = G.monsters[si];
-					if (!sm.alive || sm === bl.target) continue;
-					var sdx = sm.cx - bl.target.cx, sdy = sm.cy - bl.target.cy;
-					if (Math.sqrt(sdx * sdx + sdy * sdy) < bl.splash) {
-						sm.hp -= Math.round(bl.dmg * 0.5);
-						sm.hitFlash = 3;
-						if (sm.hp <= 0) {
-							sm.alive = false;
-							G.money += sm.reward;
-							G.score++;
-						}
-					}
-				}
-			}
-			// Grant tower exp
-			if (bl.target.hp <= 0) {
-				bl.target.alive = false;
-				G.money += bl.target.reward;
-				G.score++;
-				// Find which tower fired this bullet
-				for (var bi2 = 0; bi2 < G.buildings.length; bi2++) {
-					var tb = bl.fromBld || G.buildings[bi2];
-					if (tb) {
-						tb.exp++;
-						if (tb.exp >= tb.expNext && tb.level < 3) {
-							tb.level++;
-							tb.exp = 0;
-							tb.dmg = Math.round(tb.dmg * 1.5);
-							tb.rate = Math.max(5, Math.round(tb.rate * 0.8));
-						}
-						break;
-					}
-				}
-			}
-			bl.alive = false;
-		} else {
-			bl.x += (dx / d) * bl.speed;
-			bl.y += (dy / d) * bl.speed;
-			// Trail particles
-			if (bl.spr === "bullet_frost" && G.step % 2 === 0) {
-				spawnParticle(bl.x, bl.y, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, 15, "#88ddff", 3);
-			} else if (bl.spr === "bullet_fire" && G.step % 2 === 0) {
-				spawnParticle(bl.x, bl.y, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, 18, "#ff6622", 4);
-			}
-		}
-	}
+        // Sprint
+        if (m.sprintActive) {
+            effectiveSpeed *= 2.0;
+            m.sprintTimer--;
+            if (m.sprintTimer <= 0) { m.sprintActive = false; }
+        }
 
-		// Update particles
-		for (var pi = G.particles.length - 1; pi >= 0; pi--) {
-			var p = G.particles[pi];
-			p.x += p.vx;
-			p.y += p.vy;
-			p.life--;
-			if (p.life <= 0) { G.particles.splice(pi, 1); }
-		}
-	}
+        // Move along path
+        if (m.pathIdx < ROAD_PATH.length - 1) {
+            var next = ROAD_PATH[m.pathIdx + 1];
+            var targetPos = gridCenter(next[0], next[1]);
+            var dx = targetPos[0] - m.cx, dy = targetPos[1] - m.cy;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < effectiveSpeed) {
+                m.pathIdx++;
+                m.gx = next[0]; m.gy = next[1];
+                m.cx = targetPos[0]; m.cy = targetPos[1];
+            } else {
+                m.cx += (dx / dist) * effectiveSpeed;
+                m.cy += (dy / dist) * effectiveSpeed;
+            }
+        } else {
+            // Reached exit
+            m.alive = false;
+            G.life--;
+            G.levelLivesLost++;
+            if (G.life <= 0) { G.life = 0; G.gameOver = true; G.gamePhase = "gameover"; }
+            continue;
+        }
+        if (m.hitFlash > 0) m.hitFlash--;
+    }
+
+    // Update buildings
+    for (var bi = 0; bi < G.buildings.length; bi++) {
+        var b = G.buildings[bi];
+        if (b.cooldown > 0) b.cooldown--;
+
+        // Frost giant aura: slow tower attack rate
+        var rateMultiplier = 1;
+        for (var bmi = 0; bmi < G.monsters.length; bmi++) {
+            var bm = G.monsters[bmi];
+            if (bm.isBoss && bm.alive && bm.bossSkill === "frostAura") {
+                var fdx = bm.cx - b.cx, fdy = bm.cy - b.cy;
+                if (Math.sqrt(fdx * fdx + fdy * fdy) < 120) {
+                    rateMultiplier = 1.5;
+                }
+            }
+        }
+
+        // Find target
+        b.target = null;
+        var bestDist = Infinity;
+        for (var mi2 = 0; mi2 < G.monsters.length; mi2++) {
+            var m2 = G.monsters[mi2];
+            if (!m2.alive || m2.burrowed || m2.invisible) continue;
+            var dx = m2.cx - b.cx, dy = m2.cy - b.cy;
+            var d = Math.sqrt(dx * dx + dy * dy);
+            if (d < b.range && d < bestDist) {
+                bestDist = d;
+                b.target = m2;
+            }
+        }
+
+        // Fire if ready
+        if (b.target && b.cooldown <= 0) {
+            b.cooldown = Math.round(b.rate * rateMultiplier);
+            if (b.type === "barrack") {
+                // Melee: instant damage
+                b.target.hp -= b.dmg;
+                b.target.hitFlash = 5;
+                if (b.target.hp <= 0) {
+                    killMonster(b.target, b);
+                }
+            } else if (b.bullet) {
+                createBullet(b.cx, b.cy, b.target, 4, b.dmg, b.bullet, b.splash, b);
+            }
+        }
+    }
+
+    // Update bullets
+    for (var bli = G.bullets.length - 1; bli >= 0; bli--) {
+        var bl = G.bullets[bli];
+        if (!bl.alive) { G.bullets.splice(bli, 1); continue; }
+        if (!bl.target || !bl.target.alive || bl.target.burrowed || bl.target.invisible) {
+            bl.alive = false;
+            G.bullets.splice(bli, 1);
+            continue;
+        }
+        var dx = bl.target.cx - bl.x, dy = bl.target.cy - bl.y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < bl.speed + 5) {
+            // Hit
+            bl.target.hp -= bl.dmg;
+            bl.target.hitFlash = 5;
+            // Frost effect
+            if (bl.spr === "bullet_frost") {
+                for (var fi = 0; fi < G.monsters.length; fi++) {
+                    var fm = G.monsters[fi];
+                    if (!fm.alive) continue;
+                    var fdx = fm.cx - bl.target.cx, fdy = fm.cy - bl.target.cy;
+                    if (Math.sqrt(fdx * fdx + fdy * fdy) < 50) {
+                        fm.slowTimer = 90;
+                    }
+                }
+                spawnExplosion(bl.target.cx, bl.target.cy, 12, "#88ddff", 2, 25, 4);
+            } else if (bl.spr === "bullet_fire") {
+                spawnExplosion(bl.target.cx, bl.target.cy, 16, "#ff6622", 2.5, 25, 5);
+            }
+            // Splash damage
+            if (bl.splash > 0) {
+                for (var si = 0; si < G.monsters.length; si++) {
+                    var sm = G.monsters[si];
+                    if (!sm.alive || sm === bl.target) continue;
+                    var sdx = sm.cx - bl.target.cx, sdy = sm.cy - bl.target.cy;
+                    if (Math.sqrt(sdx * sdx + sdy * sdy) < bl.splash) {
+                        sm.hp -= Math.round(bl.dmg * 0.5);
+                        sm.hitFlash = 3;
+                        if (sm.hp <= 0) { killMonster(sm, bl.fromBld); }
+                    }
+                }
+            }
+            // Kill if dead
+            if (bl.target.hp <= 0) {
+                killMonster(bl.target, bl.fromBld);
+            } else if (bl.spr === "bullet_wizard") {
+                // Wizard bullet stun
+                bl.target.stunTimer = 30;
+            }
+            bl.alive = false;
+        } else {
+            bl.x += (dx / d) * bl.speed;
+            bl.y += (dy / d) * bl.speed;
+            // Trail particles
+            if (bl.spr === "bullet_frost" && G.step % 2 === 0) {
+                spawnParticle(bl.x, bl.y, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, 15, "#88ddff", 3);
+            } else if (bl.spr === "bullet_fire" && G.step % 2 === 0) {
+                spawnParticle(bl.x, bl.y, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, 18, "#ff6622", 4);
+            }
+        }
+    }
+
+    // Update particles
+    for (var pi = G.particles.length - 1; pi >= 0; pi--) {
+        var p = G.particles[pi];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        if (p.life <= 0) { G.particles.splice(pi, 1); }
+    }
+}
+
+function killMonster(m, sourceBld) {
+    if (!m.alive) return;
+    m.alive = false;
+    G.money += m.reward;
+    G.score++;
+
+    // Boss split ability
+    if (m.isBoss && m.bossSkill === "split") {
+        for (var si = 0; si < 3; si++) {
+            var sm = spawnMonster(0, 300, 0.8, 10);
+            if (sm) {
+                sm.cx = m.cx + (Math.random() - 0.5) * 40;
+                sm.cy = m.cy + (Math.random() - 0.5) * 40;
+                sm.gx = m.gx;
+                sm.gy = m.gy;
+                sm.pathIdx = m.pathIdx;
+            }
+        }
+        spawnExplosion(m.cx, m.cy, 20, "#88ff88", 3, 30, 5);
+    }
+
+    // Grant tower exp
+    if (sourceBld) {
+        sourceBld.exp++;
+        if (sourceBld.exp >= sourceBld.expNext && sourceBld.level < 3 && sourceBld.level < G.maxTowerLevel) {
+            sourceBld.level++;
+            sourceBld.exp = 0;
+            var lvData = TOWER_DATA[sourceBld.type].levels[sourceBld.level - 1];
+            sourceBld.dmg = lvData.dmg;
+            sourceBld.rate = lvData.rate;
+            sourceBld.range = lvData.range;
+            sourceBld.splash = lvData.splash;
+            sourceBld.spr = sourceBld.type + "_lv" + sourceBld.level;
+            sourceBld.expNext = sourceBld.level === 2 ? 8 : 12;
+        }
+    }
+
+    spawnExplosion(m.cx, m.cy, 8, "#ffa500", 2, 15, 3);
+}
+
+function updateBossAbility(m) {
+    if (!m.alive) return;
+    m.bossSkillTimer--;
+
+    switch (m.bossSkill) {
+        case "sprint":
+            if (m.bossSkillTimer <= 0) {
+                m.sprintActive = true;
+                m.sprintTimer = 180; // 3s
+                m.bossSkillTimer = 600; // 10s
+                spawnExplosion(m.cx, m.cy, 10, "#ffaa00", 3, 20, 4);
+            }
+            break;
+        case "burrow":
+            if (m.bossSkillTimer <= 0) {
+                m.burrowed = !m.burrowed;
+                if (m.burrowed) {
+                    spawnExplosion(m.cx, m.cy, 15, "#886644", 2, 20, 6);
+                    // Reappear at slightly random position
+                }
+                m.bossSkillTimer = m.burrowed ? 150 : 480; // 2.5s burrowed, 8s above
+            }
+            break;
+        case "poison":
+            if (m.bossSkillTimer <= 0) {
+                // Visual poison cloud effect
+                spawnExplosion(m.cx, m.cy, 30, "#88ff44", 1.5, 40, 8);
+                // Damage nearby towers (simplified - just visual)
+                m.bossSkillTimer = 720; // 12s
+            }
+            break;
+        case "inferno":
+            if (m.bossSkillTimer <= 0) {
+                spawnExplosion(m.cx, m.cy, 40, "#ff4400", 3, 30, 10);
+                // Affect towers in range (simplified)
+                for (var bi = 0; bi < G.buildings.length; bi++) {
+                    var bb = G.buildings[bi];
+                    var fdx = m.cx - bb.cx, fdy = m.cy - bb.cy;
+                    if (Math.sqrt(fdx * fdx + fdy * fdy) < 100) {
+                        bb.cooldown += 180; // 3s stun
+                    }
+                }
+                m.bossSkillTimer = 600; // 10s
+            }
+            break;
+        case "teleport":
+            if (m.bossSkillTimer <= 0) {
+                // Simplified teleport: move forward on path
+                if (m.pathIdx < ROAD_PATH.length - 3) {
+                    m.pathIdx += 2;
+                    var tp = ROAD_PATH[m.pathIdx];
+                    var tc = gridCenter(tp[0], tp[1]);
+                    m.cx = tc[0]; m.cy = tc[1];
+                    m.gx = tp[0]; m.gy = tp[1];
+                    spawnExplosion(m.cx, m.cy, 15, "#9900ff", 3, 20, 6);
+                }
+                m.bossSkillTimer = 300; // 5s
+            }
+            break;
+        case "voidLord":
+            // Summon: every 15s spawn 2 void minions
+            m.summonTimer--;
+            if (m.summonTimer <= 0) {
+                m.summonTimer = 900; // 15s
+                for (var vi = 0; vi < 2; vi++) {
+                    var vm = spawnMonster(14, 200, 0.6, 15);
+                    if (vm) {
+                        vm.gx = m.gx;
+                        vm.gy = m.gy;
+                        vm.cx = m.cx + (Math.random() - 0.5) * 60;
+                        vm.cy = m.cy + (Math.random() - 0.5) * 60;
+                        vm.pathIdx = m.pathIdx;
+                    }
+                }
+                spawnExplosion(m.cx, m.cy, 20, "#8844ff", 3, 30, 8);
+            }
+
+            // Phase transitions based on HP %
+            var hpPct = m.hp / m.maxHp;
+            if (hpPct < 0.5 && !m.phase2done) {
+                m.phase2done = true;
+                m.speed = 0.58; // Phase 2: slow down
+                m.bossSkillTimer = 600;
+                spawnExplosion(m.cx, m.cy, 30, "#ff00ff", 3, 30, 8);
+            } else if (hpPct < 0.2 && !m.phase3done) {
+                m.phase3done = true;
+                m.speed = 1.0; // Phase 3: speed up
+                m.bossSkillTimer = 360;
+                spawnExplosion(m.cx, m.cy, 40, "#ffffff", 4, 40, 12);
+            }
+            break;
+    }
+}
 
 // ===== RENDER =====
 function render() {
-	ctx.fillStyle = "#0a0a0f";
-	ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+    // Clear
+    ctx.fillStyle = "#0a0a0f";
+    ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
 
-	renderMap();
-	renderDecorations();
-	renderGrid();
-	renderPreview();
-	renderBuildings();
-	renderMonsters();
-	renderBullets();
-	renderUI();
-	renderParticles();
-	renderGameOver();
-}
+    if (G.gamePhase === "menu") {
+        renderMenu();
+        return;
+    }
+    if (G.gamePhase === "loading") {
+        drawLoading();
+        return;
+    }
 
-function isOnRoad(gx, gy) {
-	return ROAD_PATH.some(function(p) { return p[0] === gx && p[1] === gy; });
+    renderMap();
+    renderDecorations();
+    renderGrid();
+    renderPreview();
+    renderBuildings();
+    renderMonsters();
+    renderBullets();
+    renderParticles();
+
+    if (G.gamePhase === "playing") {
+        renderUI();
+    } else if (G.gamePhase === "levelComplete") {
+        renderUI();
+        renderLevelComplete();
+    } else if (G.gamePhase === "gameover") {
+        renderUI();
+        renderGameOver();
+    }
 }
 
 function renderMap() {
-	var mx = MX, my = MY, mw = GS * 16, mh = GS * 16;
-	// Grass background using 1-bit-pack tile or fallback checkerboard
-	if (SPR.ready && SC.grass) {
-		var gc = SC.grass;
-		for (var gy = 0; gy < CFG.rows; gy++) {
-			for (var gx = 0; gx < CFG.cols; gx++) {
-				var px = mx + gx * GS, py = my + gy * GS;
-				ctx.drawImage(SPR.img, gc[0]*16, gc[1]*16, 16, 16, px, py, GS, GS);
-			}
-		}
-	} else {
-		for (var gy = 0; gy < CFG.rows; gy++) {
-			for (var gx = 0; gx < CFG.cols; gx++) {
-				var px = mx + gx * GS, py = my + gy * GS;
-				ctx.fillStyle = (gx + gy) % 2 === 0 ? "#38d973" : "#2daf5e";
-				ctx.fillRect(px, py, GS, GS);
-			}
-		}
-	}
-	// Draw road with seamless connections between adjacent cells
-	var m = 3;
-	for (var i = 0; i < ROAD_PATH.length; i++) {
-		var gx = ROAD_PATH[i][0], gy = ROAD_PATH[i][1];
-		var px = mx + gx * GS + m, py = my + gy * GS + m;
-		var sz = GS - m * 2;
-		var hasN = isOnRoad(gx, gy - 1), hasS = isOnRoad(gx, gy + 1);
-		var hasW = isOnRoad(gx - 1, gy), hasE = isOnRoad(gx + 1, gy);
-		// Road base (warm brown)
-		ctx.fillStyle = "#8a7a5a";
-		ctx.fillRect(px, py, sz, sz);
-		// Road inner (lighter tan)
-		ctx.fillStyle = "#b8a880";
-		ctx.fillRect(px + 2, py + 2, sz - 4, sz - 4);
-		// Extend to adjacent road cells for seamless connection
-		if (hasN) { ctx.fillRect(px, py - m, sz, m); }
-		if (hasS) { ctx.fillRect(px, py + sz, sz, m); }
-		if (hasW) { ctx.fillRect(px - m, py, m, sz); }
-		if (hasE) { ctx.fillRect(px + sz, py, m, sz); }
-	}
-	// Draw road edge borders for path definition
-	ctx.strokeStyle = "rgba(60,40,20,0.3)";
-	ctx.lineWidth = 1;
-	for (var i = 0; i < ROAD_PATH.length; i++) {
-		var gx = ROAD_PATH[i][0], gy = ROAD_PATH[i][1];
-		var px = mx + gx * GS, py = my + gy * GS;
-		if (!isOnRoad(gx - 1, gy)) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py + GS); ctx.stroke(); }
-		if (!isOnRoad(gx + 1, gy)) { ctx.beginPath(); ctx.moveTo(px + GS, py); ctx.lineTo(px + GS, py + GS); ctx.stroke(); }
-		if (!isOnRoad(gx, gy - 1)) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + GS, py); ctx.stroke(); }
-		if (!isOnRoad(gx, gy + 1)) { ctx.beginPath(); ctx.moveTo(px, py + GS); ctx.lineTo(px + GS, py + GS); ctx.stroke(); }
-	}
+    var mx = MX, my = MY, mw = GS * 16, mh = GS * 16;
+    // Background
+    if (SPR.ready && SC.grass) {
+        var gc = SC.grass;
+        for (var gy = 0; gy < CFG.rows; gy++) {
+            for (var gx = 0; gx < CFG.cols; gx++) {
+                var px = mx + gx * GS, py = my + gy * GS;
+                ctx.drawImage(SPR.img, gc[0]*16, gc[1]*16, 16, 16, px, py, GS, GS);
+            }
+        }
+    } else {
+        for (var gy = 0; gy < CFG.rows; gy++) {
+            for (var gx = 0; gx < CFG.cols; gx++) {
+                var px = mx + gx * GS, py = my + gy * GS;
+                ctx.fillStyle = (gx + gy) % 2 === 0 ? "#38d973" : "#2daf5e";
+                ctx.fillRect(px, py, GS, GS);
+            }
+        }
+    }
+
+    // Theme-specific overlay
+    var theme = (LEVEL_DATA[G.currentLevel] && LEVEL_DATA[G.currentLevel].theme) || "plain";
+    if (theme === "void") {
+        ctx.fillStyle = "rgba(40,0,60,0.3)";
+        ctx.fillRect(mx, my, mw, mh);
+    } else if (theme === "shadow") {
+        ctx.fillStyle = "rgba(20,20,30,0.2)";
+        ctx.fillRect(mx, my, mw, mh);
+    } else if (theme === "volcano") {
+        ctx.fillStyle = "rgba(60,20,0,0.15)";
+        ctx.fillRect(mx, my, mw, mh);
+    } else if (theme === "frost") {
+        ctx.fillStyle = "rgba(200,230,255,0.1)";
+        ctx.fillRect(mx, my, mw, mh);
+    } else if (theme === "swamp") {
+        ctx.fillStyle = "rgba(30,60,20,0.2)";
+        ctx.fillRect(mx, my, mw, mh);
+    }
+
+    // Draw road
+    var m = 3;
+    for (var i = 0; i < ROAD_PATH.length; i++) {
+        var gx = ROAD_PATH[i][0], gy = ROAD_PATH[i][1];
+        var px = mx + gx * GS + m, py = my + gy * GS + m;
+        var sz = GS - m * 2;
+        var hasN = isOnRoad(gx, gy - 1), hasS = isOnRoad(gx, gy + 1);
+        var hasW = isOnRoad(gx - 1, gy), hasE = isOnRoad(gx + 1, gy);
+        ctx.fillStyle = "#8a7a5a";
+        ctx.fillRect(px, py, sz, sz);
+        ctx.fillStyle = "#b8a880";
+        ctx.fillRect(px + 2, py + 2, sz - 4, sz - 4);
+        if (hasN) { ctx.fillRect(px, py - m, sz, m); }
+        if (hasS) { ctx.fillRect(px, py + sz, sz, m); }
+        if (hasW) { ctx.fillRect(px - m, py, m, sz); }
+        if (hasE) { ctx.fillRect(px + sz, py, m, sz); }
+    }
+    // Road borders
+    ctx.strokeStyle = "rgba(60,40,20,0.3)";
+    ctx.lineWidth = 1;
+    for (var i = 0; i < ROAD_PATH.length; i++) {
+        var gx = ROAD_PATH[i][0], gy = ROAD_PATH[i][1];
+        var px = mx + gx * GS, py = my + gy * GS;
+        if (!isOnRoad(gx - 1, gy)) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py + GS); ctx.stroke(); }
+        if (!isOnRoad(gx + 1, gy)) { ctx.beginPath(); ctx.moveTo(px + GS, py); ctx.lineTo(px + GS, py + GS); ctx.stroke(); }
+        if (!isOnRoad(gx, gy - 1)) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + GS, py); ctx.stroke(); }
+        if (!isOnRoad(gx, gy + 1)) { ctx.beginPath(); ctx.moveTo(px, py + GS); ctx.lineTo(px + GS, py + GS); ctx.stroke(); }
+    }
+
+    // Spawn point indicator
+    if (ROAD_PATH.length > 0) {
+        var sp = ROAD_PATH[0];
+        var spx = mx + sp[0] * GS, spy = my + sp[1] * GS;
+        ctx.fillStyle = "rgba(255,100,100,0.3)";
+        ctx.fillRect(spx, spy, GS, GS);
+        ctx.fillStyle = "#f88";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("▶", spx + GS/2, spy + GS/2 + 3);
+    }
+    // Exit indicator
+    if (ROAD_PATH.length > 0) {
+        var ep = ROAD_PATH[ROAD_PATH.length - 1];
+        var epx = mx + ep[0] * GS, epy = my + ep[1] * GS;
+        ctx.fillStyle = "rgba(255,50,50,0.4)";
+        ctx.fillRect(epx, epy, GS, GS);
+        ctx.fillStyle = "#f44";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("基地", epx + GS/2, epy + GS/2 + 3);
+    }
 }
 
 function renderDecorations() {
-	if (!SPR.ready) return;
-	for (var gy = 0; gy < CFG.rows; gy++) {
-		for (var gx = 0; gx < CFG.cols; gx++) {
-			var g = mapGrid[gy][gx];
-			if (!g.decor) continue;
-			var dc = SC[g.decor];
-			if (!dc) continue;
-			var c = gridCenter(gx, gy);
-			var s = GS * 0.5 / 16;
-			var w = 16 * s, h = 16 * s;
-			ctx.drawImage(SPR.img, dc[0]*16, dc[1]*16, 16, 16, c[0] - w/2, c[1] - h + GS*0.2, w, h);
-		}
-	}
+    if (!SPR.ready) return;
+    for (var gy = 0; gy < CFG.rows; gy++) {
+        for (var gx = 0; gx < CFG.cols; gx++) {
+            var g = mapGrid[gy][gx];
+            if (!g.decor) continue;
+            var dc = SC[g.decor];
+            if (!dc) continue;
+            var c = gridCenter(gx, gy);
+            var s = GS * 0.5 / 16;
+            var w = 16 * s, h = 16 * s;
+            ctx.drawImage(SPR.img, dc[0]*16, dc[1]*16, 16, 16, c[0] - w/2, c[1] - h + GS*0.2, w, h);
+        }
+    }
 }
 
 function renderGrid() {
-	// Highlight hovered grid cell
-	if (G.hoverGrid) {
-		var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
-		var px = MX + gx * GS, py = MY + gy * GS;
-		ctx.fillStyle = "rgba(255,255,255,0.08)";
-		ctx.fillRect(px, py, GS, GS);
-		ctx.strokeStyle = "rgba(255,255,255,0.2)";
-		ctx.lineWidth = 1;
-		ctx.strokeRect(px, py, GS, GS);
-	}
+    if (G.hoverGrid) {
+        var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
+        var px = MX + gx * GS, py = MY + gy * GS;
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        ctx.fillRect(px, py, GS, GS);
+        ctx.strokeStyle = "rgba(255,255,255,0.2)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px, py, GS, GS);
+    }
 }
 
 function renderPreview() {
-	if (!G.selectedType || !G.hoverGrid) return;
-	var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
-	var g = mapGrid[gy][gx];
-	if (!g.buildable || g.building) return;
-	var td = TOWER_DATA[G.selectedType];
-	if (!td || !td.spr) return;
-	var c = gridCenter(gx, gy);
-	var sprName = td.spr[0];
-	var dc = SC[sprName];
-	if (!dc) return;
-	ctx.save();
-	ctx.globalAlpha = 0.35;
-	var s = GS * 0.5 / 16;
-	var w = 16 * s, h = 16 * s;
-	ctx.drawImage(SPR.img, dc[0]*16, dc[1]*16, 16, 16, c[0] - w/2, c[1] - h + GS*0.2, w, h);
-	ctx.restore();
-	// Range circle
-	ctx.beginPath();
-	ctx.arc(c[0], c[1], td.range, 0, Math.PI * 2);
-	ctx.fillStyle = "rgba(187,141,32,0.1)";
-	ctx.fill();
-	ctx.strokeStyle = "rgba(187,141,32,0.3)";
-	ctx.lineWidth = 1;
-	ctx.stroke();
+    if (!G.selectedType || !G.hoverGrid) return;
+    var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
+    var g = mapGrid[gy] && mapGrid[gy][gx];
+    if (!g || !g.buildable || g.building) return;
+    var td = TOWER_DATA[G.selectedType];
+    if (!td) return;
+    // Check if tower is unlocked
+    var unlocked = getUnlockedTowerKeys(G.currentLevel);
+    if (unlocked.indexOf(G.selectedType) === -1) return;
+    var c = gridCenter(gx, gy);
+    var sprName = G.selectedType + "_lv1";
+    var dc = SC[sprName];
+    if (!dc) return;
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    var s = GS * 0.5 / 16;
+    var w = 16 * s, h = 16 * s;
+    ctx.drawImage(SPR.img, dc[0]*16, dc[1]*16, 16, 16, c[0] - w/2, c[1] - h + GS*0.2, w, h);
+    ctx.restore();
+    // Range circle
+    var lvData = td.levels[0];
+    ctx.beginPath();
+    ctx.arc(c[0], c[1], lvData.range, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(187,141,32,0.1)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(187,141,32,0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
 }
 
 function renderBuildings() {
-	for (var i = 0; i < G.buildings.length; i++) {
-		var b = G.buildings[i];
-		var sprName = getTowerSprite(b);
-		if (!sprName) continue;
-		var dc = SC[sprName];
-		if (!dc) continue;
-		var s = GS * 0.5 / 16;
-		var w = 16 * s, h = 16 * s;
-		ctx.drawImage(SPR.img, dc[0]*16, dc[1]*16, 16, 16, b.cx - w/2, b.cy - h + GS*0.2, w, h);
-		// Frost tower tint
-		if (b.type === "frost") {
-			ctx.globalCompositeOperation = "source-atop";
-			ctx.fillStyle = "rgba(100,200,255,0.5)";
-			ctx.fillRect(b.cx - w / 2, b.cy - h + GS * 0.2, w, h);
-			ctx.globalCompositeOperation = "source-over";
-			// Blue ground circle (drawn after tint, won't be re-tinted)
-			ctx.fillStyle = "rgba(80,180,255,0.25)";
-			ctx.beginPath();
-			ctx.arc(b.cx, b.cy + GS * 0.05, GS * 0.35, 0, Math.PI * 2);
-			ctx.fill();
-		} else if (b.type === "fire") {
-			ctx.globalCompositeOperation = "source-atop";
-			ctx.fillStyle = "rgba(255,100,30,0.5)";
-			ctx.fillRect(b.cx - w / 2, b.cy - h + GS * 0.2, w, h);
-			ctx.globalCompositeOperation = "source-over";
-			// Red ground circle (drawn after tint, won't be re-tinted)
-			ctx.fillStyle = "rgba(255,120,30,0.25)";
-			ctx.beginPath();
-			ctx.arc(b.cx, b.cy + GS * 0.05, GS * 0.35, 0, Math.PI * 2);
-			ctx.fill();
-		}
-		// Barrack: draw knight
-		if (b.type === "barrack" && b.level > 0) {
-			var knightSpr = ["knight_lv1","knight_lv2","knight_lv3"][Math.min(b.level-1, 2)];
-			var kdc = SC[knightSpr];
-			if (kdc) {
-				var ks = GS * 0.4 / 16;
-				var kw = 16 * ks, kh = 16 * ks;
-				var kx = b.cx + GS * 0.3, ky = b.cy - GS * 0.1;
-				if (b.target && b.target.alive) {
-					// Knight moves toward target
-					var dirX = b.target.cx - b.cx, dirY = b.target.cy - b.cy;
-					var d = Math.sqrt(dirX*dirX+dirY*dirY) || 1;
-					var dist = Math.min(GS * 0.4, d);
-					kx = b.cx + (dirX/d) * dist;
-					ky = b.cy + (dirY/d) * dist;
-				}
-				// Swing animation
-				ctx.save();
-				var swing = b.cooldown < 5 ? Math.sin(G.step * 0.3) * 0.3 : 0;
-				ctx.translate(kx, ky);
-				ctx.rotate(swing);
-				ctx.drawImage(SPR.img, kdc[0]*16, kdc[1]*16, 16, 16, -kw/2, -kh/2, kw, kh);
-				ctx.restore();
-			}
-		}
-		// Level indicator
-		if (b.level > 1) {
-			ctx.fillStyle = "#ff0";
-			ctx.font = "bold 10px sans-serif";
-			ctx.textAlign = "center";
-			ctx.fillText("★".repeat(b.level-1), b.cx, b.cy - GS * 0.35);
-		}
-	}
+    for (var i = 0; i < G.buildings.length; i++) {
+        var b = G.buildings[i];
+        var sprName = getTowerSprite(b);
+        if (!sprName) continue;
+        var dc = SC[sprName];
+        if (!dc) continue;
+        var s = GS * 0.5 / 16;
+        var w = 16 * s, h = 16 * s;
+        ctx.drawImage(SPR.img, dc[0]*16, dc[1]*16, 16, 16, b.cx - w/2, b.cy - h + GS*0.2, w, h);
+
+        // Tower-specific tint effects
+        if (b.type === "frost") {
+            ctx.globalCompositeOperation = "source-atop";
+            ctx.fillStyle = "rgba(100,200,255,0.5)";
+            ctx.fillRect(b.cx - w / 2, b.cy - h + GS * 0.2, w, h);
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = "rgba(80,180,255,0.25)";
+            ctx.beginPath();
+            ctx.arc(b.cx, b.cy + GS * 0.05, GS * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (b.type === "fire") {
+            ctx.globalCompositeOperation = "source-atop";
+            ctx.fillStyle = "rgba(255,100,30,0.5)";
+            ctx.fillRect(b.cx - w / 2, b.cy - h + GS * 0.2, w, h);
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = "rgba(255,120,30,0.25)";
+            ctx.beginPath();
+            ctx.arc(b.cx, b.cy + GS * 0.05, GS * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (b.type === "crystal") {
+            ctx.fillStyle = "rgba(200,100,255,0.15)";
+            ctx.beginPath();
+            ctx.arc(b.cx, b.cy + GS * 0.05, GS * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Barrack knight
+        if (b.type === "barrack" && b.level > 0) {
+            var knightSpr = ["knight_lv1","knight_lv2","knight_lv3"][Math.min(b.level-1, 2)];
+            var kdc = SC[knightSpr];
+            if (kdc) {
+                var ks = GS * 0.4 / 16;
+                var kw = 16 * ks, kh = 16 * ks;
+                var kx = b.cx + GS * 0.3, ky = b.cy - GS * 0.1;
+                if (b.target && b.target.alive) {
+                    var dirX = b.target.cx - b.cx, dirY = b.target.cy - b.cy;
+                    var d = Math.sqrt(dirX*dirX+dirY*dirY) || 1;
+                    var dist = Math.min(GS * 0.4, d);
+                    kx = b.cx + (dirX/d) * dist;
+                    ky = b.cy + (dirY/d) * dist;
+                }
+                ctx.save();
+                var swing = b.cooldown < 5 ? Math.sin(G.step * 0.3) * 0.3 : 0;
+                ctx.translate(kx, ky);
+                ctx.rotate(swing);
+                ctx.drawImage(SPR.img, kdc[0]*16, kdc[1]*16, 16, 16, -kw/2, -kh/2, kw, kh);
+                ctx.restore();
+            }
+        }
+
+        // Level indicator
+        if (b.level > 1) {
+            ctx.fillStyle = "#ff0";
+            ctx.font = "bold 10px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("★".repeat(b.level-1), b.cx, b.cy - GS * 0.35);
+        }
+        // Selected building highlight
+        if (G.selectedBuilding === b) {
+            ctx.strokeStyle = "#ff0";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(b.cx - GS/2, b.cy - GS/2, GS, GS);
+        }
+    }
 }
 
 function renderMonsters() {
-	for (var i = 0; i < G.monsters.length; i++) {
-		var m = G.monsters[i];
-		if (!m.alive) continue;
-		var ufoFrame = (m.animFrame % 70 < 10 ? 1 : Math.floor(m.animFrame / 10) % 7) + 1;
-		var sprName = "monster_" + ufoFrame;
-		var mc = SC[sprName];
-		if (!mc) continue;
-		var s = 30 / 16;
-		var w = 16 * s, h = 16 * s;
-		ctx.save();
-		ctx.drawImage(SPR.img, mc[0]*16, mc[1]*16, 16, 16, m.cx - w/2, m.cy - h/2, w, h);
-		if (m.tint) {
-			ctx.globalCompositeOperation = "source-atop";
-			ctx.fillStyle = m.tint;
-			ctx.fillRect(m.cx - w/2, m.cy - h/2, w, h);
-		}
-		ctx.restore();
-		// Hit flash
-		if (m.hitFlash > 0) {
-			ctx.fillStyle = "rgba(255,255,255," + (m.hitFlash / 10) + ")";
-			ctx.beginPath();
-			ctx.arc(m.cx, m.cy, 16, 0, Math.PI * 2);
-			ctx.fill();
-		}
-		// HP bar
-		var hpPct = m.hp / m.maxHp;
-		ctx.fillStyle = "#333";
-		ctx.fillRect(m.cx - 15, m.cy - h/2 - 6, 30, 4);
-		ctx.fillStyle = hpPct > 0.5 ? "#4c4" : (hpPct > 0.25 ? "#cc4" : "#c44");
-		ctx.fillRect(m.cx - 15, m.cy - h/2 - 6, 30 * hpPct, 4);
-	}
+    for (var i = 0; i < G.monsters.length; i++) {
+        var m = G.monsters[i];
+        if (!m.alive) continue;
+        if (m.burrowed) {
+            // Show burrowed indicator
+            ctx.fillStyle = "rgba(136,100,68,0.5)";
+            ctx.beginPath();
+            ctx.arc(m.cx, m.cy, 12, 0, Math.PI * 2);
+            ctx.fill();
+            continue;
+        }
+
+        var sprName = "monster_" + m.sprIdx;
+        var mc = SC[sprName];
+        if (!mc) continue;
+        var s = 30 / 16;
+        var w = 16 * s, h = 16 * s;
+
+        // Boss size boost
+        var scale = m.isBoss ? 1.6 : 1;
+        s = s * scale;
+        w = 16 * s;
+        h = 16 * s;
+
+        ctx.save();
+        ctx.drawImage(SPR.img, mc[0]*16, mc[1]*16, 16, 16, m.cx - w/2, m.cy - h/2, w, h);
+        ctx.restore();
+
+        // Boss name
+        if (m.isBoss && m.bossName) {
+            ctx.fillStyle = "#ff0";
+            ctx.font = "bold 11px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(m.bossName, m.cx, m.cy - h/2 - 10);
+        }
+
+        // Hit flash
+        if (m.hitFlash > 0) {
+            ctx.fillStyle = "rgba(255,255,255," + (m.hitFlash / 10) + ")";
+            ctx.beginPath();
+            ctx.arc(m.cx, m.cy, 16 * scale, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        // HP bar
+        var hpPct = m.hp / m.maxHp;
+        var barW = m.isBoss ? 50 : 30;
+        ctx.fillStyle = "#333";
+        ctx.fillRect(m.cx - barW/2, m.cy - h/2 - 6, barW, 4);
+        ctx.fillStyle = hpPct > 0.5 ? "#4c4" : (hpPct > 0.25 ? "#cc4" : "#c44");
+        ctx.fillRect(m.cx - barW/2, m.cy - h/2 - 6, barW * hpPct, 4);
+        // Slow indicator
+        if (m.slowTimer > 0) {
+            ctx.fillStyle = "rgba(100,200,255,0.4)";
+            ctx.beginPath();
+            ctx.arc(m.cx, m.cy, 14 * scale, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
 }
 
 function renderBullets() {
-	for (var i = 0; i < G.bullets.length; i++) {
-		var bl = G.bullets[i];
-		if (!bl.alive) continue;
-		var bc = SC[bl.spr];
-		if (bc) {
-			var s = 20 / 16;
-			var w = 16 * s, h = 16 * s;
-			ctx.drawImage(SPR.img, bc[0]*16, bc[1]*16, 16, 16, bl.x - w/2, bl.y - h/2, w, h);
-		} else {
-			// Fallback colored circle
-			var color = "#ff0";
-			if (bl.spr === "bullet_frost") color = "#88ddff";
-			else if (bl.spr === "bullet_fire") color = "#ff6622";
-			ctx.fillStyle = color;
-			ctx.beginPath();
-			ctx.arc(bl.x, bl.y, 4, 0, Math.PI * 2);
-			ctx.fill();
-		}
-		// Frost/fire bullet glow
-		if (bl.spr === "bullet_frost") {
-			ctx.fillStyle = "rgba(136,221,255,0.4)";
-			ctx.beginPath();
-			ctx.arc(bl.x, bl.y, 6, 0, Math.PI * 2);
-			ctx.fill();
-		} else if (bl.spr === "bullet_fire") {
-			ctx.fillStyle = "rgba(255,102,34,0.5)";
-			ctx.beginPath();
-			ctx.arc(bl.x, bl.y, 7, 0, Math.PI * 2);
-			ctx.fill();
-		}
-	}
+    for (var i = 0; i < G.bullets.length; i++) {
+        var bl = G.bullets[i];
+        if (!bl.alive) continue;
+        var bc = SC[bl.spr];
+        if (bc) {
+            var s = 20 / 16;
+            var w = 16 * s, h = 16 * s;
+            ctx.drawImage(SPR.img, bc[0]*16, bc[1]*16, 16, 16, bl.x - w/2, bl.y - h/2, w, h);
+        } else {
+            var color = "#ff0";
+            if (bl.spr === "bullet_frost") color = "#88ddff";
+            else if (bl.spr === "bullet_fire") color = "#ff6622";
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(bl.x, bl.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        // Glow effects
+        if (bl.spr === "bullet_frost") {
+            ctx.fillStyle = "rgba(136,221,255,0.4)";
+            ctx.beginPath();
+            ctx.arc(bl.x, bl.y, 6, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (bl.spr === "bullet_fire") {
+            ctx.fillStyle = "rgba(255,102,34,0.5)";
+            ctx.beginPath();
+            ctx.arc(bl.x, bl.y, 7, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
 }
 
 function renderParticles() {
-	for (var i = 0; i < G.particles.length; i++) {
-		var p = G.particles[i];
-		var alpha = p.life / p.maxLife;
-		ctx.globalAlpha = alpha;
-		ctx.fillStyle = p.color;
-		ctx.beginPath();
-		ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
-		ctx.fill();
-	}
-	ctx.globalAlpha = 1;
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        var alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
 }
 
+// ===== UI RENDERING =====
 function renderUI() {
-	// Right panel background
-	var px = MX + GS * 16 + 10, py = MY, pw = CFG.canvasW - px - 10, ph = GS * 16;
-	ctx.fillStyle = "rgba(20,20,30,0.9)";
-	ctx.fillRect(px, py, pw, ph);
-	ctx.strokeStyle = "#333";
-	ctx.lineWidth = 1;
-	ctx.strokeRect(px, py, pw, ph);
+    var px = MX + GS * 16 + 10, py = MY, pw = CFG.canvasW - px - 10, ph = GS * 16;
+    ctx.fillStyle = "rgba(20,20,30,0.9)";
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, py, pw, ph);
 
-	// Info
-	ctx.fillStyle = "#fff";
-	ctx.font = "bold 14px Microsoft YaHei";
-	ctx.textAlign = "left";
-	ctx.fillText("波次 " + G.wave, px + 8, py + 22);
-	ctx.fillStyle = "#ff0";
-	ctx.fillText("💰 " + G.money, px + 8, py + 44);
-	ctx.fillStyle = "#f44";
-	ctx.fillText("❤ " + G.life + "/20", px + 8, py + 64);
-	ctx.fillStyle = "#fd0";
-	ctx.fillText("⭐ " + G.score, px + 8, py + 84);
+    // Level and wave info
+    var ld = LEVEL_DATA[G.currentLevel];
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 14px Microsoft YaHei";
+    ctx.textAlign = "left";
+    if (ld) ctx.fillText("第" + (G.currentLevel + 1) + "关 " + ld.name, px + 8, py + 18);
+    ctx.fillStyle = "#aaa";
+    ctx.font = "12px Microsoft YaHei";
+    ctx.fillText("波次 " + (G.wave + 1) + "/" + getLevelTotalWaves(), px + 8, py + 36);
+    ctx.fillStyle = "#ff0";
+    ctx.font = "bold 13px Microsoft YaHei";
+    ctx.fillText("💰 " + G.money, px + 8, py + 56);
+    ctx.fillStyle = "#f44";
+    ctx.fillText("❤ " + G.life + "/" + (ld ? ld.life : 20), px + 8, py + 76);
+    ctx.fillStyle = "#fd0";
+    ctx.fillText("⭐ " + G.score, px + 8, py + 96);
 
-	// Tower buttons
-	var btnY = py + 100;
-	for (var i = 0; i < TOWER_KEYS.length; i++) {
-		var key = TOWER_KEYS[i];
-		var td = TOWER_DATA[key];
-		var by = btnY + i * 60;
-		var selected = G.selectedType === key;
-		ctx.fillStyle = selected ? "rgba(100,150,255,0.3)" : "rgba(255,255,255,0.05)";
-		ctx.fillRect(px + 4, by, pw - 8, 54);
-		ctx.strokeStyle = selected ? "#69f" : "#444";
-		ctx.lineWidth = selected ? 2 : 1;
-		ctx.strokeRect(px + 4, by, pw - 8, 54);
-		ctx.fillStyle = selected ? "#fff" : "#aaa";
-		ctx.font = "12px Microsoft YaHei";
-		ctx.textAlign = "left";
-		ctx.fillText(td.name, px + 10, by + 16);
-		ctx.fillStyle = G.money >= td.cost ? "#ff0" : "#644";
-		ctx.fillText("💰" + td.cost, px + 10, by + 32);
-		// Mini sprite preview
-		if (td.spr && td.spr[0]) {
-			var uic = SC[td.spr[0]];
-			if (uic) {
-				var ss = 28 / 16;
-				ctx.drawImage(SPR.img, uic[0]*16, uic[1]*16, 16, 16, px + pw - 36, by + 8, 16*ss, 16*ss);
-			}
-		}
-	}
+    // Tower buttons (only show unlocked)
+    var unlockedTowers = getUnlockedTowerKeys(G.currentLevel);
+    var btnY = py + 110;
+    var displayedTowers = [];
+    for (var i = 0; i < TOWER_KEYS.length; i++) {
+        if (unlockedTowers.indexOf(TOWER_KEYS[i]) !== -1) {
+            displayedTowers.push(TOWER_KEYS[i]);
+        }
+    }
+    // Show wall at the end
+    var wallIdx = displayedTowers.indexOf("wall");
+    if (wallIdx > -1) {
+        displayedTowers.splice(wallIdx, 1);
+        displayedTowers.push("wall");
+    }
 
-	// Wave button
-	var waveBtnY = btnY + TOWER_KEYS.length * 60 + 10;
-	ctx.fillStyle = G.waveInProgress ? "#333" : "#284";
-	ctx.fillRect(px + 4, waveBtnY, pw - 8, 36);
-	ctx.strokeStyle = G.waveInProgress ? "#555" : "#4a8";
-	ctx.strokeRect(px + 4, waveBtnY, pw - 8, 36);
-	ctx.fillStyle = "#fff";
-	ctx.font = "13px Microsoft YaHei";
-	ctx.textAlign = "center";
-	ctx.fillText(G.waveInProgress ? "进行中..." : "下一波", px + pw/2, waveBtnY + 24);
+    for (var i = 0; i < displayedTowers.length; i++) {
+        var key = displayedTowers[i];
+        var td = TOWER_DATA[key];
+        var by = btnY + i * 52;
+        var selected = G.selectedType === key;
+        ctx.fillStyle = selected ? "rgba(100,150,255,0.3)" : "rgba(255,255,255,0.05)";
+        ctx.fillRect(px + 4, by, pw - 8, 46);
+        ctx.strokeStyle = selected ? "#69f" : "#444";
+        ctx.lineWidth = selected ? 2 : 1;
+        ctx.strokeRect(px + 4, by, pw - 8, 46);
+        ctx.fillStyle = selected ? "#fff" : "#aaa";
+        ctx.font = "11px Microsoft YaHei";
+        ctx.textAlign = "left";
+        ctx.fillText(td.name, px + 10, by + 14);
+        ctx.fillStyle = G.money >= td.cost ? "#ff0" : "#644";
+        ctx.fillText("💰" + td.cost, px + 10, by + 28);
+
+        // Level indicator
+        var maxLvl = Math.min(G.maxTowerLevel, 3);
+        ctx.fillStyle = "#666";
+        ctx.font = "9px sans-serif";
+        ctx.fillText("Lv" + maxLvl, px + 10, by + 40);
+
+        // Mini sprite
+        if (td.levels && td.levels[0]) {
+            var uic = SC[key + "_lv1"];
+            if (uic) {
+                var ss = 24 / 16;
+                ctx.drawImage(SPR.img, uic[0]*16, uic[1]*16, 16, 16, px + pw - 32, by + 6, 16*ss, 16*ss);
+            }
+        }
+    }
+
+    // Wave button
+    var waveBtnY = btnY + displayedTowers.length * 52 + 8;
+    var waveBtnReady = G.nextWaveReady && !G.waveInProgress && !isLevelComplete();
+    ctx.fillStyle = G.waveInProgress ? "#333" : (waveBtnReady ? "#284" : "#1a1a2a");
+    ctx.fillRect(px + 4, waveBtnY, pw - 8, 34);
+    ctx.strokeStyle = G.waveInProgress ? "#555" : (waveBtnReady ? "#4a8" : "#333");
+    ctx.strokeRect(px + 4, waveBtnY, pw - 8, 34);
+    ctx.fillStyle = G.waveInProgress ? "#888" : "#fff";
+    ctx.font = "12px Microsoft YaHei";
+    ctx.textAlign = "center";
+    if (G.waveInProgress) {
+        ctx.fillText("进行中...", px + pw/2, waveBtnY + 22);
+    } else if (waveBtnReady) {
+        ctx.fillText("下一波", px + pw/2, waveBtnY + 22);
+    } else if (G.spawnQueue.length > 0) {
+        ctx.fillText("等待中...", px + pw/2, waveBtnY + 22);
+    } else {
+        ctx.fillText("准备中...", px + pw/2, waveBtnY + 22);
+    }
+
+    // Upgrade button (when building selected)
+    var upgradeBtnY = waveBtnY + 42;
+    if (G.selectedBuilding) {
+        var sb = G.selectedBuilding;
+        var nextLvl = sb.level + 1;
+        var td = TOWER_DATA[sb.type];
+        var maxLvl = Math.min(G.maxTowerLevel, 3);
+        if (nextLvl <= maxLvl && td) {
+            var uc = td.upgradeCost[nextLvl - 1] || 999999;
+            var canAfford = G.money >= uc;
+            ctx.fillStyle = canAfford ? "#284" : "#222";
+            ctx.fillRect(px + 4, upgradeBtnY, pw - 8, 30);
+            ctx.strokeStyle = canAfford ? "#4a8" : "#444";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(px + 4, upgradeBtnY, pw - 8, 30);
+            ctx.fillStyle = canAfford ? "#fff" : "#666";
+            ctx.font = "11px Microsoft YaHei";
+            ctx.textAlign = "center";
+            ctx.fillText("升级 Lv" + sb.level + "→Lv" + nextLvl + " 💰" + uc, px + pw/2, upgradeBtnY + 20);
+            // Building info
+            ctx.fillStyle = "#aaa";
+            ctx.font = "10px Microsoft YaHei";
+            ctx.textAlign = "left";
+            ctx.fillText(sb.type + " Lv" + sb.level, px + 8, upgradeBtnY + 36);
+        }
+        upgradeBtnY += 36;
+    }
+
+    // Back to menu button
+    var menuBtnY = upgradeBtnY + 6;
+    ctx.fillStyle = "#333";
+    ctx.fillRect(px + 4, menuBtnY, pw - 8, 30);
+    ctx.strokeStyle = "#555";
+    ctx.strokeRect(px + 4, menuBtnY, pw - 8, 30);
+    ctx.fillStyle = "#aaa";
+    ctx.font = "11px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("返回菜单", px + pw/2, menuBtnY + 20);
 }
 
+// ===== MENU SCREEN =====
+function renderMenu() {
+    // Background
+    ctx.fillStyle = "#0a0a0f";
+    ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+
+    // Title
+    ctx.fillStyle = "#fd0";
+    ctx.font = "bold 36px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("塔防保卫战 v2", CFG.canvasW / 2, 50);
+
+    ctx.fillStyle = "#888";
+    ctx.font = "14px Microsoft YaHei";
+    ctx.fillText("选择关卡", CFG.canvasW / 2, 80);
+
+    // Level grid: 4 columns x 2 rows
+    var cols = 4, rows = 2;
+    var btnW = 180, btnH = 140, gap = 20;
+    var totalW = cols * btnW + (cols - 1) * gap;
+    var startX = (CFG.canvasW - totalW) / 2;
+    var startY = 110;
+
+    for (var i = 0; i < TOTAL_LEVELS; i++) {
+        var col = i % cols;
+        var row = Math.floor(i / cols);
+        var bx = startX + col * (btnW + gap);
+        var by = startY + row * (btnH + gap);
+        var unlocked = i <= G.maxUnlockedLevel;
+        var ld = LEVEL_DATA[i];
+
+        // Button background
+        ctx.fillStyle = unlocked ? "rgba(30,40,60,0.9)" : "rgba(20,20,25,0.9)";
+        ctx.fillRect(bx, by, btnW, btnH);
+        ctx.strokeStyle = unlocked ? "#468" : "#333";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bx, by, btnW, btnH);
+
+        // Level number
+        ctx.fillStyle = unlocked ? "#fff" : "#555";
+        ctx.font = "bold 28px Microsoft YaHei";
+        ctx.textAlign = "center";
+        ctx.fillText("" + (i + 1), bx + btnW / 2, by + 38);
+
+        // Level name
+        if (ld) {
+            ctx.fillStyle = unlocked ? "#aac" : "#444";
+            ctx.font = "12px Microsoft YaHei";
+            ctx.fillText(ld.name, bx + btnW / 2, by + 60);
+            ctx.fillStyle = unlocked ? "#667" : "#333";
+            ctx.font = "10px Microsoft YaHei";
+            ctx.fillText(ld.waves.length + "波", bx + btnW / 2, by + 76);
+        }
+
+        // Lock icon
+        if (!unlocked) {
+            ctx.fillStyle = "rgba(0,0,0,0.5)";
+            ctx.fillRect(bx, by, btnW, btnH);
+            ctx.fillStyle = "#666";
+            ctx.font = "30px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("🔒", bx + btnW / 2, by + btnH / 2 + 10);
+        }
+
+        // Instruction text for first level
+        if (i === 0 && unlocked) {
+            ctx.fillStyle = "#4a8";
+            ctx.font = "11px Microsoft YaHei";
+            ctx.fillText("点击开始", bx + btnW / 2, by + btnH - 10);
+        }
+    }
+
+    // Instructions
+    ctx.fillStyle = "#555";
+    ctx.font = "12px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("点击关卡开始游戏  |  通关解锁下一关", CFG.canvasW / 2, CFG.canvasH - 30);
+}
+
+// ===== LEVEL COMPLETE SCREEN =====
+function renderLevelComplete() {
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+
+    var ld = LEVEL_DATA[G.currentLevel];
+    var ldName = ld ? ld.name : "";
+    var goldReward = ld ? ld.goldReward : 0;
+
+    // Panel
+    var pw = 360, ph = 320;
+    var px = (CFG.canvasW - pw) / 2, py = (CFG.canvasH - ph) / 2;
+    ctx.fillStyle = "rgba(20,30,50,0.95)";
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = "#468";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(px, py, pw, ph);
+
+    // Title
+    ctx.fillStyle = "#4c4";
+    ctx.font = "bold 28px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("第" + (G.currentLevel + 1) + "关 通关!", CFG.canvasW / 2, py + 50);
+
+    ctx.fillStyle = "#aaa";
+    ctx.font = "16px Microsoft YaHei";
+    ctx.fillText(ldName, CFG.canvasW / 2, py + 80);
+
+    // Stats
+    ctx.textAlign = "left";
+    var sy = py + 115;
+    ctx.fillStyle = "#ff0";
+    ctx.font = "14px Microsoft YaHei";
+    ctx.fillText("💰 通关奖励: " + goldReward, px + 40, sy);
+    ctx.fillStyle = "#fd0";
+    ctx.fillText("⭐ 击杀数: " + G.score, px + 40, sy + 25);
+    ctx.fillStyle = "#f44";
+    var livesLost = G.levelLivesLost || 0;
+    ctx.fillText("❤ 损失生命: " + livesLost, px + 40, sy + 50);
+
+    // Total gold
+    var totalGold = G.money;
+    ctx.fillStyle = "#ff0";
+    ctx.font = "bold 16px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("持有金币: " + totalGold, CFG.canvasW / 2, sy + 85);
+
+    // Buttons
+    var btnY = py + ph - 80;
+    var isLastLevel = G.currentLevel >= TOTAL_LEVELS - 1;
+
+    if (!isLastLevel) {
+        // Next level button
+        ctx.fillStyle = "#284";
+        ctx.fillRect(px + 30, btnY, 140, 40);
+        ctx.strokeStyle = "#4a8";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px + 30, btnY, 140, 40);
+        ctx.fillStyle = "#fff";
+        ctx.font = "14px Microsoft YaHei";
+        ctx.textAlign = "center";
+        ctx.fillText("下一关 ▶", px + 100, btnY + 26);
+
+        // Back to menu
+        ctx.fillStyle = "#333";
+        ctx.fillRect(px + pw - 170, btnY, 140, 40);
+        ctx.strokeStyle = "#555";
+        ctx.strokeRect(px + pw - 170, btnY, 140, 40);
+        ctx.fillStyle = "#aaa";
+        ctx.fillText("返回菜单", px + pw - 100, btnY + 26);
+    } else {
+        // Final level completed
+        ctx.fillStyle = "#fd0";
+        ctx.font = "bold 18px Microsoft YaHei";
+        ctx.textAlign = "center";
+        ctx.fillText("🏆 恭喜通关全部关卡!", CFG.canvasW / 2, btnY + 5);
+        ctx.fillStyle = "#a8f";
+        ctx.font = "14px Microsoft YaHei";
+        ctx.fillText("虚空征服者", CFG.canvasW / 2, btnY + 30);
+
+        // Back to menu
+        ctx.fillStyle = "#333";
+        ctx.fillRect(px + pw/2 - 70, btnY + 45, 140, 36);
+        ctx.strokeStyle = "#555";
+        ctx.strokeRect(px + pw/2 - 70, btnY + 45, 140, 36);
+        ctx.fillStyle = "#aaa";
+        ctx.fillText("返回菜单", px + pw/2, btnY + 68);
+    }
+}
+
+// ===== GAME OVER =====
 function renderGameOver() {
-	if (!G.gameOver) return;
-	ctx.fillStyle = "rgba(0,0,0,0.6)";
-	ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
-	ctx.fillStyle = "#f44";
-	ctx.font = "bold 40px Microsoft YaHei";
-	ctx.textAlign = "center";
-	ctx.fillText("游戏结束", CFG.canvasW / 2, CFG.canvasH / 2 - 20);
-	ctx.fillStyle = "#aaa";
-	ctx.font = "18px Microsoft YaHei";
-	ctx.fillText("坚持到第 " + G.wave + " 波", CFG.canvasW / 2, CFG.canvasH / 2 + 30);
-	ctx.fillStyle = "#ff0";
-	ctx.font = "14px Microsoft YaHei";
-	ctx.fillText("点击重新开始", CFG.canvasW / 2, CFG.canvasH / 2 + 70);
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+
+    var pw = 320, ph = 240;
+    var px = (CFG.canvasW - pw) / 2, py = (CFG.canvasH - ph) / 2;
+    ctx.fillStyle = "rgba(40,10,10,0.95)";
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = "#844";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(px, py, pw, ph);
+
+    ctx.fillStyle = "#f44";
+    ctx.font = "bold 30px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("游戏结束", CFG.canvasW / 2, py + 55);
+
+    ctx.fillStyle = "#aaa";
+    ctx.font = "14px Microsoft YaHei";
+    var ld = LEVEL_DATA[G.currentLevel];
+    ctx.fillText("第" + (G.currentLevel + 1) + "关 - 第 " + (G.wave + 1) + " 波", CFG.canvasW / 2, py + 85);
+    ctx.fillText("击杀 " + G.score + " 个敌人", CFG.canvasW / 2, py + 110);
+
+    // Retry button
+    var btnY = py + 145;
+    ctx.fillStyle = "#622";
+    ctx.fillRect(px + 30, btnY, 120, 40);
+    ctx.strokeStyle = "#a44";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 30, btnY, 120, 40);
+    ctx.fillStyle = "#fff";
+    ctx.font = "14px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("重新挑战", px + 90, btnY + 26);
+
+    // Menu button
+    ctx.fillStyle = "#333";
+    ctx.fillRect(px + pw - 150, btnY, 120, 40);
+    ctx.strokeStyle = "#555";
+    ctx.strokeRect(px + pw - 150, btnY, 120, 40);
+    ctx.fillStyle = "#aaa";
+    ctx.fillText("返回菜单", px + pw - 90, btnY + 26);
 }
 
-function restartGame() {
-	G.money = 200; G.life = 20; G.score = 0; G.wave = 0;
-	G.step = 0; G.selectedType = null;
-	G.buildings = []; G.monsters = []; G.bullets = []; G.particles = [];
-	G.waveTimer = 0; G.spawnQueue = []; G.waveInProgress = false;
-	G.gameOver = false; G.phase = "playing";
-	_bid = 0; _mid = 0; _blid = 0;
-	initMap();
+function drawLoading() {
+    ctx.fillStyle = "#0a0a0f";
+    ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
+    ctx.fillStyle = "#888";
+    ctx.font = "18px Microsoft YaHei";
+    ctx.textAlign = "center";
+    ctx.fillText("加载精灵素材中...", CFG.canvasW / 2, CFG.canvasH / 2);
 }
 
 // ===== INPUT =====
 var touchActive = false;
 
 function getEventXY(e) {
-	var rect = canvas.getBoundingClientRect();
-	var scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
-	var clientX = e.clientX !== undefined ? e.clientX : e.pageX;
-	var clientY = e.clientY !== undefined ? e.clientY : e.pageY;
-	var x = (clientX - rect.left) * scaleX;
-	var y = (clientY - rect.top) * scaleY;
-	return [x, y];
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+    var clientX = e.clientX !== undefined ? e.clientX : e.pageX;
+    var clientY = e.clientY !== undefined ? e.clientY : e.pageY;
+    var x = (clientX - rect.left) * scaleX;
+    var y = (clientY - rect.top) * scaleY;
+    return [x, y];
 }
 
 function handleCanvasClick(x, y) {
-	// Game over click = restart
-	if (G.gameOver) { restartGame(); return; }
+    // MENU phase
+    if (G.gamePhase === "menu") {
+        handleMenuClick(x, y);
+        return;
+    }
 
-	// Check panel click
-	var px = MX + GS * 16 + 10, py = MY, pw = CFG.canvasW - px - 10;
-	if (x >= px && x <= px + pw) {
-		// Tower buttons
-		var btnY = py + 100;
-		for (var i = 0; i < TOWER_KEYS.length; i++) {
-			var by = btnY + i * 60;
-			if (y >= by && y <= by + 54) {
-				G.selectedType = TOWER_KEYS[i];
-				return;
-			}
-		}
-		// Wave button
-		var waveBtnY = btnY + TOWER_KEYS.length * 60 + 10;
-		if (y >= waveBtnY && y <= waveBtnY + 36 && !G.waveInProgress) {
-			startWave();
-		}
-		return;
-	}
+    // LEVEL COMPLETE phase
+    if (G.gamePhase === "levelComplete") {
+        handleLevelCompleteClick(x, y);
+        return;
+    }
 
-	// Try place building on map
-	if (!G.selectedType || !G.hoverGrid) return;
-	var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
-	var g = mapGrid[gy][gx];
-	if (!g.buildable || g.building) return;
-	var td = TOWER_DATA[G.selectedType];
-	if (!td || G.money < td.cost) return;
-	createBuilding(G.selectedType, gx, gy);
+    // GAME OVER phase
+    if (G.gamePhase === "gameover") {
+        handleGameOverClick(x, y);
+        return;
+    }
+
+    // PLAYING phase
+    if (G.gamePhase !== "playing") return;
+
+    // Check right panel click
+    var px = MX + GS * 16 + 10, py = MY, pw = CFG.canvasW - px - 10;
+    if (x >= px && x <= px + pw) {
+        // Tower buttons
+        var unlockedTowers = getUnlockedTowerKeys(G.currentLevel);
+        var displayedTowers = [];
+        for (var i = 0; i < TOWER_KEYS.length; i++) {
+            if (unlockedTowers.indexOf(TOWER_KEYS[i]) !== -1) {
+                displayedTowers.push(TOWER_KEYS[i]);
+            }
+        }
+        var wallIdx = displayedTowers.indexOf("wall");
+        if (wallIdx > -1) {
+            displayedTowers.splice(wallIdx, 1);
+            displayedTowers.push("wall");
+        }
+
+        var btnY = py + 110;
+        for (var i = 0; i < displayedTowers.length; i++) {
+            var by = btnY + i * 52;
+            if (y >= by && y <= by + 46) {
+                var key = displayedTowers[i];
+                var td = TOWER_DATA[key];
+                if (G.money >= td.cost) {
+                    G.selectedType = key;
+                    G.selectedBuilding = null;
+                }
+                return;
+            }
+        }
+        // Wave button
+        var waveBtnY = btnY + displayedTowers.length * 52 + 8;
+        if (y >= waveBtnY && y <= waveBtnY + 34 && G.nextWaveReady && !G.waveInProgress) {
+            startWave();
+            return;
+        }
+        // Upgrade button (when building selected)
+        var upgradeBtnY = waveBtnY + 42;
+        if (G.selectedBuilding) {
+            var sb = G.selectedBuilding;
+            var nextLvl = sb.level + 1;
+            var td = TOWER_DATA[sb.type];
+            var maxLvl = Math.min(G.maxTowerLevel, 3);
+            if (nextLvl <= maxLvl && td) {
+                if (y >= upgradeBtnY && y <= upgradeBtnY + 30) {
+                    upgradeBuilding(sb);
+                    return;
+                }
+                upgradeBtnY += 36;
+            }
+        }
+        // Back to menu
+        var menuBtnY = upgradeBtnY + 6;
+        if (y >= menuBtnY && y <= menuBtnY + 30) {
+            G.gamePhase = "menu";
+            return;
+        }
+        return;
+    }
+
+    // Map click - place building
+    if (!G.selectedType || !G.hoverGrid) return;
+    var gx = G.hoverGrid[0], gy = G.hoverGrid[1];
+    var g = mapGrid[gy] && mapGrid[gy][gx];
+    if (!g) return;
+
+    // Check if clicking on existing building (upgrade)
+    if (g.building) {
+        var b = g.building;
+        G.selectedBuilding = (G.selectedBuilding === b) ? null : b;
+        // If upgrade clicked, try to upgrade
+        if (G.selectedBuilding === b) {
+            // Just select; upgrade happens on second click or via UI
+        }
+        return;
+    }
+
+    // Place new building
+    if (!g.buildable || g.building) return;
+    var td = TOWER_DATA[G.selectedType];
+    if (!td || G.money < td.cost) return;
+    // Check if tower is unlocked
+    var unlocked = getUnlockedTowerKeys(G.currentLevel);
+    if (unlocked.indexOf(G.selectedType) === -1) return;
+
+    createBuilding(G.selectedType, gx, gy);
+    G.selectedBuilding = null;
+}
+
+function handleMenuClick(x, y) {
+    var cols = 4, rows = 2;
+    var btnW = 180, btnH = 140, gap = 20;
+    var totalW = cols * btnW + (cols - 1) * gap;
+    var startX = (CFG.canvasW - totalW) / 2;
+    var startY = 110;
+
+    for (var i = 0; i < TOTAL_LEVELS; i++) {
+        var col = i % cols;
+        var row = Math.floor(i / cols);
+        var bx = startX + col * (btnW + gap);
+        var by = startY + row * (btnH + gap);
+        if (x >= bx && x <= bx + btnW && y >= by && y <= by + btnH) {
+            if (i <= G.maxUnlockedLevel) {
+                // Start this level
+                startPlayingLevel(i);
+                return;
+            }
+        }
+    }
+}
+
+function startPlayingLevel(levelIdx) {
+    initLevel(levelIdx);
+    G.gamePhase = "playing";
+    G.autoWaveTimer = 0;
+    G.nextWaveReady = true;
+}
+
+function handleLevelCompleteClick(x, y) {
+    var pw = 360, ph = 320;
+    var px = (CFG.canvasW - pw) / 2, py = (CFG.canvasH - ph) / 2;
+    var isLastLevel = G.currentLevel >= TOTAL_LEVELS - 1;
+
+    if (!isLastLevel) {
+        var btnY = py + ph - 80;
+        // Next level
+        if (x >= px + 30 && x <= px + 170 && y >= btnY && y <= btnY + 40) {
+            var ld = LEVEL_DATA[G.currentLevel];
+            if (ld) G.money += ld.goldReward || 0;
+            if (G.currentLevel + 1 > G.maxUnlockedLevel) {
+                G.maxUnlockedLevel = G.currentLevel + 1;
+                saveProgress();
+            }
+            startPlayingLevel(G.currentLevel + 1);
+            return;
+        }
+        // Back to menu
+        if (x >= px + pw - 170 && x <= px + pw - 30 && y >= btnY && y <= btnY + 40) {
+            saveProgress();
+            G.gamePhase = "menu";
+            return;
+        }
+    } else {
+        // Back to menu
+        var btnY = py + ph - 35;
+        if (x >= px + pw/2 - 70 && x <= px + pw/2 + 70 && y >= btnY && y <= btnY + 36) {
+            var ld = LEVEL_DATA[G.currentLevel];
+            if (ld) G.money += ld.goldReward || 0;
+            saveProgress();
+            G.gamePhase = "menu";
+            return;
+        }
+    }
+}
+
+function handleGameOverClick(x, y) {
+    var pw = 320, ph = 240;
+    var px = (CFG.canvasW - pw) / 2, py = (CFG.canvasH - ph) / 2;
+    var btnY = py + 145;
+
+    // Retry
+    if (x >= px + 30 && x <= px + 150 && y >= btnY && y <= btnY + 40) {
+        startPlayingLevel(G.currentLevel);
+        return;
+    }
+    // Back to menu
+    if (x >= px + pw - 150 && x <= px + pw - 30 && y >= btnY && y <= btnY + 40) {
+        G.gamePhase = "menu";
+        return;
+    }
 }
 
 function handleCanvasMove(x, y) {
-	G.mouseX = x; G.mouseY = y;
-	G.hoverGrid = posToGrid(x, y);
+    G.mouseX = x; G.mouseY = y;
+    G.hoverGrid = posToGrid(x, y);
 }
 
 canvas.addEventListener("mousemove", function(e) {
-	var xy = getEventXY(e);
-	handleCanvasMove(xy[0], xy[1]);
+    var xy = getEventXY(e);
+    handleCanvasMove(xy[0], xy[1]);
 });
 
 canvas.addEventListener("click", function(e) {
-	if (touchActive) { touchActive = false; return; }
-	var xy = getEventXY(e);
-	handleCanvasClick(xy[0], xy[1]);
+    if (touchActive) { touchActive = false; return; }
+    var xy = getEventXY(e);
+    handleCanvasClick(xy[0], xy[1]);
 });
 
 // Touch events
 canvas.addEventListener("touchstart", function(e) {
-	e.preventDefault();
-	touchActive = true;
-	var touch = e.touches[0];
-	var xy = getEventXY(touch);
-	handleCanvasMove(xy[0], xy[1]);
-	handleCanvasClick(xy[0], xy[1]);
+    e.preventDefault();
+    touchActive = true;
+    var touch = e.touches[0];
+    var xy = getEventXY(touch);
+    handleCanvasMove(xy[0], xy[1]);
+    handleCanvasClick(xy[0], xy[1]);
 }, { passive: false });
 
 canvas.addEventListener("touchmove", function(e) {
-	e.preventDefault();
-	var touch = e.touches[0];
-	var xy = getEventXY(touch);
-	handleCanvasMove(xy[0], xy[1]);
+    e.preventDefault();
+    var touch = e.touches[0];
+    var xy = getEventXY(touch);
+    handleCanvasMove(xy[0], xy[1]);
 }, { passive: false });
 
 canvas.addEventListener("touchend", function(e) {
-	e.preventDefault();
-	touchActive = false;
+    e.preventDefault();
+    touchActive = false;
 }, { passive: false });
 
-// ===== RESIZE HANDLER =====
+// Keyboard shortcuts
+document.addEventListener("keydown", function(e) {
+    if (e.key === "r" && G.gamePhase === "gameover") {
+        startPlayingLevel(G.currentLevel);
+    }
+    if (e.key === "m") {
+        if (G.gamePhase === "playing") G.gamePhase = "menu";
+        else if (G.gamePhase === "menu") G.gamePhase = "playing";
+    }
+    if (e.key === " " && G.nextWaveReady && !G.waveInProgress && G.gamePhase === "playing") {
+        e.preventDefault();
+        startWave();
+    }
+});
+
+// ===== RESIZE =====
 function resizeCanvas() {
-	var aspect = CFG.canvasW / CFG.canvasH;
-	var maxW = window.innerWidth;
-	var maxH = window.innerHeight;
-	var w, h;
-	if (maxW / maxH > aspect) {
-		h = maxH;
-		w = h * aspect;
-	} else {
-		w = maxW;
-		h = w / aspect;
-	}
-	canvas.style.width = Math.floor(w) + "px";
-	canvas.style.height = Math.floor(h) + "px";
+    var aspect = CFG.canvasW / CFG.canvasH;
+    var maxW = window.innerWidth;
+    var maxH = window.innerHeight;
+    var w, h;
+    if (maxW / maxH > aspect) {
+        h = maxH;
+        w = h * aspect;
+    } else {
+        w = maxW;
+        h = w / aspect;
+    }
+    canvas.style.width = Math.floor(w) + "px";
+    canvas.style.height = Math.floor(h) + "px";
 }
 
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("orientationchange", function() {
-	setTimeout(resizeCanvas, 200);
+    setTimeout(resizeCanvas, 200);
 });
 resizeCanvas();
 
 // ===== MAIN LOOP =====
 function gameLoop() {
-	if (G.phase === "loading") { drawLoading(); requestAnimationFrame(gameLoop); return; }
-	update();
-	render();
-	requestAnimationFrame(gameLoop);
-}
-
-function drawLoading() {
-	ctx.fillStyle = "#0a0a0f";
-	ctx.fillRect(0, 0, CFG.canvasW, CFG.canvasH);
-	ctx.fillStyle = "#888";
-	ctx.font = "18px Microsoft YaHei";
-	ctx.textAlign = "center";
-	ctx.fillText("加载精灵素材中...", CFG.canvasW / 2, CFG.canvasH / 2);
+    if (G.gamePhase === "loading") { drawLoading(); requestAnimationFrame(gameLoop); return; }
+    if (G.gamePhase === "playing") {
+        update();
+    }
+    render();
+    requestAnimationFrame(gameLoop);
 }
 
 // ===== START =====
-initMap();
+loadProgress();
+// If first time, start at menu with level 1 unlocked
+if (G.maxUnlockedLevel < 0) G.maxUnlockedLevel = 0;
+
+// Initialize level 1 data (for map rendering if needed)
+initLevel(0);
+G.gamePhase = "menu";
+
 SPR.load(function() {
-	document.getElementById("loading").style.display = "none";
-	if (G.phase !== "playing") {
-		G.phase = "playing";
-		gameLoop();
-	}
+    document.getElementById("loading").style.display = "none";
+    if (G.gamePhase === "loading") {
+        G.gamePhase = "menu";
+        gameLoop();
+    }
 });
+
 setTimeout(function() {
-	if (G.phase === "loading") {
-		if (SPR.ready) {
-			document.getElementById("loading").style.display = "none";
-			G.phase = "playing";
-			gameLoop();
-		} else {
-			document.getElementById("loading").textContent = "素材加载超时，请刷新重试";
-		}
-	}
+    if (G.gamePhase === "loading") {
+        if (SPR.ready) {
+            document.getElementById("loading").style.display = "none";
+            G.gamePhase = "menu";
+            gameLoop();
+        } else {
+            document.getElementById("loading").textContent = "素材加载超时，请刷新重试";
+        }
+    }
 }, 5000);
+
+// Start game loop
+gameLoop();
 
 // ===== TESTS =====
 function assert(cond, msg) {
-	if (!cond) console.error("[FAIL] " + msg);
-	else console.log("[PASS] " + msg);
+    if (!cond) console.error("[FAIL] " + msg);
+    else console.log("[PASS] " + msg);
 }
 
 (function runTests() {
-	assert(typeof canvas !== "undefined", "Canvas 存在");
-	assert(CFG.gridSize === 48, "网格尺寸 48");
-	assert(CFG.cols === 16 && CFG.rows === 16, "16x16 网格");
-	assert(Object.keys(SC).length === 43, "SC " + Object.keys(SC).length + " 精灵");
-	assert(ROAD_PATH.length > 0, "道路路径 " + ROAD_PATH.length + " 格");
-	assert(TOWER_KEYS.length === 7, "7 种塔类型");
-	assert(typeof createBuilding === "function", "createBuilding 函数存在");
-	assert(typeof startWave === "function", "startWave 函数存在");
-	assert(typeof spawnMonster === "function", "spawnMonster 函数存在");
-	// Check road path shape
-	var endsAtExit = ROAD_PATH[ROAD_PATH.length-1][0] === 15 && ROAD_PATH[ROAD_PATH.length-1][1] === 15;
-	assert(endsAtExit, "路径终点 (15,15)");
-	// Decor count
-	var decorCount = 0;
-	for (var gy = 0; gy < CFG.rows; gy++)
-		for (var gx = 0; gx < CFG.cols; gx++)
-			if (mapGrid[gy][gx].decor) decorCount++;
-	assert(decorCount > 0, "环境装饰 " + decorCount + " 个");
-	console.log("[INFO] 游戏初始化完成");
+    assert(typeof canvas !== "undefined", "Canvas 存在");
+    assert(CFG.gridSize === 48, "网格尺寸 48");
+    assert(CFG.cols === 16 && CFG.rows === 16, "16x16 网格");
+    assert(Object.keys(SC).length >= 40, "精灵表 " + Object.keys(SC).length + " 精灵");
+    assert(MONSTER_TYPES.length === 15, "15种怪物类型");
+    assert(BOSS_DATA.length === 8, "8个Boss");
+    assert(LEVEL_DATA.length === 8, "8个关卡");
+
+    // Check each level has waves and path
+    for (var i = 0; i < LEVEL_DATA.length; i++) {
+        var lv = LEVEL_DATA[i];
+        assert(lv.path && lv.path.length > 0, "关卡" + (i+1) + " 有路径");
+        assert(lv.waves && lv.waves.length > 0, "关卡" + (i+1) + " 有波次");
+        assert(lv.name && lv.name !== "", "关卡" + (i+1) + " 有名称");
+    }
+
+    // Check path continuity (each step moves to adjacent cell)
+    for (var i = 0; i < LEVEL_DATA.length; i++) {
+        var path = LEVEL_DATA[i].path;
+        var continuous = true;
+        for (var p = 1; p < path.length; p++) {
+            var dx = Math.abs(path[p][0] - path[p-1][0]);
+            var dy = Math.abs(path[p][1] - path[p-1][1]);
+            if (dx + dy !== 1) { continuous = false; break; }
+        }
+        assert(continuous, "关卡" + (i+1) + " 路径连续");
+    }
+
+    // Check tower data
+    assert(TOWER_DATA.archer.levels.length === 3, "箭塔3级");
+    assert(TOWER_DATA.archer.levels[2].dmg === 65, "箭塔Lv3伤害65");
+
+    // Check total waves
+    var totalWaves = 0;
+    for (var i = 0; i < LEVEL_DATA.length; i++) {
+        totalWaves += LEVEL_DATA[i].waves.length;
+    }
+    assert(totalWaves === 104, "总共104波 (实际" + totalWaves + ")");
+
+    // Check ROAD_PATH is valid
+    assert(typeof isOnRoad === "function", "isOnRoad 函数存在");
+    assert(typeof createBuilding === "function", "createBuilding 函数存在");
+    assert(typeof startWave === "function", "startWave 函数存在");
+    assert(typeof spawnMonster === "function", "spawnMonster 函数存在");
+    assert(typeof initLevel === "function", "initLevel 函数存在");
+
+    console.log("[INFO] 塔防v2八关系统初始化完成");
+    console.log("[INFO] 当前解锁关卡: " + (G.maxUnlockedLevel + 1));
 })();
 </script>
 </body>
