@@ -230,47 +230,26 @@ function lockPiece() {
     }, 300);
 }
 
-function findConnectedGroups() {
-    const visited = [];
+function findFullLines() {
+    const fullLines = [];
     for (let r = 0; r < ROWS; r++) {
-        visited[r] = new Array(COLS).fill(false);
-    }
-    const groups = [];
-    // Only check 4 directions (horizontal and vertical), not diagonals
-    const directions = [[-1,0],[1,0],[0,-1],[0,1]];
-
-    for (let r = 0; r < ROWS; r++) {
+        let full = true;
         for (let c = 0; c < COLS; c++) {
-            if (grid[r][c] === EMPTY || visited[r][c]) continue;
-            const color = grid[r][c];
-            const group = [];
-            const queue = [[r, c]];
-            visited[r][c] = true;
-
-            while (queue.length > 0) {
-                const [cr, cc] = queue.shift();
-                group.push([cr, cc]);
-                for (const [dr, dc] of directions) {
-                    const nr = cr + dr;
-                    const nc = cc + dc;
-                    if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
-                    if (visited[nr][nc] || grid[nr][nc] !== color) continue;
-                    visited[nr][nc] = true;
-                    queue.push([nr, nc]);
-                }
-            }
-
-            if (group.length >= 3) {
-                groups.push({ cells: group, color: color });
+            if (grid[r][c] === EMPTY) {
+                full = false;
+                break;
             }
         }
+        if (full) {
+            fullLines.push(r);
+        }
     }
-    return groups;
+    return fullLines;
 }
 
 function checkEliminations() {
-    const groups = findConnectedGroups();
-    if (groups.length === 0) {
+    const fullLines = findFullLines();
+    if (fullLines.length === 0) {
         combo = 0;
         cascading = false;
         spawnPiece();
@@ -281,19 +260,21 @@ function checkEliminations() {
     combo++;
     let totalEliminated = 0;
 
-    for (const group of groups) {
-        totalEliminated += group.cells.length;
-        for (const [r, c] of group.cells) {
-            spawnParticles(c, r, COLORS[group.color]);
-            flashCells.push({ row: r, col: c, timer: 300 });
+    for (const row of fullLines) {
+        totalEliminated += COLS;
+        for (let c = 0; c < COLS; c++) {
+            spawnParticles(c, row, COLORS[grid[row][c]]);
+            flashCells.push({ row: row, col: c, timer: 300 });
         }
     }
     playEliminate(combo);
 
-    for (const group of groups) {
-        for (const [r, c] of group.cells) {
-            grid[r][c] = EMPTY;
-        }
+    // Remove full lines and shift down
+    for (const row of fullLines) {
+        // Remove the line
+        grid.splice(row, 1);
+        // Add empty line at top
+        grid.unshift(new Array(COLS).fill(EMPTY));
     }
 
     const basePoints = totalEliminated * 10;
@@ -313,23 +294,12 @@ function checkEliminations() {
         saveHighScore();
     }
 
-    const centerX = group => {
-        let sum = 0;
-        for (const [,c] of group.cells) sum += c;
-        return (sum / group.cells.length) * CELL + CELL / 2;
-    };
-    const centerY = group => {
-        let sum = 0;
-        for (const [r] of group.cells) sum += r;
-        return (sum / group.cells.length) * CELL + CELL / 2;
-    };
-
-    for (const group of groups) {
-        const groupScore = group.cells.length * 10 * combo;
+    for (const row of fullLines) {
+        const lineScore = COLS * 10 * combo;
         scorePopups.push({
-            x: centerX(group),
-            y: centerY(group),
-            text: (combo > 1 ? combo + 'x ' : '') + '+' + groupScore,
+            x: COLS * CELL / 2,
+            y: row * CELL + CELL / 2,
+            text: (combo > 1 ? combo + 'x ' : '') + '+' + lineScore,
             timer: 1200,
             combo: combo
         });
@@ -733,7 +703,7 @@ function drawMenu() {
 
     ctx.font = '14px sans-serif';
     ctx.fillStyle = '#666688';
-    ctx.fillText('3个及以上同色方块相连即可消除', cx, cy + 120);
+    ctx.fillText('铺满一整行即可消除', cx, cy + 120);
     ctx.fillText('支持键盘和触屏操作', cx, cy + 142);
 }
 
