@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>方块消消乐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:'Segoe UI',sans-serif}
+canvas{display:block;image-rendering:pixelated;touch-action:none}
+#gameCanvas{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+(function(){
+'use strict';
+
+const COLS = 10;
+const ROWS = 20;
+const CELL = 30;
+const PREVIEW_SIZE = 4;
+const EMPTY = -1;
+
+const COLORS = [
+    '#ff4444', // red
+    '#4488ff', // blue
+    '#44dd44', // green
+    '#ffdd44', // yellow
+    '#bb44ff', // purple
+    '#ff8844', // orange
+    '#44dddd'  // cyan
+];
+
+const COLORS_LIGHT = [
+    '#ff8888', '#88bbff', '#88ff88', '#ffee88',
+    '#dd88ff', '#ffbb88', '#88eeee'
+];
+
+const TETROMINOES = [
+    { shape: [[1,1],[1,1]], name: 'O' },
+    { shape: [[1,1,1,1]], name: 'I' },
+    { shape: [[0,1,0],[1,1,1]], name: 'T' },
+    { shape: [[1,0],[1,0],[1,1]], name: 'L' },
+    { shape: [[0,1],[0,1],[1,1]], name: 'J' },
+    { shape: [[1,0],[1,1],[0,1]], name: 'S' },
+    { shape: [[0,1],[1,1],[1,0]], name: 'Z' }
+];
+
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAMEOVER: 3 };
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let gridWidth, gridHeight, offsetX, offsetY;
+let totalWidth, totalHeight;
+let gameState = STATE.MENU;
+let score = 0;
+let level = 1;
+let blocksEliminated = 0;
+let highScore = 0;
+let combo = 0;
+let comboTimer = 0;
+let comboDisplayList = [];
+let particles = [];
+let currentPiece = null;
+let nextPiece = null;
+let grid = [];
+let dropTimer = 0;
+let dropInterval = 1000;
+let lockDelay = 0;
+let lockDelayMax = 500;
+let isLocking = false;
+let lastTime = 0;
+let inputCooldown = 0;
+let scorePopups = [];
+let flashCells = [];
+let flashTimer = 0;
+let cascading = false;
+let cascadeCheckTimer = 0;
+
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+let touchMoved = false;
+let touchDropInterval = null;
+let touchDropTimeout = null;
+
+let audioCtx = null;
+
+function initAudio() {
+    if (audioCtx) return;
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(e) {}
+}
+
+function playTone(freq, duration, type, volume) {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(volume || 0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+}
+
+function playMove() { playTone(600, 0.05, 'square', 0.08); }
+function playRotate() { playTone(800, 0.1, 'sine', 0.12); }
+function playDrop() { playTone(300, 0.15, 'triangle', 0.1); }
+function playEliminate(comboNum) {
+    const baseFreq = 500 + comboNum * 80;
+    playTone(baseFreq, 0.2, 'sine', 0.15);
+    setTimeout(() => playTone(baseFreq * 1.25, 0.15, 'sine', 0.1), 80);
+}
+function playGameOver() {
+    playTone(400, 0.3, 'sawtooth', 0.12);
+    setTimeout(() => playTone(300, 0.3, 'sawtooth', 0.1), 200);
+    setTimeout(() => playTone(200, 0.5, 'sawtooth', 0.08), 400);
+}
+
+function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const sidePanel = 160;
+    gridWidth = COLS * CELL;
+    gridHeight = ROWS * CELL;
+    totalWidth = gridWidth + sidePanel;
+    totalHeight = gridHeight;
+
+    const maxW = window.innerWidth * 0.95;
+    const maxH = window.innerHeight * 0.95;
+    let scale = Math.min(maxW / totalWidth, maxH / totalHeight);
+    scale = Math.min(scale, 2);
+
+    canvas.width = totalWidth * scale * dpr;
+    canvas.height = totalHeight * scale * dpr;
+    canvas.style.width = (totalWidth * scale) + 'px';
+    canvas.style.height = (totalHeight * scale) + 'px';
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    offsetX = 0;
+    offsetY = 0;
+}
+
+function loadHighScore() {
+    try {
+        const s = localStorage.getItem('blockMatchHighScore');
+        highScore = s ? parseInt(s) || 0 : 0;
+    } catch(e) { highScore = 0; }
+}
+
+function saveHighScore() {
+    try {
+        localStorage.setItem('blockMatchHighScore', highScore.toString());
+    } catch(e) {}
+}
+
+function createGrid() {
+    grid = [];
+    for (let r = 0; r < ROWS; r++) {
+        grid[r] = [];
+        for (let c = 0; c < COLS; c++) {
+            grid[r][c] = EMPTY;
+        }
+    }
+}
+
+function createPiece() {
+    const idx = Math.floor(Math.random() * TETROMINOES.length);
+    const colorIdx = Math.floor(Math.random() * COLORS.length);
+    const tetro = TETROMINOES[idx];
+    const shape = tetro.shape.map(row => [...row]);
+    return {
+        shape: shape,
+        color: colorIdx,
+        row: 0,
+        col: Math.floor((COLS - shape[0].length) / 2)
+    };
+}
+
+function rotatePiece(piece) {
+    const rows = piece.shape.length;
+    const cols = piece.shape[0].length;
+    const newShape = [];
+    for (let c = 0; c < cols; c++) {
+        newShape[c] = [];
+        for (let r = rows - 1; r >= 0; r--) {
+            newShape[c].push(piece.shape[r][c]);
+        }
+    }
+    return newShape;
+}
+
+function isValid(shape, row, col) {
+    for (let r = 0; r < shape.length; r++) {
+        for (let c = 0; c < shape[r].length; c++) {
+            if (!shape[r][c]) continue;
+            const nr = row + r;
+            const nc = col + c;
+            if (nc < 0 || nc >= COLS || nr >= ROWS) return false;
+            if (nr >= 0 && grid[nr][nc] !== EMPTY) return false;
+        }
+    }
+    return true;
+}
+
+function lockPiece() {
+    for (let r = 0; r < currentPiece.shape.length; r++) {
+        for (let c = 0; c < currentPiece.shape[r].length; c++) {
+            if (!currentPiece.shape[r][c]) continue;
+            const nr = currentPiece.row + r;
+            const nc = currentPiece.col + c;
+            if (nr < 0) continue;
+            grid[nr][nc] = currentPiece.color;
+        }
+    }
+    currentPiece = null;
+    isLocking = false;
+    lockDelay = 0;
+    checkEliminations();
+}
+
+function findConnectedGroups() {
+    const visited = [];
+    for (let r = 0; r < ROWS; r++) {
+        visited[r] = new Array(COLS).fill(false);
+    }
+    const groups = [];
+    const directions = [
+        [-1,0],[1,0],[0,-1],[0,1],
+        [-1,-1],[-1,1],[1,-1],[1,1]
+    ];
+
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (grid[r][c] === EMPTY || visited[r][c]) continue;
+            const color = grid[r][c];
+            const group = [];
+            const queue = [[r, c]];
+            visited[r][c] = true;
+
+            while (queue.length > 0) {
+                const [cr, cc] = queue.shift();
+                group.push([cr, cc]);
+                for (const [dr, dc] of directions) {
+                    const nr = cr + dr;
+                    const nc = cc + dc;
+                    if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
+                    if (visited[nr][nc] || grid[nr][nc] !== color) continue;
+                    visited[nr][nc] = true;
+                    queue.push([nr, nc]);
+                }
+            }
+
+            if (group.length >= 3) {
+                groups.push({ cells: group, color: color });
+            }
+        }
+    }
+    return groups;
+}
+
+function checkEliminations() {
+    const groups = findConnectedGroups();
+    if (groups.length === 0) {
+        combo = 0;
+        cascading = false;
+        spawnPiece();
+        return;
+    }
+
+    cascading = true;
+    combo++;
+    let totalEliminated = 0;
+
+    for (const group of groups) {
+        totalEliminated += group.cells.length;
+        for (const [r, c] of group.cells) {
+            spawnParticles(c, r, COLORS[group.color]);
+            flashCells.push({ row: r, col: c, timer: 300 });
+        }
+    }
+    playEliminate(combo);
+
+    for (const group of groups) {
+        for (const [r, c] of group.cells) {
+            grid[r][c] = EMPTY;
+        }
+    }
+
+    const basePoints = totalEliminated * 10;
+    const comboMultiplier = combo;
+    const earned = basePoints * comboMultiplier;
+    score += earned;
+    blocksEliminated += totalEliminated;
+
+    const newLevel = Math.floor(blocksEliminated / 100) + 1;
+    if (newLevel > level) {
+        level = newLevel;
+        dropInterval = Math.max(100, 1000 - (level - 1) * 80);
+    }
+
+    if (score > highScore) {
+        highScore = score;
+        saveHighScore();
+    }
+
+    const centerX = group => {
+        let sum = 0;
+        for (const [,c] of group.cells) sum += c;
+        return (sum / group.cells.length) * CELL + CELL / 2;
+    };
+    const centerY = group => {
+        let sum = 0;
+        for (const [r] of group.cells) sum += r;
+        return (sum / group.cells.length) * CELL + CELL / 2;
+    };
+
+    for (const group of groups) {
+        const groupScore = group.cells.length * 10 * combo;
+        scorePopups.push({
+            x: centerX(group),
+            y: centerY(group),
+            text: (combo > 1 ? combo + 'x ' : '') + '+' + groupScore,
+            timer: 1200,
+            combo: combo
+        });
+    }
+
+    if (combo > 1) {
+        comboDisplayList.push({
+            text: combo + ' COMBO!',
+            timer: 1500,
+            scale: 1 + combo * 0.2
+        });
+    }
+
+    cascadeCheckTimer = 300;
+}
+
+function applyGravity() {
+    let fell = false;
+    for (let c = 0; c < COLS; c++) {
+        let writeRow = ROWS - 1;
+        for (let r = ROWS - 1; r >= 0; r--) {
+            if (grid[r][c] !== EMPTY) {
+                if (r !== writeRow) {
+                    grid[writeRow][c] = grid[r][c];
+                    grid[r][c] = EMPTY;
+                    fell = true;
+                }
+                writeRow--;
+            }
+        }
+    }
+    return fell;
+}
+
+function spawnPiece() {
+    currentPiece = nextPiece || createPiece();
+    nextPiece = createPiece();
+    dropTimer = 0;
+    isLocking = false;
+    lockDelay = 0;
+
+    if (!isValid(currentPiece.shape, currentPiece.row, currentPiece.col)) {
+        gameOver();
+    }
+}
+
+function hardDrop() {
+    if (!currentPiece) return;
+    let dropCount = 0;
+    while (isValid(currentPiece.shape, currentPiece.row + 1, currentPiece.col)) {
+        currentPiece.row++;
+        dropCount++;
+    }
+    score += dropCount * 2;
+    playDrop();
+    lockPiece();
+}
+
+function clearAllRepeatTimers() {
+    if (leftRepeatTimer) { clearInterval(leftRepeatTimer); leftRepeatTimer = null; }
+    if (rightRepeatTimer) { clearInterval(rightRepeatTimer); rightRepeatTimer = null; }
+    if (downRepeatTimer) { clearInterval(downRepeatTimer); downRepeatTimer = null; }
+}
+
+function gameOver() {
+    gameState = STATE.GAMEOVER;
+    clearAllRepeatTimers();
+    playGameOver();
+    if (score > highScore) {
+        highScore = score;
+        saveHighScore();
+    }
+}
+
+function startGame() {
+    initAudio();
+    clearAllRepeatTimers();
+    if (touchDropTimeout) { clearTimeout(touchDropTimeout); touchDropTimeout = null; }
+    if (touchDropInterval) { clearInterval(touchDropInterval); touchDropInterval = null; }
+    createGrid();
+    score = 0;
+    level = 1;
+    blocksEliminated = 0;
+    combo = 0;
+    dropInterval = 1000;
+    particles = [];
+    scorePopups = [];
+    comboDisplayList = [];
+    flashCells = [];
+    cascading = false;
+    currentPiece = null;
+    nextPiece = createPiece();
+    spawnPiece();
+    gameState = STATE.PLAYING;
+}
+
+function spawnParticles(col, row, color) {
+    const cx = col * CELL + CELL / 2;
+    const cy = row * CELL + CELL / 2;
+    for (let i = 0; i < 8; i++) {
+        const angle = (Math.PI * 2 / 8) * i + Math.random() * 0.5;
+        const speed = 80 + Math.random() * 120;
+        particles.push({
+            x: cx,
+            y: cy,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 600 + Math.random() * 400,
+            maxLife: 1000,
+            color: color,
+            size: 3 + Math.random() * 3
+        });
+    }
+}
+
+function updateParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx * dt / 1000;
+        p.y += p.vy * dt / 1000;
+        p.vy += 200 * dt / 1000;
+        p.life -= dt;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function updateScorePopups(dt) {
+    for (let i = scorePopups.length - 1; i >= 0; i--) {
+        const p = scorePopups[i];
+        p.timer -= dt;
+        p.y -= 30 * dt / 1000;
+        if (p.timer <= 0) scorePopups.splice(i, 1);
+    }
+}
+
+function updateComboDisplay(dt) {
+    for (let i = comboDisplayList.length - 1; i >= 0; i--) {
+        comboDisplayList[i].timer -= dt;
+        if (comboDisplayList[i].timer <= 0) comboDisplayList.splice(i, 1);
+    }
+}
+
+function updateFlashCells(dt) {
+    for (let i = flashCells.length - 1; i >= 0; i--) {
+        flashCells[i].timer -= dt;
+        if (flashCells[i].timer <= 0) flashCells.splice(i, 1);
+    }
+}
+
+function drawGrid() {
+    ctx.fillStyle = '#12122a';
+    ctx.fillRect(offsetX, offsetY, gridWidth, gridHeight);
+
+    ctx.strokeStyle = '#1a1a3a';
+    ctx.lineWidth = 0.5;
+    for (let r = 0; r <= ROWS; r++) {
+        ctx.beginPath();
+        ctx.moveTo(offsetX, offsetY + r * CELL);
+        ctx.lineTo(offsetX + gridWidth, offsetY + r * CELL);
+        ctx.stroke();
+    }
+    for (let c = 0; c <= COLS; c++) {
+        ctx.beginPath();
+        ctx.moveTo(offsetX + c * CELL, offsetY);
+        ctx.lineTo(offsetX + c * CELL, offsetY + gridHeight);
+        ctx.stroke();
+    }
+}
+
+function drawBlock(col, row, colorIdx, alpha) {
+    const x = offsetX + col * CELL + 1;
+    const y = offsetY + row * CELL + 1;
+    const size = CELL - 2;
+    const a = alpha || 1;
+
+    ctx.globalAlpha = a;
+    ctx.fillStyle = COLORS[colorIdx];
+    ctx.fillRect(x, y, size, size);
+
+    ctx.fillStyle = COLORS_LIGHT[colorIdx];
+    ctx.fillRect(x + 2, y + 2, size - 4, 4);
+    ctx.fillRect(x + 2, y + 2, 4, size - 4);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(x + size - 4, y + 4, 4, size - 4);
+    ctx.fillRect(x + 4, y + size - 4, size - 4, 4);
+
+    ctx.globalAlpha = 1;
+}
+
+function drawLockedBlocks() {
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (grid[r][c] !== EMPTY) {
+                let flash = false;
+                for (const f of flashCells) {
+                    if (f.row === r && f.col === c) {
+                        flash = true;
+                        break;
+                    }
+                }
+                if (flash) {
+                    const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.02);
+                    drawBlock(c, r, grid[r][c], 0.5 + pulse * 0.5);
+                } else {
+                    drawBlock(c, r, grid[r][c]);
+                }
+            }
+        }
+    }
+}
+
+function drawGhostPiece() {
+    if (!currentPiece) return;
+    let ghostRow = currentPiece.row;
+    while (isValid(currentPiece.shape, ghostRow + 1, currentPiece.col)) {
+        ghostRow++;
+    }
+    for (let r = 0; r < currentPiece.shape.length; r++) {
+        for (let c = 0; c < currentPiece.shape[r].length; c++) {
+            if (!currentPiece.shape[r][c]) continue;
+            const gr = ghostRow + r;
+            if (gr < 0) continue;
+            const x = offsetX + (currentPiece.col + c) * CELL + 1;
+            const y = offsetY + gr * CELL + 1;
+            const size = CELL - 2;
+            ctx.strokeStyle = COLORS[currentPiece.color];
+            ctx.globalAlpha = 0.3;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, size, size);
+            ctx.globalAlpha = 1;
+        }
+    }
+}
+
+function drawCurrentPiece() {
+    if (!currentPiece) return;
+    for (let r = 0; r < currentPiece.shape.length; r++) {
+        for (let c = 0; c < currentPiece.shape[r].length; c++) {
+            if (!currentPiece.shape[r][c]) continue;
+            const dr = currentPiece.row + r;
+            if (dr < 0) continue;
+            drawBlock(currentPiece.col + c, dr, currentPiece.color);
+        }
+    }
+}
+
+function drawParticles() {
+    for (const p of particles) {
+        const alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(
+            offsetX + p.x - p.size / 2,
+            offsetY + p.y - p.size / 2,
+            p.size * alpha,
+            p.size * alpha
+        );
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawScorePopups() {
+    for (const p of scorePopups) {
+        const alpha = Math.min(1, p.timer / 400);
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillStyle = p.combo > 1 ? '#ffdd44' : '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.text, offsetX + p.x, offsetY + p.y);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawComboDisplay() {
+    for (const c of comboDisplayList) {
+        const alpha = Math.min(1, c.timer / 500);
+        const scale = c.scale * (1 + (1 - alpha) * 0.3);
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold ' + Math.floor(32 * scale) + 'px sans-serif';
+        ctx.fillStyle = '#ff4444';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(c.text, offsetX + gridWidth / 2, offsetY + gridHeight / 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textBaseline = 'alphabetic';
+}
+
+function drawSidePanel() {
+    const px = offsetX + gridWidth + 15;
+    const py = offsetY + 20;
+
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = '#aaaacc';
+    ctx.textAlign = 'left';
+    ctx.fillText('SCORE', px, py);
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(score.toString(), px, py + 28);
+
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = '#aaaacc';
+    ctx.fillText('LEVEL', px, py + 70);
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(level.toString(), px, py + 98);
+
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = '#aaaacc';
+    ctx.fillText('BLOCKS', px, py + 140);
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(blocksEliminated.toString(), px, py + 168);
+
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = '#aaaacc';
+    ctx.fillText('BEST', px, py + 210);
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = '#ffdd44';
+    ctx.fillText(highScore.toString(), px, py + 234);
+
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillStyle = '#aaaacc';
+    ctx.fillText('NEXT', px, py + 275);
+
+    if (nextPiece) {
+        const previewX = px + 10;
+        const previewY = py + 290;
+        const previewCell = 22;
+        const shape = nextPiece.shape;
+        const pw = shape[0].length * previewCell;
+        const ph = shape.length * previewCell;
+
+        ctx.fillStyle = '#1a1a3a';
+        ctx.fillRect(previewX - 5, previewY - 5, pw + 10, ph + 10);
+        ctx.strokeStyle = '#2a2a4a';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(previewX - 5, previewY - 5, pw + 10, ph + 10);
+
+        for (let r = 0; r < shape.length; r++) {
+            for (let c = 0; c < shape[r].length; c++) {
+                if (!shape[r][c]) continue;
+                const bx = previewX + c * previewCell + 1;
+                const by = previewY + r * previewCell + 1;
+                const bs = previewCell - 2;
+                ctx.fillStyle = COLORS[nextPiece.color];
+                ctx.fillRect(bx, by, bs, bs);
+                ctx.fillStyle = COLORS_LIGHT[nextPiece.color];
+                ctx.fillRect(bx + 2, by + 2, bs - 4, 3);
+            }
+        }
+    }
+
+    const controlY = py + 380;
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = '#666688';
+    ctx.fillText('← → Move', px, controlY);
+    ctx.fillText('↑ Rotate', px, controlY + 18);
+    ctx.fillText('↓ Soft Drop', px, controlY + 36);
+    ctx.fillText('Space Hard Drop', px, controlY + 54);
+    ctx.fillText('P Pause', px, controlY + 72);
+    ctx.fillText('R Restart', px, controlY + 90);
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, totalWidth, totalHeight);
+
+    const cx = totalWidth / 2;
+    const cy = totalHeight / 2;
+
+    ctx.font = 'bold 48px sans-serif';
+    ctx.fillStyle = '#ff4444';
+    ctx.textAlign = 'center';
+    ctx.fillText('方块消消乐', cx, cy - 100);
+
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#8888aa';
+    ctx.fillText('俄罗斯方块 × 三消', cx, cy - 60);
+
+    const btnX = cx - 90;
+    const btnY = cy - 10;
+    const btnW = 180;
+    const btnH = 50;
+
+    ctx.fillStyle = '#2244aa';
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+    ctx.strokeStyle = '#4466cc';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(btnX, btnY, btnW, btnH);
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('开始游戏', cx, btnY + 33);
+
+    if (highScore > 0) {
+        ctx.font = '16px sans-serif';
+        ctx.fillStyle = '#ffdd44';
+        ctx.fillText('最高分: ' + highScore, cx, cy + 80);
+    }
+
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = '#666688';
+    ctx.fillText('3个及以上同色方块相连即可消除', cx, cy + 120);
+    ctx.fillText('支持键盘和触屏操作', cx, cy + 142);
+}
+
+function drawPaused() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, totalWidth, totalHeight);
+    ctx.font = 'bold 36px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.fillText('暂停', totalWidth / 2, totalHeight / 2 - 10);
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#aaaacc';
+    ctx.fillText('按 P 继续', totalWidth / 2, totalHeight / 2 + 25);
+}
+
+function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, totalWidth, totalHeight);
+
+    const cx = totalWidth / 2;
+    const cy = totalHeight / 2;
+
+    ctx.font = 'bold 40px sans-serif';
+    ctx.fillStyle = '#ff4444';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', cx, cy - 60);
+
+    ctx.font = '24px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('得分: ' + score, cx, cy - 10);
+
+    if (score >= highScore && score > 0) {
+        ctx.font = '18px sans-serif';
+        ctx.fillStyle = '#ffdd44';
+        ctx.fillText('新纪录!', cx, cy + 25);
+    } else {
+        ctx.font = '18px sans-serif';
+        ctx.fillStyle = '#aaaacc';
+        ctx.fillText('最高分: ' + highScore, cx, cy + 25);
+    }
+
+    const btnX = cx - 80;
+    const btnY = cy + 50;
+    const btnW = 160;
+    const btnH = 45;
+
+    ctx.fillStyle = '#2244aa';
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+    ctx.strokeStyle = '#4466cc';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(btnX, btnY, btnW, btnH);
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('重新开始', cx, btnY + 30);
+
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = '#666688';
+    ctx.fillText('或按 R 键', cx, btnY + 70);
+}
+
+function drawGame() {
+    drawGrid();
+    drawLockedBlocks();
+    drawGhostPiece();
+    drawCurrentPiece();
+    drawParticles();
+    drawScorePopups();
+    drawComboDisplay();
+    drawSidePanel();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, totalWidth, totalHeight);
+
+    switch (gameState) {
+        case STATE.MENU:
+            drawMenu();
+            break;
+        case STATE.PLAYING:
+            drawGame();
+            break;
+        case STATE.PAUSED:
+            drawGame();
+            drawPaused();
+            break;
+        case STATE.GAMEOVER:
+            drawGame();
+            drawGameOver();
+            break;
+    }
+}
+
+function update(dt) {
+    if (gameState !== STATE.PLAYING) return;
+
+    updateParticles(dt);
+    updateScorePopups(dt);
+    updateComboDisplay(dt);
+    updateFlashCells(dt);
+
+    if (cascading) {
+        cascadeCheckTimer -= dt;
+        if (cascadeCheckTimer <= 0) {
+            const fell = applyGravity();
+            if (fell) {
+                cascadeCheckTimer = 200;
+            } else {
+                checkEliminations();
+            }
+        }
+        return;
+    }
+
+    if (!currentPiece) return;
+
+    if (inputCooldown > 0) inputCooldown -= dt;
+
+    if (isLocking) {
+        lockDelay += dt;
+        if (lockDelay >= lockDelayMax) {
+            lockPiece();
+            return;
+        }
+        if (isValid(currentPiece.shape, currentPiece.row + 1, currentPiece.col)) {
+            isLocking = false;
+            lockDelay = 0;
+        }
+    }
+
+    dropTimer += dt;
+    if (dropTimer >= dropInterval) {
+        dropTimer = 0;
+        if (isValid(currentPiece.shape, currentPiece.row + 1, currentPiece.col)) {
+            currentPiece.row++;
+        } else {
+            if (!isLocking) {
+                isLocking = true;
+                lockDelay = 0;
+            }
+        }
+    }
+}
+
+function moveLeft() {
+    if (!currentPiece || cascading) return;
+    if (isValid(currentPiece.shape, currentPiece.row, currentPiece.col - 1)) {
+        currentPiece.col--;
+        if (isLocking) lockDelay = 0;
+        playMove();
+    }
+}
+
+function moveRight() {
+    if (!currentPiece || cascading) return;
+    if (isValid(currentPiece.shape, currentPiece.row, currentPiece.col + 1)) {
+        currentPiece.col++;
+        if (isLocking) lockDelay = 0;
+        playMove();
+    }
+}
+
+function rotate() {
+    if (!currentPiece || cascading) return;
+    const newShape = rotatePiece(currentPiece);
+    const kicks = [0, -1, 1, -2, 2];
+    for (const kick of kicks) {
+        if (isValid(newShape, currentPiece.row, currentPiece.col + kick)) {
+            currentPiece.shape = newShape;
+            currentPiece.col += kick;
+            if (isLocking) lockDelay = 0;
+            playRotate();
+            return;
+        }
+    }
+}
+
+function softDrop() {
+    if (!currentPiece || cascading) return;
+    if (isValid(currentPiece.shape, currentPiece.row + 1, currentPiece.col)) {
+        currentPiece.row++;
+        score += 1;
+        dropTimer = 0;
+    }
+}
+
+function getCanvasPos(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = totalWidth / rect.width;
+    const scaleY = totalHeight / rect.height;
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+function handleMenuClick(x, y) {
+    const cx = totalWidth / 2;
+    const cy = totalHeight / 2;
+    const btnX = cx - 90;
+    const btnY = cy - 10;
+    const btnW = 180;
+    const btnH = 50;
+
+    if (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH) {
+        startGame();
+    }
+}
+
+function handleGameOverClick(x, y) {
+    const cx = totalWidth / 2;
+    const cy = totalHeight / 2;
+    const btnX = cx - 80;
+    const btnY = cy + 50;
+    const btnW = 160;
+    const btnH = 45;
+
+    if (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH) {
+        startGame();
+    }
+}
+
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    const pos = getCanvasPos(e.clientX, e.clientY);
+    if (gameState === STATE.MENU) {
+        handleMenuClick(pos.x, pos.y);
+    } else if (gameState === STATE.GAMEOVER) {
+        handleGameOverClick(pos.x, pos.y);
+    }
+});
+
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    initAudio();
+    const touch = e.touches[0];
+    const pos = getCanvasPos(touch.clientX, touch.clientY);
+
+    if (gameState === STATE.MENU) {
+        handleMenuClick(pos.x, pos.y);
+        return;
+    }
+    if (gameState === STATE.GAMEOVER) {
+        handleGameOverClick(pos.x, pos.y);
+        return;
+    }
+    if (gameState !== STATE.PLAYING) return;
+
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchStartTime = Date.now();
+    touchMoved = false;
+
+    touchDropTimeout = setTimeout(function() {
+        touchDropTimeout = null;
+        touchDropInterval = setInterval(function() {
+            if (gameState === STATE.PLAYING && currentPiece) {
+                softDrop();
+            }
+        }, 80);
+    }, 200);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    if (gameState !== STATE.PLAYING) return;
+
+    if (touchDropTimeout) {
+        clearTimeout(touchDropTimeout);
+        touchDropTimeout = null;
+    }
+
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartX;
+    const dy = touch.clientY - touchStartY;
+    const rect = canvas.getBoundingClientRect();
+    const cellPixel = CELL * (rect.width / totalWidth);
+    const threshold = cellPixel * 0.6;
+
+    if (Math.abs(dx) > threshold && !touchMoved) {
+        touchMoved = true;
+        if (dx > 0) moveRight();
+        else moveLeft();
+        touchStartX = touch.clientX;
+    }
+
+    if (dy > threshold && !touchMoved) {
+        touchMoved = true;
+        softDrop();
+        touchStartY = touch.clientY;
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    if (touchDropTimeout) {
+        clearTimeout(touchDropTimeout);
+        touchDropTimeout = null;
+    }
+    if (touchDropInterval) {
+        clearInterval(touchDropInterval);
+        touchDropInterval = null;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+
+    const elapsed = Date.now() - touchStartTime;
+    if (!touchMoved && elapsed < 200) {
+        rotate();
+    }
+
+    if (touchMoved) {
+        const touch = e.changedTouches[0];
+        const dy = touch.clientY - touchStartY;
+        const rect = canvas.getBoundingClientRect();
+        const cellPixel = CELL * (rect.height / totalHeight);
+        if (dy > cellPixel * 2) {
+            hardDrop();
+        }
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', function(e) {
+    if (touchDropTimeout) {
+        clearTimeout(touchDropTimeout);
+        touchDropTimeout = null;
+    }
+    if (touchDropInterval) {
+        clearInterval(touchDropInterval);
+        touchDropInterval = null;
+    }
+}, { passive: false });
+
+const keysDown = {};
+
+document.addEventListener('keydown', function(e) {
+    initAudio();
+    const key = e.key.toLowerCase();
+
+    if (key === 'r') {
+        startGame();
+        return;
+    }
+
+    if (key === 'p') {
+        if (gameState === STATE.PLAYING) {
+            gameState = STATE.PAUSED;
+            clearAllRepeatTimers();
+        } else if (gameState === STATE.PAUSED) {
+            gameState = STATE.PLAYING;
+        }
+        return;
+    }
+
+    if (gameState === STATE.MENU && (key === 'enter' || key === ' ')) {
+        e.preventDefault();
+        startGame();
+        return;
+    }
+
+    if (gameState === STATE.GAMEOVER && (key === 'enter' || key === ' ')) {
+        e.preventDefault();
+        startGame();
+        return;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+
+    if (!keysDown[key]) {
+        keysDown[key] = true;
+        switch (key) {
+            case 'arrowleft':
+            case 'a':
+                e.preventDefault();
+                moveLeft();
+                break;
+            case 'arrowright':
+            case 'd':
+                e.preventDefault();
+                moveRight();
+                break;
+            case 'arrowup':
+            case 'w':
+                e.preventDefault();
+                rotate();
+                break;
+            case 'arrowdown':
+            case 's':
+                e.preventDefault();
+                softDrop();
+                break;
+            case ' ':
+                e.preventDefault();
+                hardDrop();
+                break;
+        }
+    }
+});
+
+document.addEventListener('keyup', function(e) {
+    keysDown[e.key.toLowerCase()] = false;
+});
+
+let leftRepeatTimer = null;
+let rightRepeatTimer = null;
+let downRepeatTimer = null;
+
+document.addEventListener('keydown', function(e) {
+    if (gameState !== STATE.PLAYING) return;
+    const key = e.key.toLowerCase();
+
+    if ((key === 'arrowleft' || key === 'a') && !leftRepeatTimer) {
+        leftRepeatTimer = setInterval(moveLeft, 80);
+    }
+    if ((key === 'arrowright' || key === 'd') && !rightRepeatTimer) {
+        rightRepeatTimer = setInterval(moveRight, 80);
+    }
+    if ((key === 'arrowdown' || key === 's') && !downRepeatTimer) {
+        downRepeatTimer = setInterval(softDrop, 60);
+    }
+});
+
+document.addEventListener('keyup', function(e) {
+    const key = e.key.toLowerCase();
+    if (key === 'arrowleft' || key === 'a') {
+        if (leftRepeatTimer) { clearInterval(leftRepeatTimer); leftRepeatTimer = null; }
+    }
+    if (key === 'arrowright' || key === 'd') {
+        if (rightRepeatTimer) { clearInterval(rightRepeatTimer); rightRepeatTimer = null; }
+    }
+    if (key === 'arrowdown' || key === 's') {
+        if (downRepeatTimer) { clearInterval(downRepeatTimer); downRepeatTimer = null; }
+    }
+});
+
+function gameLoop(time) {
+    const dt = lastTime ? Math.min(time - lastTime, 50) : 16;
+    lastTime = time;
+
+    update(dt);
+    draw();
+
+    requestAnimationFrame(gameLoop);
+}
+
+function init() {
+    loadHighScore();
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    requestAnimationFrame(gameLoop);
+}
+
+init();
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>寿司店大亨</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+canvas { image-rendering: pixelated; border: 2px solid #e94560; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 800, H = 600;
+canvas.width = W;
+canvas.height = H;
+
+if (!ctx.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        this.moveTo(x + r[0], y);
+        this.lineTo(x + w - r[1], y);
+        this.arcTo(x + w, y, x + w, y + r[1], r[1]);
+        this.lineTo(x + w, y + h - r[2]);
+        this.arcTo(x + w, y + h, x + w - r[2], y + h, r[2]);
+        this.lineTo(x + r[3], y + h);
+        this.arcTo(x, y + h, x, y + h - r[3], r[3]);
+        this.lineTo(x, y + r[0]);
+        this.arcTo(x, y, x + r[0], y, r[0]);
+        this.closePath();
+    };
+}
+
+// Audio context
+let audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, duration, type = 'sine', vol = 0.3) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+}
+function sfxMake() { playTone(600, 0.15); setTimeout(() => playTone(800, 0.1), 80); }
+function sfxServe() { playTone(500, 0.1); setTimeout(() => playTone(700, 0.15), 100); setTimeout(() => playTone(900, 0.2), 200); }
+function sfxCoin() { playTone(1200, 0.1, 'square', 0.15); setTimeout(() => playTone(1600, 0.15, 'square', 0.15), 80); }
+function sfxAngry() { playTone(200, 0.3, 'sawtooth', 0.2); }
+function sfxUpgrade() { playTone(400, 0.1); setTimeout(() => playTone(600, 0.1), 100); setTimeout(() => playTone(800, 0.1), 200); setTimeout(() => playTone(1000, 0.2), 300); }
+
+// Save/Load
+const SAVE_KEY = 'sushi_tycoon_save';
+function saveGame() {
+    const data = {
+        coins: gameState.coins,
+        totalEarned: gameState.totalEarned,
+        totalServed: gameState.totalServed,
+        totalCustomers: gameState.totalCustomers,
+        chefLevel: gameState.chefLevel,
+        seatLevel: gameState.seatLevel,
+        decoLevel: gameState.decoLevel,
+        unlockedRecipes: gameState.unlockedRecipes,
+        day: gameState.day,
+        lastTime: Date.now()
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+}
+function loadGame() {
+    try {
+        const raw = localStorage.getItem(SAVE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch { return null; }
+}
+
+// Game constants
+const INGREDIENTS = [
+    { id: 'rice', name: '米饭', emoji: '🍚', color: '#f5f5dc' },
+    { id: 'salmon', name: '三文鱼', emoji: '🐟', color: '#fa8072' },
+    { id: 'tuna', name: '金枪鱼', emoji: '🍣', color: '#cd5c5c' },
+    { id: 'cucumber', name: '黄瓜', emoji: '🥒', color: '#90ee90' },
+    { id: 'egg', name: '蛋', emoji: '🥚', color: '#ffe4b5' },
+    { id: 'fire', name: '炙烤', emoji: '🔥', color: '#ff6347' }
+];
+
+const RECIPES = [
+    { id: 'salmon_nigiri', name: '三文鱼握寿司', ingredients: ['rice', 'salmon'], price: 15, unlocked: true, emoji: '🍣' },
+    { id: 'tuna_nigiri', name: '金枪鱼握寿司', ingredients: ['rice', 'tuna'], price: 18, unlocked: true, emoji: '🍣' },
+    { id: 'cucumber_roll', name: '黄瓜卷', ingredients: ['rice', 'cucumber'], price: 12, unlocked: true, emoji: '🥒' },
+    { id: 'egg_sushi', name: '蛋寿司', ingredients: ['rice', 'egg'], price: 10, unlocked: true, emoji: '🥚' },
+    { id: 'seaweed_roll', name: '海苔卷', ingredients: ['rice', 'cucumber', 'tuna'], price: 22, unlocked: true, emoji: '🍣' },
+    { id: 'seared_salmon', name: '炙烤三文鱼', ingredients: ['rice', 'salmon', 'fire'], price: 25, unlocked: false, emoji: '🔥' },
+    { id: 'unagi_rice', name: '鳗鱼饭', ingredients: ['rice', 'salmon', 'egg'], price: 28, unlocked: false, emoji: '🐟' },
+    { id: 'gunkan', name: '军舰寿司', ingredients: ['rice', 'egg', 'cucumber'], price: 20, unlocked: false, emoji: '🍣' },
+    { id: 'dragon_roll', name: '龙卷', ingredients: ['rice', 'salmon', 'cucumber', 'tuna'], price: 35, unlocked: false, emoji: '🐉' },
+    { id: 'rainbow_roll', name: '彩虹卷', ingredients: ['rice', 'salmon', 'tuna', 'egg'], price: 38, unlocked: false, emoji: '🌈' },
+    { id: 'spicy_tuna', name: '辣金枪鱼', ingredients: ['rice', 'tuna', 'fire'], price: 24, unlocked: false, emoji: '🌶️' },
+    { id: 'california_roll', name: '加州卷', ingredients: ['rice', 'cucumber', 'egg'], price: 18, unlocked: false, emoji: '🥑' },
+    { id: 'toro_sashimi', name: '金枪鱼刺身', ingredients: ['tuna', 'salmon'], price: 30, unlocked: false, emoji: '🍣' },
+    { id: 'tamago_sushi', name: '玉子寿司', ingredients: ['rice', 'egg', 'fire'], price: 16, unlocked: false, emoji: '🥚' },
+    { id: 'phoenix_roll', name: '凤凰卷', ingredients: ['rice', 'salmon', 'egg', 'fire'], price: 40, unlocked: false, emoji: '🔥' },
+    { id: 'veggie_roll', name: '蔬菜卷', ingredients: ['rice', 'cucumber', 'cucumber'], price: 14, unlocked: false, emoji: '🥒' },
+    { id: 'salmon_bowl', name: '三文鱼饭', ingredients: ['rice', 'salmon', 'rice'], price: 20, unlocked: false, emoji: '🐟' },
+    { id: 'deluxe_plate', name: '豪华拼盘', ingredients: ['rice', 'salmon', 'tuna', 'egg', 'cucumber'], price: 50, unlocked: false, emoji: '🍱' },
+    { id: 'mystery_roll', name: '神秘卷', ingredients: ['rice', 'fire', 'tuna'], price: 32, unlocked: false, emoji: '❓' },
+    { id: 'golden_sushi', name: '黄金寿司', ingredients: ['rice', 'salmon', 'fire', 'egg'], price: 45, unlocked: false, emoji: '✨' }
+];
+
+const RECIPE_UNLOCK_COSTS = [100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 1800, 2000, 2500, 3000];
+
+const CUSTOMER_TYPES = [
+    { id: 'normal', name: '普通', color: '#4a90d9', patience: 1.0, money: 1.0, emoji: '😊' },
+    { id: 'business', name: '商人', color: '#2c3e50', patience: 0.6, money: 2.0, emoji: '💼' },
+    { id: 'child', name: '孩子', color: '#e74c3c', patience: 1.5, money: 0.6, emoji: '🧒' },
+    { id: 'gourmet', name: '美食家', color: '#8e44ad', patience: 0.8, money: 1.5, emoji: '👨‍🍳' },
+    { id: 'vip', name: 'VIP', color: '#f39c12', patience: 1.2, money: 1.0, emoji: '👑' }
+];
+
+// Game state
+let gameState = {
+    screen: 'menu', // menu, playing, upgrade, settlement
+    coins: 0,
+    totalEarned: 0,
+    totalServed: 0,
+    totalCustomers: 0,
+    chefLevel: 0,
+    seatLevel: 0,
+    decoLevel: 0,
+    unlockedRecipes: [0, 1, 2, 3, 4], // indices
+    customers: [],
+    currentIngredients: [],
+    makingRecipe: null,
+    makeProgress: 0,
+    selectedRecipe: null,
+    dragSushi: null,
+    dragX: 0, dragY: 0,
+    floatingTexts: [],
+    particles: [],
+    spawnTimer: 0,
+    dayTimer: 0,
+    dayDuration: 120, // seconds per day
+    dayEarnings: 0,
+    dayServed: 0,
+    dayLost: 0,
+    seatOccupied: [false, false, false, false],
+    hoverRecipe: -1,
+    hoverIngredient: -1,
+    hoverUpgrade: -1,
+    shopLevel: 1,
+    offlineEarnings: 0,
+    showOffline: false,
+    comboCount: 0,
+    comboTimer: 0,
+    dayMaxCombo: 0,
+    animations: [],
+    selectedCategory: 0,
+    recipeScroll: 0,
+    upgradeScroll: 0,
+    day: 1
+};
+
+// Seat positions
+function getSeatPositions() {
+    const maxSeats = getMaxSeats();
+    const seats = [];
+    const startX = 100;
+    const spacing = (W - 200) / Math.max(maxSeats - 1, 1);
+    for (let i = 0; i < maxSeats; i++) {
+        seats.push({ x: startX + i * spacing, y: 280 });
+    }
+    return seats;
+}
+function getMaxSeats() { return 4 + gameState.seatLevel * 2; }
+function getCookSpeed() { return 1 + gameState.chefLevel * 0.2; }
+function getPatienceMult() { return 1 + gameState.decoLevel * 0.1; }
+
+// Initialize game
+function initGame() {
+    const save = loadGame();
+    if (save) {
+        gameState.coins = save.coins || 0;
+        gameState.totalEarned = save.totalEarned || 0;
+        gameState.totalServed = save.totalServed || 0;
+        gameState.totalCustomers = save.totalCustomers || 0;
+        gameState.chefLevel = save.chefLevel || 0;
+        gameState.seatLevel = save.seatLevel || 0;
+        gameState.decoLevel = save.decoLevel || 0;
+        gameState.unlockedRecipes = save.unlockedRecipes || [0, 1, 2, 3, 4];
+        gameState.day = save.day || 1;
+        gameState.shopLevel = Math.floor((save.chefLevel + save.seatLevel + save.decoLevel) / 3) + 1;
+
+        if (save.lastTime) {
+            const elapsed = Math.min((Date.now() - save.lastTime) / 1000, 86400);
+            const rate = getOfflineRate();
+            gameState.offlineEarnings = Math.floor(elapsed / 60 * rate);
+            if (gameState.offlineEarnings > 0) gameState.showOffline = true;
+        }
+    }
+}
+
+function getOfflineRate() {
+    const baseRecipes = RECIPES.filter((r, i) => gameState.unlockedRecipes.includes(i));
+    const avgPrice = baseRecipes.reduce((s, r) => s + r.price, 0) / Math.max(baseRecipes.length, 1);
+    return avgPrice * (1 + gameState.chefLevel * 0.3) * (1 + gameState.seatLevel * 0.2);
+}
+
+// Customer spawn
+function spawnCustomer() {
+    const maxSeats = getMaxSeats();
+    const freeSeatIdx = gameState.seatOccupied.indexOf(false);
+    if (freeSeatIdx === -1 || freeSeatIdx >= maxSeats) return;
+
+    const typeIdx = weightedRandom([40, 15, 20, 15, 10]);
+    const type = CUSTOMER_TYPES[typeIdx];
+    const availableRecipes = gameState.unlockedRecipes.map(i => RECIPES[i]);
+    let wanted;
+    if (type.id === 'gourmet') {
+        const expensive = availableRecipes.filter(r => r.price >= 20);
+        wanted = expensive.length > 0 ? expensive[Math.floor(Math.random() * expensive.length)] : availableRecipes[Math.floor(Math.random() * availableRecipes.length)];
+    } else {
+        wanted = availableRecipes[Math.floor(Math.random() * availableRecipes.length)];
+    }
+
+    const seats = getSeatPositions();
+    const seat = seats[freeSeatIdx];
+    gameState.seatOccupied[freeSeatIdx] = true;
+
+    const patience = (8 + Math.random() * 8) * type.patience * getPatienceMult();
+    const moneyMult = type.id === 'vip' ? (1 + Math.random() * 2) : type.money;
+
+    const customer = {
+        type: type,
+        wantedRecipe: wanted,
+        seatIdx: freeSeatIdx,
+        x: seat.x,
+        y: seat.y,
+        targetX: seat.x,
+        targetY: seat.y,
+        patience: patience,
+        maxPatience: patience,
+        moneyMult: moneyMult,
+        state: 'entering', // entering, waiting, satisfied, angry, leaving
+        enterProgress: 0,
+        leaveProgress: 0,
+        satisfaction: 0,
+        bubbleScale: 0
+    };
+    gameState.customers.push(customer);
+    gameState.totalCustomers++;
+}
+
+function weightedRandom(weights) {
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < weights.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return i;
+    }
+    return weights.length - 1;
+}
+
+// Recipe matching
+function findMatchingRecipe(ingredients) {
+    const sorted = [...ingredients].sort();
+    for (const idx of gameState.unlockedRecipes) {
+        const recipe = RECIPES[idx];
+        const recipeSorted = [...recipe.ingredients].sort();
+        if (sorted.length === recipeSorted.length && sorted.every((v, i) => v === recipeSorted[i])) {
+            return recipe;
+        }
+    }
+    return null;
+}
+
+// Add floating text
+function addFloatingText(text, x, y, color = '#ffd700', size = 20) {
+    gameState.floatingTexts.push({ text, x, y, color, size, life: 1.5, maxLife: 1.5 });
+}
+
+// Add particles
+function addParticles(x, y, color, count = 8) {
+    for (let i = 0; i < count; i++) {
+        gameState.particles.push({
+            x, y, vx: (Math.random() - 0.5) * 4, vy: -Math.random() * 3 - 1,
+            color, life: 0.8 + Math.random() * 0.5, size: 2 + Math.random() * 3
+        });
+    }
+}
+
+// Add coin animation
+function addCoinAnim(x, y) {
+    gameState.animations.push({ type: 'coin', x, y, targetX: 45, targetY: 88, progress: 0, life: 1 });
+}
+
+// Upgrade costs
+function getUpgradeCost(type) {
+    const level = gameState[type + 'Level'];
+    return [200, 600, 1500][level] || 99999;
+}
+
+// Game update
+function update(dt) {
+    if (gameState.screen !== 'playing') return;
+
+    gameState.dayTimer += dt;
+    if (gameState.dayTimer >= gameState.dayDuration) {
+        gameState.screen = 'settlement';
+        saveGame();
+        return;
+    }
+
+    // Combo timer
+    if (gameState.comboTimer > 0) {
+        gameState.comboTimer -= dt;
+        if (gameState.comboTimer <= 0) gameState.comboCount = 0;
+    }
+
+    // Spawn customers
+    gameState.spawnTimer += dt;
+    const spawnInterval = Math.max(2, 5 - gameState.shopLevel * 0.3);
+    if (gameState.spawnTimer >= spawnInterval) {
+        gameState.spawnTimer = 0;
+        spawnCustomer();
+    }
+
+    // Update customers
+    for (let i = gameState.customers.length - 1; i >= 0; i--) {
+        const c = gameState.customers[i];
+        if (c.state === 'entering') {
+            c.enterProgress += dt * 2;
+            if (c.enterProgress >= 1) { c.enterProgress = 1; c.state = 'waiting'; }
+            c.bubbleScale = Math.min(1, c.bubbleScale + dt * 3);
+        } else if (c.state === 'waiting') {
+            c.patience -= dt;
+            if (c.patience <= 0) {
+                c.state = 'angry';
+                sfxAngry();
+                addFloatingText('😤', c.x, c.y - 40, '#ff4444', 28);
+                gameState.dayLost++;
+                gameState.comboCount = 0;
+            }
+        } else if (c.state === 'satisfied') {
+            c.leaveProgress += dt * 2;
+            if (c.leaveProgress >= 1) {
+                gameState.seatOccupied[c.seatIdx] = false;
+                gameState.customers.splice(i, 1);
+            }
+        } else if (c.state === 'angry') {
+            c.leaveProgress += dt * 1.5;
+            if (c.leaveProgress >= 1) {
+                gameState.seatOccupied[c.seatIdx] = false;
+                gameState.customers.splice(i, 1);
+            }
+        }
+    }
+
+    // Making progress
+    if (gameState.makingRecipe) {
+        gameState.makeProgress += dt * getCookSpeed() / 2;
+        if (gameState.makeProgress >= 1) {
+            gameState.selectedRecipe = gameState.makingRecipe;
+            gameState.makingRecipe = null;
+            gameState.makeProgress = 0;
+            gameState.currentIngredients = [];
+            sfxMake();
+        }
+    }
+
+    // Floating texts
+    for (let i = gameState.floatingTexts.length - 1; i >= 0; i--) {
+        const ft = gameState.floatingTexts[i];
+        ft.life -= dt;
+        ft.y -= 30 * dt;
+        if (ft.life <= 0) gameState.floatingTexts.splice(i, 1);
+    }
+
+    // Particles
+    for (let i = gameState.particles.length - 1; i >= 0; i--) {
+        const p = gameState.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 5 * dt;
+        p.life -= dt;
+        if (p.life <= 0) gameState.particles.splice(i, 1);
+    }
+
+    // Animations
+    for (let i = gameState.animations.length - 1; i >= 0; i--) {
+        const a = gameState.animations[i];
+        a.progress += dt * 2;
+        a.life -= dt;
+        if (a.life <= 0) gameState.animations.splice(i, 1);
+    }
+
+    // Auto-save every 10 seconds
+    if (Math.floor(gameState.dayTimer) % 10 === 0 && Math.floor(gameState.dayTimer) !== Math.floor(gameState.dayTimer - dt)) {
+        saveGame();
+    }
+}
+
+// Draw functions
+function drawEmoji(emoji, x, y, size = 24) {
+    ctx.font = `${size}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, x, y);
+}
+
+function drawRoundedRect(x, y, w, h, r, fill, stroke) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+}
+
+function drawBar(x, y, w, h, ratio, color, bgColor = '#333') {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w * Math.max(0, Math.min(1, ratio)), h);
+    ctx.strokeStyle = '#555';
+    ctx.strokeRect(x, y, w, h);
+}
+
+function drawShop() {
+    // Background - wooden floor
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#2c1810');
+    grad.addColorStop(0.3, '#3d2317');
+    grad.addColorStop(1, '#1a0f0a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Ceiling beams
+    ctx.fillStyle = '#4a2a1a';
+    for (let i = 0; i < 5; i++) {
+        ctx.fillRect(i * 200, 0, 10, 500);
+    }
+
+    // Counter / bar
+    drawRoundedRect(30, 350, W - 60, 120, 10, '#5c3a1e', '#8b5e3c');
+    ctx.fillStyle = '#6b4226';
+    ctx.fillRect(40, 360, W - 80, 8);
+
+    // Kitchen area
+    drawRoundedRect(30, 120, 200, 200, 8, '#2a2a3a', '#444');
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('厨房', 130, 140);
+
+    // Seats
+    const seats = getSeatPositions();
+    for (let i = 0; i < seats.length; i++) {
+        const s = seats[i];
+        // Seat
+        drawRoundedRect(s.x - 25, s.y - 20, 50, 40, 5, gameState.seatOccupied[i] ? '#6b4226' : '#8b6b4a', '#a08060');
+        drawEmoji('💺', s.x, s.y, 20);
+    }
+
+    // Lanterns
+    for (let i = 0; i < 3; i++) {
+        const lx = 150 + i * 250;
+        drawEmoji('🏮', lx, 80, 28);
+    }
+
+    // Shop sign
+    drawRoundedRect(W / 2 - 100, 15, 200, 40, 8, '#c0392b', '#e74c3c');
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('🍣 寿司大亨 🍣', W / 2, 38);
+}
+
+function drawCustomers() {
+    for (const c of gameState.customers) {
+        let alpha = 1;
+        let offsetY = 0;
+        if (c.state === 'entering') {
+            alpha = c.enterProgress;
+            offsetY = (1 - c.enterProgress) * 50;
+        } else if (c.state === 'satisfied' || c.state === 'angry') {
+            alpha = 1 - c.leaveProgress;
+            offsetY = c.leaveProgress * 30;
+        }
+
+        ctx.globalAlpha = alpha;
+        const cy = c.y + offsetY - 50;
+
+        // Customer body
+        drawRoundedRect(c.x - 18, cy - 5, 36, 45, 5, c.type.color, '#fff');
+        drawEmoji(c.type.emoji, c.x, cy + 10, 24);
+
+        // Wanted bubble
+        if (c.state === 'waiting' || c.state === 'entering') {
+            const bs = c.bubbleScale;
+            ctx.globalAlpha = alpha * bs;
+            const bx = c.x, by = cy - 45;
+            drawRoundedRect(bx - 30, by - 20, 60, 35, 8, 'rgba(255,255,255,0.9)', '#ccc');
+            drawEmoji(c.wantedRecipe.emoji, bx, by - 2, 22);
+
+            // Patience bar
+            ctx.globalAlpha = alpha;
+            const pRatio = c.patience / c.maxPatience;
+            const pColor = pRatio > 0.5 ? '#4CAF50' : pRatio > 0.25 ? '#FF9800' : '#f44336';
+            drawBar(c.x - 20, cy + 42, 40, 5, pRatio, pColor);
+        }
+
+        if (c.state === 'satisfied') {
+            drawEmoji('😊', c.x, cy - 30, 28);
+        } else if (c.state === 'angry') {
+            drawEmoji('😡', c.x, cy - 30, 28);
+        }
+
+        ctx.globalAlpha = 1;
+    }
+}
+
+function drawIngredientBar() {
+    const barY = 480;
+    drawRoundedRect(20, barY, W - 40, 100, 10, 'rgba(0,0,0,0.7)', '#555');
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('食材', 35, barY + 20);
+
+    const ingSize = 50;
+    const ingStartX = 35;
+    for (let i = 0; i < INGREDIENTS.length; i++) {
+        const ing = INGREDIENTS[i];
+        const ix = ingStartX + i * (ingSize + 10);
+        const iy = barY + 35;
+        const hovered = gameState.hoverIngredient === i;
+        drawRoundedRect(ix, iy, ingSize, ingSize, 8, hovered ? '#555' : '#333', hovered ? '#ffd700' : '#666');
+        drawEmoji(ing.emoji, ix + ingSize / 2, iy + ingSize / 2 - 5, 28);
+        ctx.fillStyle = '#ccc';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(ing.name, ix + ingSize / 2, iy + ingSize - 5);
+    }
+
+    // Current ingredients / making
+    const makeX = 480;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('制作台', makeX, barY + 20);
+
+    drawRoundedRect(makeX, barY + 28, 150, 60, 8, '#222', '#555');
+    if (gameState.makingRecipe) {
+        drawRoundedRect(makeX + 5, barY + 60, 140, 10, 3, '#333');
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillRect(makeX + 5, barY + 60, 140 * gameState.makeProgress, 10);
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('制作中: ' + gameState.makingRecipe.name, makeX + 75, barY + 50);
+    } else if (gameState.currentIngredients.length > 0) {
+        for (let i = 0; i < gameState.currentIngredients.length; i++) {
+            const ing = INGREDIENTS.find(x => x.id === gameState.currentIngredients[i]);
+            drawEmoji(ing.emoji, makeX + 20 + i * 25, barY + 50, 20);
+        }
+        ctx.fillStyle = '#aaa';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('点击制作台完成', makeX + 75, barY + 85);
+    } else {
+        ctx.fillStyle = '#666';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('点击食材开始', makeX + 75, barY + 55);
+    }
+
+    // Ready sushi
+    if (gameState.selectedRecipe) {
+        const sx = 660;
+        drawRoundedRect(sx, barY + 28, 120, 60, 8, '#2a4a2a', '#4CAF50');
+        drawEmoji(gameState.selectedRecipe.emoji, sx + 40, barY + 50, 28);
+        ctx.fillStyle = '#4CAF50';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(gameState.selectedRecipe.name, sx + 60, barY + 45);
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('拖给顾客', sx + 60, barY + 65);
+        // Discard hint
+        drawRoundedRect(sx + 104, barY + 28, 16, 16, 4, '#c0392b', '#e74c3c');
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('x', sx + 112, barY + 39);
+    }
+}
+
+function drawStatusBar() {
+    drawRoundedRect(20, 65, W - 40, 45, 8, 'rgba(0,0,0,0.7)', '#555');
+
+    // Coins
+    drawEmoji('💰', 45, 88, 22);
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(formatNumber(gameState.coins), 65, 92);
+
+    // Day timer
+    const remain = Math.max(0, gameState.dayDuration - gameState.dayTimer);
+    const min = Math.floor(remain / 60);
+    const sec = Math.floor(remain % 60);
+    drawEmoji('⏰', 200, 88, 20);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${min}:${sec.toString().padStart(2, '0')}`, 220, 92);
+
+    // Day
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Arial';
+    ctx.fillText(`第${gameState.day}天`, 310, 92);
+
+    // Combo
+    if (gameState.comboCount > 1) {
+        ctx.fillStyle = '#ff6347';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText(`连击 x${gameState.comboCount}`, 400, 92);
+    }
+
+    // Stats
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'right';
+    ctx.fillText(`服务: ${gameState.dayServed} | 流失: ${gameState.dayLost}`, W - 40, 82);
+    ctx.fillText(`今日: ${formatNumber(gameState.dayEarnings)}`, W - 40, 98);
+
+    // Buttons
+    drawRoundedRect(W - 150, 70, 50, 30, 5, '#4CAF50', '#66BB6A');
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('升级', W - 125, 89);
+
+    drawRoundedRect(W - 90, 70, 50, 30, 5, '#2196F3', '#42A5F5');
+    ctx.fillStyle = '#fff';
+    ctx.fillText('菜谱', W - 65, 89);
+}
+
+function drawRecipePanel() {
+    drawRoundedRect(250, 130, 300, 320, 12, 'rgba(0,0,0,0.9)', '#ffd700');
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('📖 菜谱大全', 400, 160);
+
+    // Category tabs
+    const tabs = ['已解锁', '未解锁'];
+    for (let i = 0; i < tabs.length; i++) {
+        const tx = 300 + i * 100;
+        drawRoundedRect(tx, 175, 90, 25, 5, gameState.selectedCategory === i ? '#ffd700' : '#333', '#666');
+        ctx.fillStyle = gameState.selectedCategory === i ? '#000' : '#fff';
+        ctx.font = '13px Arial';
+        ctx.fillText(tabs[i], tx + 45, 192);
+    }
+
+    const recipes = gameState.selectedCategory === 0
+        ? gameState.unlockedRecipes.map(i => ({ ...RECIPES[i], idx: i }))
+        : RECIPES.map((r, i) => ({ ...r, idx: i })).filter(r => !gameState.unlockedRecipes.includes(r.idx));
+
+    const maxVisible = 8;
+    const maxScroll = Math.max(0, recipes.length - maxVisible);
+    if (gameState.recipeScroll > maxScroll) gameState.recipeScroll = maxScroll;
+    if (gameState.recipeScroll < 0) gameState.recipeScroll = 0;
+
+    const startY = 210;
+    for (let i = 0; i < Math.min(recipes.length, maxVisible); i++) {
+        const ri = i + gameState.recipeScroll;
+        if (ri >= recipes.length) break;
+        const r = recipes[ri];
+        const ry = startY + i * 30;
+        const hovered = gameState.hoverRecipe === i;
+        drawRoundedRect(265, ry, 270, 26, 4, hovered ? '#444' : '#222', '#555');
+        drawEmoji(r.emoji, 285, ry + 13, 18);
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(r.name, 305, ry + 16);
+        ctx.fillStyle = '#ffd700';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${r.price}💰`, 520, ry + 16);
+    }
+
+    if (maxScroll > 0) {
+        const scrollBarX = 540;
+        const scrollBarY = 210;
+        const scrollBarH = maxVisible * 30 - 4;
+        drawRoundedRect(scrollBarX, scrollBarY, 12, scrollBarH, 4, '#222', '#555');
+        const thumbH = Math.max(16, scrollBarH * maxVisible / recipes.length);
+        const thumbY = scrollBarY + (scrollBarH - thumbH) * gameState.recipeScroll / maxScroll;
+        drawRoundedRect(scrollBarX, thumbY, 12, thumbH, 4, '#888', '#aaa');
+    }
+
+    // Close button
+    drawRoundedRect(520, 135, 25, 25, 5, '#c0392b', '#e74c3c');
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('X', 533, 152);
+}
+
+function drawUpgradePanel() {
+    drawRoundedRect(200, 100, 400, 380, 12, 'rgba(0,0,0,0.9)', '#4CAF50');
+    ctx.fillStyle = '#4CAF50';
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('⬆️ 店铺升级', 400, 130);
+
+    const upgrades = [
+        { key: 'chef', name: '👨‍🍳 厨师', desc: '制作速度', level: gameState.chefLevel, max: 3 },
+        { key: 'seat', name: '💺 座位', desc: '座位数量', level: gameState.seatLevel, max: 3 },
+        { key: 'deco', name: '🎨 装饰', desc: '顾客耐心', level: gameState.decoLevel, max: 3 }
+    ];
+
+    for (let i = 0; i < upgrades.length; i++) {
+        const u = upgrades[i];
+        const uy = 155 + i * 80;
+        const hovered = gameState.hoverUpgrade === i;
+        drawRoundedRect(220, uy, 360, 70, 8, hovered ? '#333' : '#222', '#555');
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(u.name, 240, uy + 25);
+
+        ctx.fillStyle = '#aaa';
+        ctx.font = '12px Arial';
+        ctx.fillText(`${u.desc} +${u.level * 20}%`, 240, uy + 45);
+
+        // Level dots
+        for (let l = 0; l < u.max; l++) {
+            ctx.beginPath();
+            ctx.arc(400 + l * 20, uy + 25, 6, 0, Math.PI * 2);
+            ctx.fillStyle = l < u.level ? '#4CAF50' : '#444';
+            ctx.fill();
+            ctx.strokeStyle = '#666';
+            ctx.stroke();
+        }
+
+        if (u.level < u.max) {
+            const cost = getUpgradeCost(u.key);
+            drawRoundedRect(480, uy + 15, 80, 30, 5, '#2196F3', '#42A5F5');
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${cost}💰`, 520, uy + 34);
+        } else {
+            ctx.fillStyle = '#4CAF50';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('MAX', 520, uy + 34);
+        }
+    }
+
+    // Recipe unlock section
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('📖 菜谱解锁', 400, 420);
+
+    const nextLocked = RECIPES.findIndex((r, i) => !gameState.unlockedRecipes.includes(i));
+    if (nextLocked >= 0) {
+        const recipe = RECIPES[nextLocked];
+        const costIdx = gameState.unlockedRecipes.length - 5;
+        const cost = RECIPE_UNLOCK_COSTS[costIdx] || 3000;
+        drawRoundedRect(250, 435, 300, 35, 6, '#222', '#555');
+        drawEmoji(recipe.emoji, 275, 452, 20);
+        ctx.fillStyle = '#fff';
+        ctx.font = '13px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(recipe.name, 300, 455);
+        drawRoundedRect(460, 438, 80, 28, 5, '#FF9800', '#FFA726');
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${cost}💰`, 500, 456);
+    } else {
+        ctx.fillStyle = '#4CAF50';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('全部菜谱已解锁!', 400, 455);
+    }
+
+    // Close button
+    drawRoundedRect(570, 105, 25, 25, 5, '#c0392b', '#e74c3c');
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('X', 583, 122);
+}
+
+function drawFloatingTexts() {
+    for (const ft of gameState.floatingTexts) {
+        const alpha = Math.min(1, ft.life / ft.maxLife * 2);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = ft.color;
+        ctx.font = `bold ${ft.size}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText(ft.text, ft.x, ft.y);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawParticles() {
+    for (const p of gameState.particles) {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawAnimations() {
+    for (const a of gameState.animations) {
+        if (a.type === 'coin') {
+            const t = a.progress;
+            if (t > 1) continue;
+            const x = a.x + (a.targetX - a.x) * t;
+            const y = a.y + (a.targetY - a.y) * t - Math.sin(t * Math.PI) * 50;
+            ctx.globalAlpha = 1 - t * 0.5;
+            drawEmoji('💰', x, y, Math.max(1, 20 - t * 10));
+        }
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawMenuScreen() {
+    // Background
+    const grad = ctx.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, 400);
+    grad.addColorStop(0, '#2c1810');
+    grad.addColorStop(1, '#0a0505');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Decorative sushi
+    const sushis = ['🍣', '🍱', '🍙', '🐟', '🥚', '🥒', '🏮', '🥢'];
+    for (let i = 0; i < 20; i++) {
+        ctx.globalAlpha = 0.15;
+        drawEmoji(sushis[i % sushis.length], (i * 137 + 50) % W, (i * 89 + 30) % H, 30 + (i % 3) * 10);
+    }
+    ctx.globalAlpha = 1;
+
+    // Title
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('🍣 寿司店大亨 🍣', W / 2, 180);
+
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = '18px Arial';
+    ctx.fillText('SUSHI SHOP TYCOON', W / 2, 220);
+
+    // Start button
+    const bx = W / 2 - 100, by = 280, bw = 200, bh = 50;
+    const pulse = 1 + Math.sin(Date.now() / 300) * 0.03;
+    ctx.save();
+    ctx.translate(bx + bw / 2, by + bh / 2);
+    ctx.scale(pulse, pulse);
+    ctx.translate(-(bx + bw / 2), -(by + bh / 2));
+    drawRoundedRect(bx, by, bw, bh, 12, '#c0392b', '#e74c3c');
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('开始营业', W / 2, by + 33);
+    ctx.restore();
+
+    // Info
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Arial';
+    ctx.fillText('制作寿司 · 服务顾客 · 赚取金币', W / 2, 370);
+    ctx.fillText('升级店铺 · 解锁菜谱 · 成为寿司大亨', W / 2, 395);
+
+    // Stats
+    if (gameState.totalServed > 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '12px Arial';
+        ctx.fillText(`累计服务: ${gameState.totalServed} | 总收入: ${formatNumber(gameState.totalEarned)}`, W / 2, 440);
+    }
+
+    // Offline earnings
+    if (gameState.showOffline && gameState.offlineEarnings > 0) {
+        drawRoundedRect(W / 2 - 150, 460, 300, 60, 10, 'rgba(0,0,0,0.8)', '#ffd700');
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText('离线收益', W / 2, 485);
+        ctx.fillStyle = '#fff';
+        ctx.font = '14px Arial';
+        ctx.fillText(`+${formatNumber(gameState.offlineEarnings)} 💰`, W / 2, 510);
+    }
+}
+
+function drawSettlementScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    drawRoundedRect(W / 2 - 200, 80, 400, 420, 15, '#1a1a2e', '#ffd700');
+
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('📊 今日结算', W / 2, 120);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Arial';
+    ctx.fillText(`第 ${gameState.day} 天`, W / 2, 150);
+
+    // Stats
+    const stats = [
+        { label: '今日收入', value: `${formatNumber(gameState.dayEarnings)} 💰`, color: '#ffd700' },
+        { label: '服务顾客', value: `${gameState.dayServed}`, color: '#4CAF50' },
+        { label: '流失顾客', value: `${gameState.dayLost}`, color: '#f44336' },
+        { label: '最高连击', value: `${gameState.dayMaxCombo}`, color: '#FF9800' },
+        { label: '总金币', value: `${formatNumber(gameState.coins)} 💰`, color: '#ffd700' }
+    ];
+
+    for (let i = 0; i < stats.length; i++) {
+        const sy = 185 + i * 45;
+        drawRoundedRect(W / 2 - 160, sy, 320, 35, 6, '#222', '#333');
+        ctx.fillStyle = '#aaa';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(stats[i].label, W / 2 - 140, sy + 23);
+        ctx.fillStyle = stats[i].color;
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText(stats[i].value, W / 2 + 140, sy + 23);
+    }
+
+    // Next day button
+    drawRoundedRect(W / 2 - 80, 430, 160, 45, 10, '#4CAF50', '#66BB6A');
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('下一天', W / 2, 458);
+}
+
+function formatNumber(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return Math.floor(n).toString();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    if (gameState.screen === 'menu') {
+        drawMenuScreen();
+    } else if (gameState.screen === 'playing') {
+        drawShop();
+        drawCustomers();
+        drawIngredientBar();
+        drawStatusBar();
+        drawFloatingTexts();
+        drawParticles();
+        drawAnimations();
+
+        if (gameState.dragSushi) {
+            ctx.globalAlpha = 0.85;
+            drawRoundedRect(gameState.dragX - 25, gameState.dragY - 25, 50, 50, 10, 'rgba(76,175,80,0.3)', '#4CAF50');
+            drawEmoji(gameState.dragSushi.emoji, gameState.dragX, gameState.dragY, 32);
+            ctx.globalAlpha = 1;
+        }
+
+        if (gameState.showRecipePanel) drawRecipePanel();
+        if (gameState.showUpgradePanel) drawUpgradePanel();
+    } else if (gameState.screen === 'settlement') {
+        drawShop();
+        drawSettlementScreen();
+    }
+}
+
+// Input handling
+let mouseX = 0, mouseY = 0;
+let lastReadyClickTime = 0;
+let touchStartY = 0;
+let touchLastScrollY = 0;
+
+function getIngredientAtPos(x, y) {
+    const barY = 480;
+    const ingSize = 50;
+    const ingStartX = 35;
+    for (let i = 0; i < INGREDIENTS.length; i++) {
+        const ix = ingStartX + i * (ingSize + 10);
+        const iy = barY + 35;
+        if (x >= ix && x <= ix + ingSize && y >= iy && y <= iy + ingSize) return i;
+    }
+    return -1;
+}
+
+function getCustomerAtPos(x, y) {
+    for (const c of gameState.customers) {
+        if (c.state !== 'waiting') continue;
+        const cy = c.y - 50;
+        if (Math.abs(x - c.x) < 30 && Math.abs(y - cy) < 40) return c;
+    }
+    return null;
+}
+
+function getMakeAreaAtPos(x, y) {
+    const barY = 480;
+    const makeX = 480;
+    return x >= makeX && x <= makeX + 150 && y >= barY + 28 && y <= barY + 88;
+}
+
+function getReadySushiAtPos(x, y) {
+    const barY = 480;
+    const sx = 660;
+    return x >= sx && x <= sx + 120 && y >= barY + 28 && y <= barY + 88;
+}
+
+function getUpgradeBtnAtPos(x, y) {
+    if (x >= W - 150 && x <= W - 100 && y >= 70 && y <= 100) return 'upgrade';
+    if (x >= W - 90 && x <= W - 40 && y >= 70 && y <= 100) return 'recipe';
+    return null;
+}
+
+function getUpgradeItemAtPos(x, y) {
+    if (!gameState.showUpgradePanel) return -1;
+    const upgrades = ['chef', 'seat', 'deco'];
+    for (let i = 0; i < 3; i++) {
+        const uy = 155 + i * 80;
+        if (x >= 480 && x <= 560 && y >= uy + 15 && y <= uy + 45) return i;
+    }
+    // Recipe unlock
+    if (x >= 460 && x <= 540 && y >= 438 && y <= 466) return 3;
+    return -1;
+}
+
+function getCloseBtnAtPos(x, y) {
+    if (gameState.showRecipePanel && x >= 520 && x <= 545 && y >= 135 && y <= 160) return 'recipe';
+    if (gameState.showUpgradePanel && x >= 570 && x <= 595 && y >= 105 && y <= 130) return 'upgrade';
+    return null;
+}
+
+function serveCustomer(customer) {
+    if (!gameState.selectedRecipe) return;
+    if (customer.wantedRecipe.id !== gameState.selectedRecipe.id) {
+        addFloatingText('不对!', customer.x, customer.y - 80, '#ff4444', 18);
+        return;
+    }
+
+    const price = Math.floor(gameState.selectedRecipe.price * customer.moneyMult);
+    const comboBonus = Math.floor(gameState.comboCount * 0.1 * price);
+    const total = price + comboBonus;
+
+    gameState.coins += total;
+    gameState.totalEarned += total;
+    gameState.dayEarnings += total;
+    gameState.totalServed++;
+    gameState.dayServed++;
+    gameState.comboCount++;
+    if (gameState.comboCount > gameState.dayMaxCombo) gameState.dayMaxCombo = gameState.comboCount;
+    gameState.comboTimer = 5;
+    gameState.selectedRecipe = null;
+
+    customer.state = 'satisfied';
+    customer.leaveProgress = 0;
+
+    sfxServe();
+    sfxCoin();
+    addFloatingText(`+${total}💰`, customer.x, customer.y - 80, '#ffd700', 22);
+    if (comboBonus > 0) addFloatingText(`连击+${comboBonus}`, customer.x, customer.y - 110, '#ff6347', 16);
+    addParticles(customer.x, customer.y - 50, '#ffd700', 12);
+    addCoinAnim(customer.x, customer.y - 80);
+}
+
+canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) * (W / rect.width);
+    mouseY = (e.clientY - rect.top) * (H / rect.height);
+
+    if (gameState.dragSushi) {
+        gameState.dragX = mouseX;
+        gameState.dragY = mouseY;
+    }
+
+    gameState.hoverIngredient = getIngredientAtPos(mouseX, mouseY);
+
+    // Recipe panel hover
+    if (gameState.showRecipePanel) {
+        const startY = 210;
+        gameState.hoverRecipe = -1;
+        for (let i = 0; i < 8; i++) {
+            const ry = startY + i * 30;
+            if (mouseX >= 265 && mouseX <= 555 && mouseY >= ry && mouseY <= ry + 26) {
+                gameState.hoverRecipe = i;
+                break;
+            }
+        }
+    }
+
+    // Upgrade panel hover
+    if (gameState.showUpgradePanel) {
+        gameState.hoverUpgrade = -1;
+        for (let i = 0; i < 3; i++) {
+            const uy = 155 + i * 80;
+            if (mouseX >= 480 && mouseX <= 560 && mouseY >= uy + 15 && mouseY <= uy + 45) {
+                gameState.hoverUpgrade = i;
+                break;
+            }
+        }
+    }
+});
+
+canvas.addEventListener('mousedown', (e) => {
+    initAudio();
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top) * (H / rect.height);
+
+    if (gameState.screen === 'menu') {
+        // Start button
+        if (x >= W / 2 - 100 && x <= W / 2 + 100 && y >= 280 && y <= 330) {
+            if (gameState.showOffline && gameState.offlineEarnings > 0) {
+                gameState.coins += gameState.offlineEarnings;
+                addFloatingText(`+${formatNumber(gameState.offlineEarnings)}`, W / 2, 250, '#ffd700', 24);
+                gameState.offlineEarnings = 0;
+                gameState.showOffline = false;
+            }
+            gameState.screen = 'playing';
+            gameState.dayTimer = 0;
+            gameState.dayEarnings = 0;
+            gameState.dayServed = 0;
+            gameState.dayLost = 0;
+            gameState.customers = [];
+            gameState.seatOccupied = new Array(getMaxSeats()).fill(false);
+            gameState.currentIngredients = [];
+            gameState.makingRecipe = null;
+            gameState.selectedRecipe = null;
+            gameState.comboCount = 0;
+            gameState.dayMaxCombo = 0;
+            gameState.showRecipePanel = false;
+            gameState.showUpgradePanel = false;
+        }
+        return;
+    }
+
+    if (gameState.screen === 'settlement') {
+        if (x >= W / 2 - 80 && x <= W / 2 + 80 && y >= 430 && y <= 475) {
+            gameState.day++;
+            gameState.screen = 'menu';
+            saveGame();
+        }
+        return;
+    }
+
+    // Close buttons
+    const closeBtn = getCloseBtnAtPos(x, y);
+    if (closeBtn === 'recipe') { gameState.showRecipePanel = false; return; }
+    if (closeBtn === 'upgrade') { gameState.showUpgradePanel = false; return; }
+
+    // Top buttons
+    const topBtn = getUpgradeBtnAtPos(x, y);
+    if (topBtn === 'upgrade') { gameState.showUpgradePanel = !gameState.showUpgradePanel; gameState.showRecipePanel = false; return; }
+    if (topBtn === 'recipe') { gameState.showRecipePanel = !gameState.showRecipePanel; gameState.showUpgradePanel = false; gameState.recipeScroll = 0; gameState.selectedCategory = 0; return; }
+
+    // Recipe panel category tabs
+    if (gameState.showRecipePanel) {
+        for (let i = 0; i < 2; i++) {
+            const tx = 300 + i * 100;
+            if (x >= tx && x <= tx + 90 && y >= 175 && y <= 200) {
+                gameState.selectedCategory = i;
+                gameState.recipeScroll = 0;
+                return;
+            }
+        }
+    }
+
+    // Upgrade purchases
+    if (gameState.showUpgradePanel) {
+        const upgIdx = getUpgradeItemAtPos(x, y);
+        if (upgIdx >= 0 && upgIdx < 3) {
+            const keys = ['chef', 'seat', 'deco'];
+            const key = keys[upgIdx];
+            if (gameState[key + 'Level'] < 3) {
+                const cost = getUpgradeCost(key);
+                if (gameState.coins >= cost) {
+                    gameState.coins -= cost;
+                    gameState[key + 'Level']++;
+                    gameState.shopLevel = Math.floor((gameState.chefLevel + gameState.seatLevel + gameState.decoLevel) / 3) + 1;
+                    sfxUpgrade();
+                    addFloatingText('升级成功!', x, y - 20, '#4CAF50', 18);
+                    if (key === 'seat') {
+                        while (gameState.seatOccupied.length < getMaxSeats()) gameState.seatOccupied.push(false);
+                    }
+                } else {
+                    addFloatingText('金币不足', x, y - 20, '#ff4444', 16);
+                }
+            }
+            return;
+        }
+        if (upgIdx === 3) {
+            const nextLocked = RECIPES.findIndex((r, i) => !gameState.unlockedRecipes.includes(i));
+            if (nextLocked >= 0) {
+                const costIdx = gameState.unlockedRecipes.length - 5;
+                const cost = RECIPE_UNLOCK_COSTS[costIdx] || 3000;
+                if (gameState.coins >= cost) {
+                    gameState.coins -= cost;
+                    gameState.unlockedRecipes.push(nextLocked);
+                    sfxUpgrade();
+                    addFloatingText(`解锁: ${RECIPES[nextLocked].name}`, x, y - 20, '#ffd700', 16);
+                } else {
+                    addFloatingText('金币不足', x, y - 20, '#ff4444', 16);
+                }
+            }
+            return;
+        }
+    }
+
+    // Ingredient clicks
+    const ingIdx = getIngredientAtPos(x, y);
+    if (ingIdx >= 0 && !gameState.makingRecipe && !gameState.selectedRecipe) {
+        const ing = INGREDIENTS[ingIdx];
+        if (gameState.currentIngredients.length < 5) {
+            gameState.currentIngredients.push(ing.id);
+            playTone(400 + ingIdx * 100, 0.08, 'sine', 0.15);
+        }
+        return;
+    }
+
+    // Make area click - start making
+    if (getMakeAreaAtPos(x, y) && gameState.currentIngredients.length > 0 && !gameState.makingRecipe) {
+        const recipe = findMatchingRecipe(gameState.currentIngredients);
+        if (recipe) {
+            gameState.makingRecipe = recipe;
+            gameState.makeProgress = 0;
+            sfxMake();
+        } else {
+            addFloatingText('配方不对!', 550, 460, '#ff4444', 16);
+            gameState.currentIngredients = [];
+        }
+        return;
+    }
+
+    // Discard button click
+    if (gameState.selectedRecipe) {
+        const barY = 480;
+        const sx = 660;
+        if (x >= sx + 104 && x <= sx + 120 && y >= barY + 28 && y <= barY + 44) {
+            gameState.selectedRecipe = null;
+            addFloatingText('丢弃了', x, y - 20, '#ff4444', 16);
+            return;
+        }
+    }
+
+    // Ready sushi - double click to discard, single click to drag
+    if (getReadySushiAtPos(x, y) && gameState.selectedRecipe) {
+        const now = Date.now();
+        if (now - lastReadyClickTime < 350) {
+            gameState.selectedRecipe = null;
+            addFloatingText('丢弃了', x, y - 20, '#ff4444', 16);
+            lastReadyClickTime = 0;
+            return;
+        }
+        lastReadyClickTime = now;
+        gameState.dragSushi = gameState.selectedRecipe;
+        gameState.dragX = x;
+        gameState.dragY = y;
+        return;
+    }
+
+    // Customer click - serve if dragging or has ready sushi
+    const customer = getCustomerAtPos(x, y);
+    if (customer && gameState.selectedRecipe) {
+        serveCustomer(customer);
+        return;
+    }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+    if (gameState.dragSushi) {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (W / rect.width);
+        const y = (e.clientY - rect.top) * (H / rect.height);
+        const customer = getCustomerAtPos(x, y);
+        if (customer) {
+            serveCustomer(customer);
+        }
+        gameState.dragSushi = null;
+    }
+});
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    touchStartY = (touch.clientY - rect.top) * (H / rect.height);
+    touchLastScrollY = touchStartY;
+    const fakeEvent = {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    };
+    canvas.dispatchEvent(new MouseEvent('mousedown', fakeEvent));
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const ty = (touch.clientY - rect.top) * (H / rect.height);
+
+    mouseX = (touch.clientX - rect.left) * (W / rect.width);
+    mouseY = ty;
+
+    if (gameState.showRecipePanel && touchStartY >= 210 && touchStartY <= 450 && mouseX >= 250 && mouseX <= 560) {
+        const deltaY = touchLastScrollY - ty;
+        if (Math.abs(deltaY) > 15) {
+            const recipes = gameState.selectedCategory === 0
+                ? gameState.unlockedRecipes
+                : RECIPES.map((r, i) => i).filter(i => !gameState.unlockedRecipes.includes(i));
+            const maxScroll = Math.max(0, recipes.length - 8);
+            gameState.recipeScroll += deltaY > 0 ? 1 : -1;
+            gameState.recipeScroll = Math.max(0, Math.min(maxScroll, gameState.recipeScroll));
+            touchLastScrollY = ty;
+        }
+        return;
+    }
+
+    const fakeEvent = {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    };
+    canvas.dispatchEvent(new MouseEvent('mousemove', fakeEvent));
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (e.changedTouches.length > 0) {
+        const touch = e.changedTouches[0];
+        const fakeEvent = {
+            clientX: touch.clientX,
+            clientY: touch.clientY
+        };
+        canvas.dispatchEvent(new MouseEvent('mouseup', fakeEvent));
+    }
+}, { passive: false });
+
+canvas.addEventListener('wheel', (e) => {
+    if (gameState.showRecipePanel) {
+        e.preventDefault();
+        const recipes = gameState.selectedCategory === 0
+            ? gameState.unlockedRecipes
+            : RECIPES.map((r, i) => i).filter(i => !gameState.unlockedRecipes.includes(i));
+        const maxScroll = Math.max(0, recipes.length - 8);
+        gameState.recipeScroll += e.deltaY > 0 ? 1 : -1;
+        gameState.recipeScroll = Math.max(0, Math.min(maxScroll, gameState.recipeScroll));
+    }
+}, { passive: false });
+
+// Game loop
+let lastTime = 0;
+function gameLoop(timestamp) {
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+    lastTime = timestamp;
+    update(dt);
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// Start
+initGame();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

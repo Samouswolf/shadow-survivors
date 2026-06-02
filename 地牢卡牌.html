@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>地牢卡牌</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+canvas { display: block; image-rendering: pixelated; cursor: default; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 800, H = 600;
+canvas.width = W;
+canvas.height = H;
+
+const COLORS = {
+  bg: '#1a1a2e',
+  panel: '#16213e',
+  accent: '#e94560',
+  gold: '#ffd700',
+  health: '#e94560',
+  armor: '#4a90d9',
+  energy: '#f5a623',
+  mana: '#7b68ee',
+  card: '#2a2a4a',
+  cardHover: '#3a3a6a',
+  cardAttack: '#4a1a1a',
+  cardSkill: '#1a3a1a',
+  cardPower: '#1a1a4a',
+  text: '#ffffff',
+  textDim: '#888888',
+  success: '#4ade80',
+  danger: '#ef4444',
+  shop: '#fbbf24',
+  event: '#a78bfa',
+  rest: '#34d399',
+  boss: '#dc2626',
+  elite: '#f97316'
+};
+
+const GameState = {
+  MENU: 'menu',
+  MAP: 'map',
+  BATTLE: 'battle',
+  REWARD: 'reward',
+  SHOP: 'shop',
+  EVENT: 'event',
+  REST: 'rest',
+  GAME_OVER: 'game_over',
+  VICTORY: 'victory',
+  CARD_SELECT: 'card_select',
+  UPGRADE_SELECT: 'upgrade_select',
+  RELIC_SELECT: 'relic_select'
+};
+
+const CardType = { ATTACK: 'attack', SKILL: 'skill', POWER: 'power' };
+const NodeType = { MONSTER: 'monster', ELITE: 'elite', SHOP: 'shop', EVENT: 'event', REST: 'rest', BOSS: 'boss' };
+
+const SoundFX = {
+  ctx: null,
+  init() {
+    if (this.ctx) return;
+    try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+  },
+  play(type) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    const now = this.ctx.currentTime;
+    switch(type) {
+      case 'attack':
+        osc.type = 'sawtooth'; osc.frequency.setValueAtTime(200, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+        gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.start(now); osc.stop(now + 0.15);
+        break;
+      case 'block':
+        osc.type = 'sine'; osc.frequency.setValueAtTime(400, now);
+        osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+        gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.start(now); osc.stop(now + 0.15);
+        break;
+      case 'heal':
+        osc.type = 'sine'; osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(500, now + 0.2);
+        gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.start(now); osc.stop(now + 0.3);
+        break;
+      case 'hit':
+        osc.type = 'square'; osc.frequency.setValueAtTime(100, now);
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+        gain.gain.setValueAtTime(0.4, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+        osc.start(now); osc.stop(now + 0.12);
+        break;
+      case 'coin':
+        osc.type = 'sine'; osc.frequency.setValueAtTime(800, now);
+        osc.frequency.setValueAtTime(1200, now + 0.05);
+        gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.start(now); osc.stop(now + 0.15);
+        break;
+      case 'card':
+        osc.type = 'triangle'; osc.frequency.setValueAtTime(600, now);
+        osc.frequency.exponentialRampToValueAtTime(400, now + 0.08);
+        gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now); osc.stop(now + 0.1);
+        break;
+      case 'death':
+        osc.type = 'sawtooth'; osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(30, now + 0.5);
+        gain.gain.setValueAtTime(0.4, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+        osc.start(now); osc.stop(now + 0.6);
+        break;
+      case 'victory':
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.setValueAtTime(500, now + 0.1);
+        osc.frequency.setValueAtTime(600, now + 0.2);
+        osc.frequency.setValueAtTime(800, now + 0.3);
+        gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        osc.start(now); osc.stop(now + 0.5);
+        break;
+      case 'boss':
+        osc.type = 'sawtooth'; osc.frequency.setValueAtTime(80, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.3);
+        gain.gain.setValueAtTime(0.5, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now); osc.stop(now + 0.4);
+        break;
+    }
+  }
+};
+
+const ALL_CARDS = {
+  strike: { name: '斩击', cost: 1, type: CardType.ATTACK, desc: '造成6伤害', effect: (g) => g.dealDamageToEnemy(6), damage: 6 },
+  defend: { name: '防御', cost: 1, type: CardType.SKILL, desc: '获得5护甲', effect: (g) => g.gainBlock(5), block: 5 },
+  heal: { name: '治疗', cost: 2, type: CardType.SKILL, desc: '恢复4生命', effect: (g) => g.healPlayer(4), heal: 4 },
+  heavy_strike: { name: '重击', cost: 2, type: CardType.ATTACK, desc: '造成12伤害', effect: (g) => g.dealDamageToEnemy(12), damage: 12 },
+  double_slash: { name: '双斩', cost: 1, type: CardType.ATTACK, desc: '造成4伤害两次', effect: (g) => { g.dealDamageToEnemy(4); setTimeout(() => { if (g.enemy && g.enemy.hp > 0) g.dealDamageToEnemy(4, false, false); }, 200); }, damage: 8 },
+  iron_wall: { name: '铁壁', cost: 2, type: CardType.SKILL, desc: '获得12护甲', effect: (g) => g.gainBlock(12), block: 12 },
+  war_cry: { name: '战吼', cost: 0, type: CardType.SKILL, desc: '本回合攻击+3', effect: (g) => { g.player.tempStrength = (g.player.tempStrength || 0) + 3; }, tempBuff: 3 },
+  vampiric: { name: '吸血', cost: 2, type: CardType.ATTACK, desc: '造成8伤害，恢复等量生命', effect: (g) => { g.dealDamageToEnemy(8); g.healPlayer(8); }, damage: 8, heal: 8 },
+  berserk: { name: '狂暴', cost: 1, type: CardType.SKILL, desc: '抽2张牌', effect: (g) => { g.drawCards(2); }, draw: 2 },
+  counter: { name: '反击', cost: 1, type: CardType.SKILL, desc: '获得8护甲，对敌方造成5伤害', effect: (g) => { g.gainBlock(8); g.dealDamageToEnemy(5); }, block: 8, damage: 5 },
+  cleave: { name: '横扫', cost: 1, type: CardType.ATTACK, desc: '造成8伤害', effect: (g) => g.dealDamageToEnemy(8), damage: 8 },
+  shield_bash: { name: '盾击', cost: 1, type: CardType.ATTACK, desc: '造成等同护甲值的伤害', effect: (g) => { const d = g.player.block; g.dealDamageToEnemy(d); }, dynamic: true },
+  rage: { name: '怒火', cost: 0, type: CardType.POWER, desc: '每回合开始获得2护甲', effect: (g) => { g.player.rageStacks = (g.player.rageStacks || 0) + 2; }, power: true },
+  strength_potion: { name: '力量药水', cost: 1, type: CardType.SKILL, desc: '永久+2力量', effect: (g) => { g.player.strength = (g.player.strength || 0) + 2; }, permanent: true },
+  piercing: { name: '穿刺', cost: 2, type: CardType.ATTACK, desc: '造成15伤害，无视护甲', effect: (g) => { g.dealDamageToEnemy(15, true); }, damage: 15 },
+  whirlwind: { name: '旋风斩', cost: -1, type: CardType.ATTACK, desc: '消耗所有能量，每点造成5伤害', effect: (g) => { const n = g._prePlayEnergy || g.player.energy; g.player.energy = 0; for (let i = 0; i < n; i++) setTimeout(() => { if (g.enemy && g.enemy.hp > 0) g.dealDamageToEnemy(5); }, i * 150); }, dynamic: true },
+  bloodletting: { name: '放血', cost: 0, type: CardType.SKILL, desc: '失去2生命，获得2能量', effect: (g) => { g.player.hp = Math.max(1, g.player.hp - 2); g.player.energy += 2; }, cost_hp: 2 },
+  offering: { name: '献祭', cost: 0, type: CardType.SKILL, desc: '失去3生命，抽3张牌', effect: (g) => { g.player.hp = Math.max(1, g.player.hp - 3); g.drawCards(3); }, cost_hp: 3, draw: 3 },
+  flame_barrier: { name: '烈焰屏障', cost: 2, type: CardType.POWER, desc: '每回合获得6护甲，被攻击时反弹3伤害', effect: (g) => { g.player.flameArmor = (g.player.flameArmor || 0) + 6; g.player.flameReflect = (g.player.flameReflect || 0) + 3; }, power: true },
+  demon_form: { name: '恶魔形态', cost: 3, type: CardType.POWER, desc: '每回合获得3力量', effect: (g) => { g.player.demonForm = (g.player.demonForm || 0) + 3; }, power: true },
+  bludgeon: { name: '痛击', cost: 3, type: CardType.ATTACK, desc: '造成32伤害', effect: (g) => g.dealDamageToEnemy(32), damage: 32 },
+  ghost_armor: { name: '幽灵护甲', cost: 1, type: CardType.SKILL, desc: '获得10护甲，回合结束不消失', effect: (g) => { g.gainBlock(10); g.player.permanentBlock = (g.player.permanentBlock || 0) + 10; }, block: 10 },
+  carnage: { name: '杀戮', cost: 2, type: CardType.ATTACK, desc: '造成20伤害', effect: (g) => g.dealDamageToEnemy(20), damage: 20 },
+  exhume: { name: '挖掘', cost: 1, type: CardType.SKILL, desc: '从弃牌堆随机取回1张牌', effect: (g) => { if (g.discardPile.length > 0) { const idx = Math.floor(Math.random() * g.discardPile.length); g.hand.push(g.discardPile.splice(idx, 1)[0]); } }, draw: 1 },
+  shockwave: { name: '冲击波', cost: 2, type: CardType.SKILL, desc: '对敌方造成10伤害并眩晕1回合', effect: (g) => { g.dealDamageToEnemy(10); g.enemy.stunned = (g.enemy.stunned || 0) + 1; }, damage: 10 },
+  disarm: { name: '缴械', cost: 1, type: CardType.SKILL, desc: '敌方力量-2', effect: (g) => { g.enemy.strength = (g.enemy.strength || 0) - 2; } },
+  metallicize: { name: '金属化', cost: 1, type: CardType.POWER, desc: '每回合结束获得3护甲', effect: (g) => { g.player.metallicize = (g.player.metallicize || 0) + 3; }, power: true }
+};
+
+const ALL_RELICS = {
+  burning_blood: { name: '燃烧之血', desc: '每场战斗后恢复6生命', icon: '🩸', onBattleEnd: (g) => { g.healPlayer(6); } },
+  cracked_core: { name: '破碎核心', desc: '战斗开始抽1张额外牌', icon: '💎', onBattleStart: (g) => { g.drawCards(1); } },
+  anchor: { name: '船锚', desc: '战斗首回合获得10护甲', icon: '⚓', onBattleStart: (g) => { g.gainBlock(10); } },
+  bag_of_prep: { name: '准备袋', desc: '战斗首回合抽2张额外牌', icon: '🎒', onBattleStart: (g) => { g.drawCards(2); } },
+  vajra: { name: '金刚杵', desc: '战斗开始获得1力量', icon: '🔨', onBattleStart: (g) => { g.player.strength = (g.player.strength || 0) + 1; } },
+  oddly_smooth_stone: { name: '奇石', desc: '战斗开始获得1敏捷', icon: '🪨', onBattleStart: (g) => { g.player.dexterity = (g.player.dexterity || 0) + 1; } },
+  lantern: { name: '灯笼', desc: '首回合+1能量', icon: '🏮', onBattleStart: (g) => { g.player.energy += 1; } },
+  horn_cleat: { name: '号角', desc: '第2回合获得14护甲', icon: '📯', onTurnStart: (g, turn) => { if (turn === 2) g.gainBlock(14); } },
+  meat_on_bone: { name: '肉骨', desc: '每回合恢复2生命', icon: '🍖', onTurnStart: (g) => { g.healPlayer(2); } },
+  pen_nib: { name: '钢笔', desc: '每10次攻击下次攻击双倍伤害', icon: '✒️', counter: 0, doubleNext: false },
+  ornamental_fan: { name: '装饰扇', desc: '打出3张攻击牌获得4护甲', icon: '🪭', counter: 0, onCardPlayed: (g, card, relic) => { if (card.type === CardType.ATTACK) { relic.counter++; if (relic.counter >= 3) { relic.counter = 0; g.gainBlock(4); } } } },
+  the_specimen: { name: '标本', desc: '敌人死亡时获得3护甲', icon: '🧪', onEnemyDeath: (g) => { g.gainBlock(3); } },
+  letter_opener: { name: '开信刀', desc: '每打出3张技能牌造成5伤害', icon: '🔪', counter: 0, onCardPlayed: (g, card, relic) => { if (card.type === CardType.SKILL) { relic.counter++; if (relic.counter >= 3) { relic.counter = 0; g.dealDamageToEnemy(5); } } } },
+  eternal_feather: { name: '永恒之羽', desc: '每拥有5张牌恢复2生命', icon: '🪶', onBattleEnd: (g) => { const heal = Math.floor(g.deck.length / 5) * 2; g.healPlayer(heal); } }
+};
+
+const ENEMIES = {
+  slime: { name: '史莱姆', hp: 28, maxHp: 28, attacks: [{ type: 'attack', value: 5 }, { type: 'attack', value: 8 }, { type: 'defend', value: 3 }], sprite: '🟢' },
+  skeleton: { name: '骷髅', hp: 38, maxHp: 38, attacks: [{ type: 'attack', value: 7 }, { type: 'attack', value: 10 }, { type: 'defend', value: 5 }], sprite: '💀' },
+  bat: { name: '蝙蝠', hp: 22, maxHp: 22, attacks: [{ type: 'attack', value: 9 }, { type: 'attack', value: 6 }, { type: 'attack', value: 6 }], sprite: '🦇' },
+  goblin: { name: '哥布林', hp: 32, maxHp: 32, attacks: [{ type: 'attack', value: 5 }, { type: 'attack', value: 12 }, { type: 'defend', value: 4 }, { type: 'attack', value: 3 }], sprite: '👺' },
+  cultist: { name: '邪教徒', hp: 45, maxHp: 45, attacks: [{ type: 'attack', value: 6 }, { type: 'buff', value: 3 }, { type: 'attack', value: 10 }], sprite: '🧙' },
+  fungi: { name: '真菌兽', hp: 50, maxHp: 50, attacks: [{ type: 'attack', value: 4 }, { type: 'attack', value: 4 }, { type: 'defend', value: 8 }], sprite: '🍄' },
+  worm: { name: '蠕虫', hp: 35, maxHp: 35, attacks: [{ type: 'attack', value: 8 }, { type: 'attack', value: 8 }, { type: 'heal', value: 5 }], sprite: '🐛' },
+  slime_large: { name: '大史莱姆', hp: 60, maxHp: 60, attacks: [{ type: 'attack', value: 10 }, { type: 'attack', value: 14 }, { type: 'defend', value: 6 }], sprite: '🟢' },
+  knight: { name: '暗黑骑士', hp: 55, maxHp: 55, attacks: [{ type: 'attack', value: 12 }, { type: 'defend', value: 10 }, { type: 'attack', value: 18 }], sprite: '⚔️' },
+  mage: { name: '暗影法师', hp: 40, maxHp: 40, attacks: [{ type: 'attack', value: 15 }, { type: 'buff', value: 4 }, { type: 'attack', value: 8 }], sprite: '🔮' },
+  elite_ogre: { name: '食人魔', hp: 80, maxHp: 80, attacks: [{ type: 'attack', value: 14 }, { type: 'attack', value: 20 }, { type: 'defend', value: 8 }, { type: 'buff', value: 3 }], sprite: '👹' },
+  elite_golem: { name: '石像鬼', hp: 100, maxHp: 100, attacks: [{ type: 'attack', value: 10 }, { type: 'attack', value: 10 }, { type: 'attack', value: 10 }, { type: 'defend', value: 15 }], sprite: '🗿' },
+  boss_slime: { name: '巨型史莱姆', hp: 150, maxHp: 150, attacks: [{ type: 'attack', value: 12 }, { type: 'attack', value: 18 }, { type: 'defend', value: 10 }], sprite: '🟢', boss: true, special: 'split', splitHp: 30 },
+  boss_necro: { name: '死灵法师', hp: 180, maxHp: 180, attacks: [{ type: 'attack', value: 10 }, { type: 'summon', value: 15 }, { type: 'buff', value: 5 }], sprite: '💀', boss: true, special: 'summon', summonHp: 25 },
+  boss_dragon: { name: '暗影龙', hp: 250, maxHp: 250, attacks: [{ type: 'attack', value: 8 }, { type: 'attack', value: 8 }, { type: 'attack', value: 8 }, { type: 'attack', value: 25 }, { type: 'buff', value: 4 }], sprite: '🐉', boss: true, special: 'multi' }
+};
+
+const EVENTS = [
+  {
+    name: '神秘宝箱',
+    desc: '你发现了一个宝箱...',
+    choices: [
+      { text: '打开', result: (g) => { const r = Math.random(); if (r < 0.5) { g.player.gold += 50; return '你获得了50金币！'; } else { g.player.hp -= 10; return '宝箱是陷阱！你失去了10生命。'; } } },
+      { text: '离开', result: () => '你安全地离开了。' }
+    ]
+  },
+  {
+    name: '古老神像',
+    desc: '一座古老的神像散发着微光...',
+    choices: [
+      { text: '祈祷', result: (g) => { g.player.maxHp += 5; g.player.hp += 5; return '你的最大生命增加了5！'; } },
+      { text: '献祭', result: (g) => { g.player.hp -= 10; g.player.strength = (g.player.strength || 0) + 2; return '你失去了10生命，获得了2力量！'; } }
+    ]
+  },
+  {
+    name: '流浪商人',
+    desc: '一个神秘的商人向你招手...',
+    choices: [
+      { text: '交易(30金)', result: (g) => { if (g.player.gold >= 30) { g.player.gold -= 30; const cardKeys = Object.keys(ALL_CARDS); const rCard = cardKeys[Math.floor(Math.random() * cardKeys.length)]; g.deck.push({ ...ALL_CARDS[rCard], id: rCard + '_' + Date.now() }); return '你获得了一张新卡牌！'; } return '金币不足！'; } },
+      { text: '拒绝', result: () => '你礼貌地拒绝了。' }
+    ]
+  },
+  {
+    name: '诅咒之地',
+    desc: '你踏入了一片被诅咒的土地...',
+    choices: [
+      { text: '承受诅咒', result: (g) => { g.player.maxHp -= 5; g.player.hp = Math.min(g.player.hp, g.player.maxHp); g.player.gold += 80; return '你失去了5最大生命，但获得了80金币！'; } },
+      { text: '绕道而行', result: (g) => { g.player.hp -= 5; return '你绕道而行，但还是受了点伤(失去5生命)。'; } }
+    ]
+  },
+  {
+    name: '铁匠铺',
+    desc: '你找到了一个废弃的铁匠铺...',
+    choices: [
+      { text: '锻造装备', result: (g) => { g.player.dexterity = (g.player.dexterity || 0) + 1; return '你获得了1敏捷！'; } },
+      { text: '修理武器', result: (g) => { g.player.strength = (g.player.strength || 0) + 1; return '你获得了1力量！'; } }
+    ]
+  }
+];
+
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function createStarterDeck() {
+  const deck = [];
+  for (let i = 0; i < 5; i++) deck.push({ ...ALL_CARDS.strike, id: 'strike_' + i });
+  for (let i = 0; i < 4; i++) deck.push({ ...ALL_CARDS.defend, id: 'defend_' + i });
+  for (let i = 0; i < 3; i++) deck.push({ ...ALL_CARDS.heal, id: 'heal_' + i });
+  return deck;
+}
+
+function generateMap(chapter) {
+  const layers = 8;
+  const map = [];
+  for (let i = 0; i < layers; i++) {
+    const layer = [];
+    const nodeCount = i === 0 ? 1 : (i === layers - 1 ? 1 : 3);
+    for (let j = 0; j < nodeCount; j++) {
+      let type;
+      if (i === layers - 1) {
+        type = NodeType.BOSS;
+      } else if (i === 0) {
+        type = NodeType.MONSTER;
+      } else if (i === 4) {
+        type = NodeType.ELITE;
+      } else {
+        const r = Math.random();
+        if (r < 0.4) type = NodeType.MONSTER;
+        else if (r < 0.55) type = NodeType.ELITE;
+        else if (r < 0.7) type = NodeType.SHOP;
+        else if (r < 0.85) type = NodeType.EVENT;
+        else type = NodeType.REST;
+      }
+      layer.push({ x: j, y: i, type, visited: false, connections: [] });
+    }
+    map.push(layer);
+  }
+  for (let i = 0; i < layers - 1; i++) {
+    const curr = map[i];
+    const next = map[i + 1];
+    curr.forEach((node, idx) => {
+      const connectCount = Math.min(next.length, 1 + Math.floor(Math.random() * 2));
+      const startIdx = Math.min(idx, next.length - connectCount);
+      for (let c = 0; c < connectCount; c++) {
+        node.connections.push(startIdx + c);
+      }
+    });
+  }
+  return map;
+}
+
+function generateEnemy(chapter, isElite, isBoss) {
+  if (isBoss) {
+    const bosses = ['boss_slime', 'boss_necro', 'boss_dragon'];
+    const bossData = ENEMIES[bosses[chapter - 1]];
+    return { ...bossData, id: bosses[chapter - 1], initialMaxHp: bossData.maxHp };
+  }
+  if (isElite) {
+    const elites = ['elite_ogre', 'elite_golem'];
+    const key = elites[Math.floor(Math.random() * elites.length)];
+    const base = ENEMIES[key];
+    const maxHp = base.maxHp + chapter * 10;
+    return { ...base, hp: base.hp + chapter * 10, maxHp, initialMaxHp: maxHp, id: key };
+  }
+  const normals = ['slime', 'skeleton', 'bat', 'goblin', 'cultist', 'fungi', 'worm'];
+  const key = normals[Math.floor(Math.random() * normals.length)];
+  const base = ENEMIES[key];
+  const maxHp = base.maxHp + chapter * 5;
+  return { ...base, hp: base.hp + chapter * 5, maxHp, initialMaxHp: maxHp, id: key };
+}
+
+function generateShopItems(chapter) {
+  const items = [];
+  const cardKeys = Object.keys(ALL_CARDS);
+  for (let i = 0; i < 5; i++) {
+    const key = cardKeys[Math.floor(Math.random() * cardKeys.length)];
+    const card = ALL_CARDS[key];
+    items.push({ type: 'card', card: { ...card, id: key + '_shop_' + i }, price: 30 + Math.floor(Math.random() * 40), key });
+  }
+  const relicKeys = Object.keys(ALL_RELICS);
+  const availableRelics = relicKeys.filter(k => !game.player.relics.find(r => r.id === k));
+  if (availableRelics.length > 0) {
+    const rKey = availableRelics[Math.floor(Math.random() * availableRelics.length)];
+    items.push({ type: 'relic', relic: { ...ALL_RELICS[rKey], id: rKey }, price: 100 + Math.floor(Math.random() * 60), key: rKey });
+  }
+  items.push({ type: 'heal', price: 30, heal: 20, desc: '恢复20生命' });
+  items.push({ type: 'maxhp', price: 50, value: 5, desc: '最大生命+5' });
+  return items;
+}
+
+function getRewardCards(chapter) {
+  const cards = [];
+  const cardKeys = Object.keys(ALL_CARDS);
+  for (let i = 0; i < 3; i++) {
+    const key = cardKeys[Math.floor(Math.random() * cardKeys.length)];
+    cards.push({ ...ALL_CARDS[key], id: key + '_reward_' + Date.now() + '_' + i, key });
+  }
+  return cards;
+}
+
+const game = {
+  state: GameState.MENU,
+  player: null,
+  enemy: null,
+  deck: [],
+  hand: [],
+  drawPile: [],
+  discardPile: [],
+  exhaustPile: [],
+  map: [],
+  currentLayer: 0,
+  currentNode: 0,
+  chapter: 1,
+  maxChapter: 3,
+  turn: 0,
+  playerTurn: true,
+  animations: [],
+  particles: [],
+  floatingTexts: [],
+  rewardCards: [],
+  shopItems: [],
+  currentEvent: null,
+  eventResult: '',
+  enemyNextAction: null,
+  selectedCardIndex: -1,
+  hoveredCardIndex: -1,
+  hoveredNodeIndex: -1,
+  hoveredShopItem: -1,
+  hoveredRelic: -1,
+  screenShake: 0,
+  fadeAlpha: 0,
+  transitioning: false,
+  transitionTarget: null,
+  combatLog: [],
+  totalGames: 0,
+  maxChapterCleared: 0,
+  stats: { damageDealt: 0, damageBlocked: 0, cardsPlayed: 0, turnsPlayed: 0, enemiesKilled: 0, goldEarned: 0, hpHealed: 0 },
+
+  loadSave() {
+    try {
+      const save = localStorage.getItem('dungeon_cards_save');
+      if (save) {
+        const data = JSON.parse(save);
+        this.totalGames = data.totalGames || 0;
+        this.maxChapterCleared = data.maxChapterCleared || 0;
+      }
+    } catch(e) {}
+  },
+
+  saveData() {
+    try {
+      localStorage.setItem('dungeon_cards_save', JSON.stringify({
+        totalGames: this.totalGames,
+        maxChapterCleared: this.maxChapterCleared
+      }));
+    } catch(e) {}
+  },
+
+  startNewGame() {
+    this.totalGames++;
+    this.player = {
+      hp: 80, maxHp: 80, block: 0, energy: 3, maxEnergy: 3,
+      strength: 0, dexterity: 0, tempStrength: 0,
+      gold: 100, relics: [{ ...ALL_RELICS.burning_blood, id: 'burning_blood' }],
+      rageStacks: 0, flameArmor: 0, flameReflect: 0, demonForm: 0, metallicize: 0, permanentBlock: 0
+    };
+    this.deck = createStarterDeck();
+    this.chapter = 1;
+    this.stats = { damageDealt: 0, damageBlocked: 0, cardsPlayed: 0, turnsPlayed: 0, enemiesKilled: 0, goldEarned: 0, hpHealed: 0 };
+    this.map = generateMap(this.chapter);
+    this.currentLayer = 0;
+    this.currentNode = 0;
+    this.state = GameState.MAP;
+    this.combatLog = [];
+    SoundFX.init();
+    this.fadeIn();
+  },
+
+  fadeIn() {
+    this.fadeAlpha = 1;
+    this.transitioning = true;
+  },
+
+  startBattle(isElite, isBoss) {
+    this.enemy = generateEnemy(this.chapter, isElite, isBoss);
+    this.enemyNextAction = null;
+    this.hand = [];
+    this.drawPile = shuffleArray([...this.deck]);
+    this.discardPile = [];
+    this.exhaustPile = [];
+    this.turn = 0;
+    this.playerTurn = true;
+    this.player.block = 0;
+    this.player.tempStrength = 0;
+    this.state = GameState.BATTLE;
+    this.combatLog = [];
+    this.addLog('战斗开始！');
+    this.player.relics.forEach(r => {
+      const relicData = ALL_RELICS[r.id];
+      if (relicData && relicData.onBattleStart) relicData.onBattleStart(this);
+    });
+    this.startTurn();
+    if (isBoss) SoundFX.play('boss');
+  },
+
+  rollEnemyIntent() {
+    const attackIdx = Math.floor(Math.random() * this.enemy.attacks.length);
+    this.enemyNextAction = { ...this.enemy.attacks[attackIdx] };
+    const strength = this.enemy.strength || 0;
+    if (this.enemyNextAction.type === 'attack') {
+      this.enemyNextAction.displayValue = this.enemyNextAction.value + strength;
+    }
+  },
+
+  startTurn() {
+    this.turn++;
+    this.playerTurn = true;
+    this.player.energy = this.player.maxEnergy;
+    this.player.block = this.player.permanentBlock || 0;
+    this.player.tempStrength = 0;
+    this.rollEnemyIntent();
+    this.drawCards(5);
+    this.player.relics.forEach(r => {
+      if (ALL_RELICS[r.id] && ALL_RELICS[r.id].onTurnStart) {
+        ALL_RELICS[r.id].onTurnStart(this, this.turn);
+      }
+    });
+    if (this.player.rageStacks) this.gainBlock(this.player.rageStacks);
+    if (this.player.flameArmor) this.gainBlock(this.player.flameArmor);
+    if (this.player.demonForm) { this.player.strength += this.player.demonForm; this.addLog(`恶魔形态: +${this.player.demonForm}力量`); }
+  },
+
+  drawCards(count) {
+    for (let i = 0; i < count; i++) {
+      if (this.drawPile.length === 0) {
+        if (this.discardPile.length === 0) break;
+        this.drawPile = shuffleArray([...this.discardPile]);
+        this.discardPile = [];
+      }
+      if (this.hand.length >= 10) break;
+      const card = this.drawPile.pop();
+      if (card) {
+        this.hand.push(card);
+        SoundFX.play('card');
+      }
+    }
+  },
+
+  playCard(index) {
+    if (!this.playerTurn || this.state !== GameState.BATTLE) return;
+    const card = this.hand[index];
+    if (!card) return;
+    const cost = card.cost === -1 ? this.player.energy : card.cost;
+    if (cost > this.player.energy) return;
+    this._prePlayEnergy = this.player.energy;
+    this.player.energy -= cost;
+    this.hand.splice(index, 1);
+    this.stats.cardsPlayed++;
+    this.addLog(`使用: ${card.name}`);
+    SoundFX.play('card');
+    if (card.effect) card.effect(this);
+    this.player.relics.forEach(r => {
+      const relicData = ALL_RELICS[r.id];
+      if (relicData && relicData.onCardPlayed) relicData.onCardPlayed(this, card, r);
+    });
+    this.discardPile.push(card);
+    this.checkEnemyDeath();
+  },
+
+  dealDamageToEnemy(baseDamage, piercing, countRelic) {
+    const strength = (this.player.strength || 0) + (this.player.tempStrength || 0);
+    let damage = Math.max(0, baseDamage + strength);
+    if (countRelic !== false) countRelic = true;
+    let penNibBonus = false;
+    if (countRelic) {
+      this.player.relics.forEach(r => {
+        if (r.id === 'pen_nib') {
+          r.counter = (r.counter || 0) + 1;
+          if (r.counter >= 10) { r.counter = 0; r.doubleNext = true; }
+          if (r.doubleNext) { damage *= 2; r.doubleNext = false; penNibBonus = true; }
+        }
+      });
+    }
+    if (!piercing && this.enemy.block > 0) {
+      const blocked = Math.min(this.enemy.block, damage);
+      this.enemy.block -= blocked;
+      damage -= blocked;
+      this.stats.damageBlocked += blocked;
+    }
+    this.enemy.hp -= damage;
+    this.stats.damageDealt += damage;
+    this.addLog(`造成 ${damage} 伤害${penNibBonus ? '(暴击!)' : ''}`);
+    SoundFX.play('attack');
+    this.addFloatingText(`-${damage}`, 550, 200, COLORS.danger);
+    this.addParticles(550, 200, COLORS.danger, 8);
+    this.screenShake = 5;
+    if (this.enemy.hp <= 0) {
+      this.enemy.hp = 0;
+      this.onEnemyDeath();
+    }
+  },
+
+  onEnemyDeath() {
+    if (this.enemy.special === 'split') {
+      const splitsLeft = (this.enemy.splitsRemaining !== undefined) ? this.enemy.splitsRemaining : 2;
+      const splitHp = this.enemy.splitHp || 30;
+      if (splitsLeft > 0) {
+        this.enemy.hp = splitHp;
+        this.enemy.maxHp = splitHp;
+        this.enemy.name = '小史莱姆';
+        this.enemy.sprite = '🟢';
+        this.enemy.block = 0;
+        this.enemy.strength = 0;
+        this.enemy.stunned = 0;
+        this.enemy.splitsRemaining = splitsLeft - 1;
+        this.enemy.special = 'split';
+        this.enemy.splitHp = splitHp;
+        this.enemyNextAction = null;
+        this.rollEnemyIntent();
+        this.addLog('巨型史莱姆分裂为小史莱姆！');
+        this.addFloatingText('分裂!', 550, 200, COLORS.accent);
+        this.addParticles(550, 200, COLORS.accent, 12);
+        return;
+      }
+    }
+    this.stats.enemiesKilled++;
+    SoundFX.play('death');
+    this.addLog(`${this.enemy.name} 被击败！`);
+    this.player.relics.forEach(r => {
+      const relicData = ALL_RELICS[r.id];
+      if (relicData && relicData.onEnemyDeath) relicData.onEnemyDeath(this);
+    });
+    this.player.relics.forEach(r => {
+      const relicData = ALL_RELICS[r.id];
+      if (relicData && relicData.onBattleEnd) relicData.onBattleEnd(this);
+    });
+    const isBoss = this.enemy.boss;
+    const goldReward = isBoss ? 80 + Math.floor(Math.random() * 40) : 15 + Math.floor(Math.random() * 20);
+    this.player.gold += goldReward;
+    this.stats.goldEarned += goldReward;
+    this.addLog(`获得 ${goldReward} 金币`);
+    SoundFX.play('coin');
+    setTimeout(() => {
+      if (isBoss) {
+        if (this.chapter >= this.maxChapter) {
+          this.maxChapterCleared = Math.max(this.maxChapterCleared, this.chapter);
+          this.saveData();
+          this.state = GameState.VICTORY;
+          SoundFX.play('victory');
+        } else {
+          this.chapter++;
+          this.map = generateMap(this.chapter);
+          this.currentLayer = 0;
+          this.rewardCards = getRewardCards(this.chapter);
+          this.state = GameState.CARD_SELECT;
+        }
+      } else {
+        this.rewardCards = getRewardCards(this.chapter);
+        this.state = GameState.CARD_SELECT;
+      }
+    }, 800);
+  },
+
+  checkEnemyDeath() {
+    if (this.enemy.hp <= 0) {
+      this.enemy.hp = 0;
+      this.onEnemyDeath();
+    }
+  },
+
+  gainBlock(amount) {
+    const dexterity = this.player.dexterity || 0;
+    const total = Math.max(0, amount + dexterity);
+    this.player.block += total;
+    this.stats.damageBlocked += total;
+    SoundFX.play('block');
+    this.addFloatingText(`+${total}🛡`, 150, 350, COLORS.armor);
+  },
+
+  healPlayer(amount) {
+    const healed = Math.min(amount, this.player.maxHp - this.player.hp);
+    this.player.hp += healed;
+    this.stats.hpHealed += healed;
+    if (healed > 0) {
+      SoundFX.play('heal');
+      this.addFloatingText(`+${healed}❤`, 150, 200, COLORS.success);
+    }
+  },
+
+  endPlayerTurn() {
+    if (!this.playerTurn) return;
+    this.playerTurn = false;
+    this.hand.forEach(c => this.discardPile.push(c));
+    this.hand = [];
+    if (this.player.metallicize) this.gainBlock(this.player.metallicize);
+    this.addLog('--- 敌方回合 ---');
+    setTimeout(() => this.enemyTurn(), 600);
+  },
+
+  enemyTurn() {
+    if (this.enemy.stunned > 0) {
+      this.enemy.stunned--;
+      this.addLog('敌方被眩晕，跳过回合！');
+      setTimeout(() => this.startTurn(), 800);
+      return;
+    }
+    const action = this.enemyNextAction || this.enemy.attacks[0];
+    const strength = this.enemy.strength || 0;
+    switch (action.type) {
+      case 'attack': {
+        let rawDamage = Math.max(0, action.value + strength);
+        let damage = rawDamage;
+        if (this.player.block > 0) {
+          const blocked = Math.min(this.player.block, damage);
+          this.player.block -= blocked;
+          damage -= blocked;
+        }
+        if (this.player.flameReflect) {
+          this.enemy.hp -= this.player.flameReflect;
+          this.addLog(`烈焰反弹 ${this.player.flameReflect} 伤害`);
+          this.addFloatingText(`-${this.player.flameReflect}`, 550, 200, '#ff6600');
+        }
+        this.player.hp -= damage;
+        const blockedAmount = rawDamage - damage;
+        if (blockedAmount > 0) {
+          this.addLog(`${this.enemy.name} 攻击: 实际${damage}伤害(原始${rawDamage}，护甲挡住${blockedAmount})`);
+        } else {
+          this.addLog(`${this.enemy.name} 攻击造成 ${damage} 伤害`);
+        }
+        SoundFX.play('hit');
+        this.addFloatingText(`-${damage}`, 150, 250, COLORS.danger);
+        this.addParticles(150, 250, COLORS.danger, 6);
+        this.screenShake = 8;
+        break;
+      }
+      case 'defend':
+        this.enemy.block += action.value;
+        this.addLog(`${this.enemy.name} 获得 ${action.value} 护甲`);
+        break;
+      case 'buff':
+        this.enemy.strength = (this.enemy.strength || 0) + action.value;
+        this.addLog(`${this.enemy.name} 获得 ${action.value} 力量`);
+        break;
+      case 'heal': {
+        const healed = Math.min(action.value, this.enemy.maxHp - this.enemy.hp);
+        this.enemy.hp += healed;
+        this.addLog(`${this.enemy.name} 恢复 ${healed} 生命`);
+        break;
+      }
+      case 'summon':
+        if (this.enemy.maxHp < this.enemy.initialMaxHp * 2) {
+          this.enemy.hp += action.value;
+          this.enemy.maxHp += action.value;
+          if (this.enemy.maxHp > this.enemy.initialMaxHp * 2) {
+            this.enemy.maxHp = this.enemy.initialMaxHp * 2;
+            this.enemy.hp = Math.min(this.enemy.hp, this.enemy.maxHp);
+          }
+          this.addLog(`${this.enemy.name} 召唤亡灵，恢复 ${action.value} 生命`);
+        } else {
+          this.addLog(`${this.enemy.name} 召唤失败！已达到上限`);
+        }
+        break;
+    }
+    if (this.player.hp <= 0) {
+      this.player.hp = 0;
+      this.state = GameState.GAME_OVER;
+      SoundFX.play('death');
+      this.saveData();
+      return;
+    }
+    this.enemy.block = 0;
+    setTimeout(() => this.startTurn(), 800);
+  },
+
+  addLog(msg) {
+    this.combatLog.unshift(msg);
+    if (this.combatLog.length > 15) this.combatLog.pop();
+  },
+
+  addFloatingText(text, x, y, color) {
+    this.floatingTexts.push({ text, x, y, color, alpha: 1, vy: -2, life: 60 });
+  },
+
+  addParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      this.particles.push({
+        x, y, color,
+        vx: (Math.random() - 0.5) * 4,
+        vy: (Math.random() - 0.5) * 4 - 2,
+        life: 30 + Math.random() * 20,
+        size: 2 + Math.random() * 3
+      });
+    }
+  },
+
+  visitNode(layerIdx, nodeIdx) {
+    const node = this.map[layerIdx][nodeIdx];
+    if (node.visited) return;
+    if (layerIdx > 0) {
+      const prevLayer = this.map[layerIdx - 1];
+      const prevVisited = prevLayer.filter(n => n.visited);
+      if (prevVisited.length === 0) return;
+      const canReach = prevVisited.some(pn => pn.connections.includes(nodeIdx));
+      if (!canReach) return;
+    }
+    node.visited = true;
+    this.currentLayer = layerIdx;
+    this.currentNode = nodeIdx;
+    switch (node.type) {
+      case NodeType.MONSTER:
+        this.startBattle(false, false);
+        break;
+      case NodeType.ELITE:
+        this.startBattle(true, false);
+        break;
+      case NodeType.BOSS:
+        this.startBattle(false, true);
+        break;
+      case NodeType.SHOP:
+        this.shopItems = generateShopItems(this.chapter);
+        this.state = GameState.SHOP;
+        break;
+      case NodeType.EVENT:
+        this.currentEvent = EVENTS[Math.floor(Math.random() * EVENTS.length)];
+        this.eventResult = '';
+        this.state = GameState.EVENT;
+        break;
+      case NodeType.REST:
+        this.state = GameState.REST;
+        break;
+    }
+  },
+
+  selectRewardCard(index) {
+    if (index >= 0 && index < this.rewardCards.length) {
+      this.deck.push({ ...this.rewardCards[index], id: this.rewardCards[index].key + '_' + Date.now() });
+      this.addLog(`获得卡牌: ${this.rewardCards[index].name}`);
+    }
+    this.state = GameState.MAP;
+  },
+
+  skipReward() {
+    this.state = GameState.MAP;
+  },
+
+  buyShopItem(index) {
+    const item = this.shopItems[index];
+    if (!item || this.player.gold < item.price) return;
+    this.player.gold -= item.price;
+    SoundFX.play('coin');
+    switch (item.type) {
+      case 'card':
+        this.deck.push({ ...item.card, id: item.key + '_' + Date.now() });
+        break;
+      case 'relic':
+        this.player.relics.push({ ...item.relic, id: item.key });
+        break;
+      case 'heal':
+        this.healPlayer(item.heal);
+        break;
+      case 'maxhp':
+        this.player.maxHp += item.value;
+        this.player.hp += item.value;
+        break;
+    }
+    this.shopItems.splice(index, 1);
+  },
+
+  leaveShop() {
+    this.state = GameState.MAP;
+  },
+
+  chooseEvent(choiceIdx) {
+    if (!this.currentEvent) return;
+    this.eventResult = this.currentEvent.choices[choiceIdx].result(this);
+  },
+
+  leaveEvent() {
+    this.state = GameState.MAP;
+  },
+
+  restHeal() {
+    const healAmount = Math.floor(this.player.maxHp * 0.3);
+    this.healPlayer(healAmount);
+    this.state = GameState.MAP;
+  },
+
+  restUpgrade() {
+    const upgradeable = this.deck.filter(c => !c.upgraded);
+    if (upgradeable.length > 0) {
+      const card = upgradeable[Math.floor(Math.random() * upgradeable.length)];
+      card.name += '+';
+      if (card.damage) card.damage += 3;
+      if (card.block) card.block += 3;
+      if (card.heal) card.heal += 2;
+      card.upgraded = true;
+      this.addLog(`升级: ${card.name}`);
+    }
+    this.state = GameState.MAP;
+  },
+
+  update() {
+    if (this.transitioning) {
+      this.fadeAlpha -= 0.05;
+      if (this.fadeAlpha <= 0) {
+        this.fadeAlpha = 0;
+        this.transitioning = false;
+      }
+    }
+    if (this.screenShake > 0) this.screenShake *= 0.85;
+    if (this.screenShake < 0.5) this.screenShake = 0;
+    this.floatingTexts = this.floatingTexts.filter(ft => {
+      ft.y += ft.vy;
+      ft.alpha -= 0.02;
+      ft.life--;
+      return ft.life > 0 && ft.alpha > 0;
+    });
+    this.particles = this.particles.filter(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.1;
+      p.life--;
+      return p.life > 0;
+    });
+  },
+
+  draw() {
+    ctx.save();
+    if (this.screenShake > 0) {
+      ctx.translate(
+        (Math.random() - 0.5) * this.screenShake * 2,
+        (Math.random() - 0.5) * this.screenShake * 2
+      );
+    }
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, W, H);
+    switch (this.state) {
+      case GameState.MENU: this.drawMenu(); break;
+      case GameState.MAP: this.drawMap(); break;
+      case GameState.BATTLE: this.drawBattle(); break;
+      case GameState.CARD_SELECT: this.drawCardSelect(); break;
+      case GameState.REWARD: this.drawReward(); break;
+      case GameState.SHOP: this.drawShop(); break;
+      case GameState.EVENT: this.drawEvent(); break;
+      case GameState.REST: this.drawRest(); break;
+      case GameState.GAME_OVER: this.drawGameOver(); break;
+      case GameState.VICTORY: this.drawVictory(); break;
+    }
+    this.floatingTexts.forEach(ft => {
+      ctx.globalAlpha = ft.alpha;
+      ctx.fillStyle = ft.color;
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(ft.text, ft.x, ft.y);
+    });
+    ctx.globalAlpha = 1;
+    this.particles.forEach(p => {
+      ctx.globalAlpha = p.life / 50;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    if (this.transitioning) {
+      ctx.globalAlpha = this.fadeAlpha;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+  },
+
+  drawMenu() {
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('地牢卡牌', W / 2, 180);
+    ctx.font = '20px sans-serif';
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText('卡牌 Roguelike 冒险', W / 2, 220);
+    const btnY = 300;
+    const btnW = 200, btnH = 50;
+    const btnX = W / 2 - btnW / 2;
+    this.drawButton('开始冒险', btnX, btnY, btnW, btnH, COLORS.accent);
+    ctx.font = '16px sans-serif';
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText(`总游戏次数: ${this.totalGames}`, W / 2, 400);
+    ctx.fillText(`最高通关: 第${this.maxChapterCleared}章`, W / 2, 425);
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText('卡牌Roguelike - 简化版 Slay the Spire', W / 2, 550);
+  },
+
+  drawMap() {
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`第${this.chapter}章 - 地牢地图`, W / 2, 35);
+    this.drawStatusBar();
+    const mapStartY = 80;
+    const mapEndY = H - 80;
+    const layerHeight = (mapEndY - mapStartY) / (this.map.length - 1);
+    this.map.forEach((layer, layerIdx) => {
+      const y = mapStartY + layerIdx * layerHeight;
+      const nodeSpacing = W / (layer.length + 1);
+      layer.forEach((node, nodeIdx) => {
+        const x = nodeSpacing * (nodeIdx + 1);
+        node.screenX = x;
+        node.screenY = y;
+      });
+    });
+    this.map.forEach((layer, layerIdx) => {
+      layer.forEach((node, nodeIdx) => {
+        node.connections.forEach(connIdx => {
+          const nextNode = this.map[layerIdx + 1][connIdx];
+          ctx.strokeStyle = node.visited ? COLORS.accent : '#333';
+          ctx.lineWidth = node.visited ? 2 : 1;
+          ctx.beginPath();
+          ctx.moveTo(node.screenX, node.screenY);
+          ctx.lineTo(nextNode.screenX, nextNode.screenY);
+          ctx.stroke();
+        });
+      });
+    });
+    this.map.forEach((layer, layerIdx) => {
+      layer.forEach((node, nodeIdx) => {
+        const x = node.screenX;
+        const y = node.screenY;
+        const isHovered = this.hoveredNodeIndex === layerIdx * 100 + nodeIdx;
+        const radius = isHovered ? 22 : 18;
+        let color;
+        switch (node.type) {
+          case NodeType.MONSTER: color = COLORS.textDim; break;
+          case NodeType.ELITE: color = COLORS.elite; break;
+          case NodeType.SHOP: color = COLORS.shop; break;
+          case NodeType.EVENT: color = COLORS.event; break;
+          case NodeType.REST: color = COLORS.rest; break;
+          case NodeType.BOSS: color = COLORS.boss; break;
+        }
+        if (node.visited) color = '#444';
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = isHovered ? '#fff' : '#666';
+        ctx.lineWidth = isHovered ? 3 : 1;
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        let icon;
+        switch (node.type) {
+          case NodeType.MONSTER: icon = '⚔️'; break;
+          case NodeType.ELITE: icon = '💀'; break;
+          case NodeType.SHOP: icon = '🛒'; break;
+          case NodeType.EVENT: icon = '❓'; break;
+          case NodeType.REST: icon = '🏕️'; break;
+          case NodeType.BOSS: icon = '👑'; break;
+        }
+        ctx.fillText(icon, x, y);
+        if (isHovered && !node.visited) {
+          ctx.font = '12px sans-serif';
+          ctx.fillStyle = '#fff';
+          let label;
+          switch (node.type) {
+            case NodeType.MONSTER: label = '怪物'; break;
+            case NodeType.ELITE: label = '精英'; break;
+            case NodeType.SHOP: label = '商店'; break;
+            case NodeType.EVENT: label = '事件'; break;
+            case NodeType.REST: label = '休息'; break;
+            case NodeType.BOSS: label = 'Boss'; break;
+          }
+          ctx.fillText(label, x, y - radius - 8);
+        }
+      });
+    });
+  },
+
+  drawBattle() {
+    this.drawEnemyArea();
+    this.drawPlayerArea();
+    this.drawHand();
+    this.drawBattleUI();
+    this.drawCombatLog();
+  },
+
+  drawEnemyArea() {
+    const ex = 550, ey = 180;
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(ex - 80, ey - 60, 160, 160);
+    ctx.strokeStyle = COLORS.danger;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(ex - 80, ey - 60, 160, 160);
+    ctx.font = '48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.enemy.sprite || '?', ex, ey);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText(this.enemy.name, ex, ey + 40);
+    if (this.enemy.strength) {
+      ctx.fillStyle = COLORS.accent;
+      ctx.font = '12px sans-serif';
+      ctx.fillText(`力量+${this.enemy.strength}`, ex, ey + 55);
+    }
+    const hpBarW = 120, hpBarH = 12;
+    const hpBarX = ex - hpBarW / 2;
+    const hpBarY = ey + 65;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(hpBarX, hpBarY, hpBarW, hpBarH);
+    const hpRatio = Math.max(0, this.enemy.hp / this.enemy.maxHp);
+    ctx.fillStyle = hpRatio > 0.5 ? COLORS.health : (hpRatio > 0.25 ? '#f59e0b' : COLORS.danger);
+    ctx.fillRect(hpBarX, hpBarY, hpBarW * hpRatio, hpBarH);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '11px sans-serif';
+    ctx.fillText(`${this.enemy.hp}/${this.enemy.maxHp}`, ex, hpBarY + 10);
+    if (this.enemy.block > 0) {
+      ctx.fillStyle = COLORS.armor;
+      ctx.font = '14px sans-serif';
+      ctx.fillText(`🛡${this.enemy.block}`, ex, hpBarY + 28);
+    }
+    if (this.enemy.stunned > 0) {
+      ctx.fillStyle = '#ff0';
+      ctx.fillText('💫 眩晕', ex, hpBarY + 45);
+    }
+    const action = this.enemyNextAction || this.enemy.attacks[0];
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = '12px sans-serif';
+    const intentText = action.type === 'attack' ? `意图: 攻击 ${action.displayValue || action.value}` :
+                       action.type === 'defend' ? `意图: 防御 ${action.value}` :
+                       action.type === 'buff' ? `意图: 增强` :
+                       action.type === 'heal' ? `意图: 治疗 ${action.value}` :
+                       action.type === 'summon' ? `意图: 召唤` : '意图: ???';
+    ctx.fillText(intentText, ex, ey - 50);
+  },
+
+  drawPlayerArea() {
+    const px = 150, py = 250;
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(px - 60, py - 40, 120, 120);
+    ctx.strokeStyle = COLORS.armor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px - 60, py - 40, 120, 120);
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🧙', px, py);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('英雄', px, py + 30);
+    const hpBarW = 100, hpBarH = 10;
+    const hpBarX = px - hpBarW / 2;
+    const hpBarY = py + 45;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(hpBarX, hpBarY, hpBarW, hpBarH);
+    const hpRatio = Math.max(0, this.player.hp / this.player.maxHp);
+    ctx.fillStyle = hpRatio > 0.5 ? COLORS.health : (hpRatio > 0.25 ? '#f59e0b' : COLORS.danger);
+    ctx.fillRect(hpBarX, hpBarY, hpBarW * hpRatio, hpBarH);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '10px sans-serif';
+    ctx.fillText(`${this.player.hp}/${this.player.maxHp}`, px, hpBarY + 9);
+    if (this.player.block > 0) {
+      ctx.fillStyle = COLORS.armor;
+      ctx.font = '13px sans-serif';
+      ctx.fillText(`🛡${this.player.block}`, px, hpBarY + 24);
+    }
+    ctx.fillStyle = COLORS.energy;
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText(`⚡${this.player.energy}`, 60, 50);
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = '12px sans-serif';
+    ctx.fillText(`牌组: ${this.drawPile.length} | 弃牌: ${this.discardPile.length}`, 60, 75);
+    if (this.player.strength > 0) {
+      ctx.fillStyle = COLORS.accent;
+      ctx.fillText(`力量: +${this.player.strength}`, 60, 95);
+    }
+    if (this.player.dexterity > 0) {
+      ctx.fillStyle = COLORS.armor;
+      ctx.fillText(`敏捷: +${this.player.dexterity}`, 60, 115);
+    }
+  },
+
+  drawHand() {
+    const handY = H - 120;
+    const cardW = 80, cardH = 100;
+    const totalW = this.hand.length * (cardW + 5);
+    const startX = (W - totalW) / 2;
+    this.hand.forEach((card, i) => {
+      const x = startX + i * (cardW + 5);
+      const isHovered = this.hoveredCardIndex === i;
+      const y = isHovered ? handY - 20 : handY;
+      let bgColor;
+      switch (card.type) {
+        case CardType.ATTACK: bgColor = COLORS.cardAttack; break;
+        case CardType.SKILL: bgColor = COLORS.cardSkill; break;
+        case CardType.POWER: bgColor = COLORS.cardPower; break;
+        default: bgColor = COLORS.card;
+      }
+      ctx.fillStyle = isHovered ? COLORS.cardHover : bgColor;
+      ctx.fillRect(x, y, cardW, cardH);
+      ctx.strokeStyle = isHovered ? COLORS.accent : '#444';
+      ctx.lineWidth = isHovered ? 2 : 1;
+      ctx.strokeRect(x, y, cardW, cardH);
+      const cost = card.cost === -1 ? 'X' : card.cost;
+      ctx.fillStyle = COLORS.energy;
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(cost, x + 5, y + 18);
+      ctx.fillStyle = COLORS.text;
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(card.name, x + cardW / 2, y + 40);
+      ctx.font = '9px sans-serif';
+      ctx.fillStyle = COLORS.textDim;
+      const descLines = this.wrapText(card.desc, cardW - 10);
+      descLines.forEach((line, li) => {
+        ctx.fillText(line, x + cardW / 2, y + 55 + li * 12);
+      });
+      const canPlay = (card.cost === -1 ? this.player.energy > 0 : card.cost <= this.player.energy) && this.playerTurn;
+      if (!canPlay) {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(x, y, cardW, cardH);
+      }
+    });
+  },
+
+  wrapText(text, maxWidth) {
+    const words = text.split('');
+    const lines = [];
+    let current = '';
+    for (const char of words) {
+      if (ctx.measureText(current + char).width > maxWidth) {
+        lines.push(current);
+        current = char;
+      } else {
+        current += char;
+      }
+    }
+    if (current) lines.push(current);
+    return lines;
+  },
+
+  drawBattleUI() {
+    const btnY = H - 35;
+    if (this.playerTurn) {
+      this.drawButton('结束回合', W / 2 - 60, btnY, 120, 30, COLORS.accent);
+    } else {
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('敌方回合...', W / 2, btnY + 20);
+    }
+  },
+
+  drawCombatLog() {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(W - 200, 80, 190, 150);
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    this.combatLog.slice(0, 8).forEach((msg, i) => {
+      ctx.fillText(msg, W - 195, 95 + i * 16);
+    });
+  },
+
+  drawCardSelect() {
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('选择一张卡牌加入牌组', W / 2, 60);
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText('或跳过不选', W / 2, 85);
+    const cardW = 140, cardH = 180;
+    const totalW = this.rewardCards.length * (cardW + 20);
+    const startX = (W - totalW) / 2;
+    this.rewardCards.forEach((card, i) => {
+      const x = startX + i * (cardW + 20);
+      const y = 120;
+      let bgColor;
+      switch (card.type) {
+        case CardType.ATTACK: bgColor = COLORS.cardAttack; break;
+        case CardType.SKILL: bgColor = COLORS.cardSkill; break;
+        case CardType.POWER: bgColor = COLORS.cardPower; break;
+        default: bgColor = COLORS.card;
+      }
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(x, y, cardW, cardH);
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, cardW, cardH);
+      ctx.fillStyle = COLORS.energy;
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(card.cost === -1 ? 'X' : card.cost, x + 10, y + 25);
+      ctx.fillStyle = COLORS.text;
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(card.name, x + cardW / 2, y + 60);
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = COLORS.textDim;
+      ctx.fillText(card.desc, x + cardW / 2, y + 85);
+      ctx.fillStyle = card.type === CardType.ATTACK ? '#ff6666' : (card.type === CardType.SKILL ? '#66ff66' : '#6666ff');
+      ctx.font = '10px sans-serif';
+      const typeName = card.type === CardType.ATTACK ? '攻击' : (card.type === CardType.SKILL ? '技能' : '能力');
+      ctx.fillText(typeName, x + cardW / 2, y + 110);
+    });
+    this.drawButton('跳过', W / 2 - 60, 340, 120, 40, COLORS.textDim);
+  },
+
+  drawReward() {
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('战斗胜利！', W / 2, 200);
+    this.drawButton('继续', W / 2 - 60, 300, 120, 40, COLORS.success);
+  },
+
+  drawShop() {
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('商店', W / 2, 40);
+    ctx.fillStyle = COLORS.gold;
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`金币: ${this.player.gold}`, W / 2, 65);
+    const itemW = 120, itemH = 140;
+    const cols = 4;
+    const startX = (W - cols * (itemW + 10)) / 2;
+    this.shopItems.forEach((item, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = startX + col * (itemW + 10);
+      const y = 90 + row * (itemH + 10);
+      const isHovered = this.hoveredShopItem === i;
+      ctx.fillStyle = isHovered ? COLORS.cardHover : COLORS.card;
+      ctx.fillRect(x, y, itemW, itemH);
+      ctx.strokeStyle = this.player.gold >= item.price ? COLORS.gold : '#444';
+      ctx.lineWidth = isHovered ? 2 : 1;
+      ctx.strokeRect(x, y, itemW, itemH);
+      ctx.fillStyle = COLORS.text;
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      if (item.type === 'card') {
+        ctx.fillText(item.card.name, x + itemW / 2, y + 20);
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = COLORS.textDim;
+        ctx.fillText(item.card.desc, x + itemW / 2, y + 40);
+        ctx.fillStyle = cardTypeColor(item.card.type);
+        ctx.fillText(item.card.type === CardType.ATTACK ? '攻击' : (item.card.type === CardType.SKILL ? '技能' : '能力'), x + itemW / 2, y + 55);
+      } else if (item.type === 'relic') {
+        ctx.font = '24px sans-serif';
+        ctx.fillText(item.relic.icon, x + itemW / 2, y + 30);
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = COLORS.text;
+        ctx.fillText(item.relic.name, x + itemW / 2, y + 55);
+        ctx.font = '9px sans-serif';
+        ctx.fillStyle = COLORS.textDim;
+        ctx.fillText(item.relic.desc, x + itemW / 2, y + 70);
+      } else {
+        ctx.fillText(item.desc, x + itemW / 2, y + 30);
+      }
+      ctx.fillStyle = COLORS.gold;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`${item.price}金`, x + itemW / 2, y + itemH - 15);
+    });
+    this.drawButton('离开商店', W / 2 - 60, H - 60, 120, 40, COLORS.textDim);
+  },
+
+  drawEvent() {
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.currentEvent.name, W / 2, 80);
+    ctx.font = '16px sans-serif';
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText(this.currentEvent.desc, W / 2, 120);
+    if (this.eventResult) {
+      ctx.fillStyle = COLORS.event;
+      ctx.font = '14px sans-serif';
+      ctx.fillText(this.eventResult, W / 2, 180);
+      this.drawButton('继续', W / 2 - 60, 220, 120, 40, COLORS.success);
+    } else {
+      this.currentEvent.choices.forEach((choice, i) => {
+        this.drawButton(choice.text, W / 2 - 100, 180 + i * 60, 200, 45, COLORS.event);
+      });
+    }
+  },
+
+  drawRest() {
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('休息营地', W / 2, 150);
+    ctx.font = '16px sans-serif';
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText(`当前生命: ${this.player.hp}/${this.player.maxHp}`, W / 2, 200);
+    const healAmount = Math.floor(this.player.maxHp * 0.3);
+    this.drawButton(`休息 (恢复${healAmount}生命)`, W / 2 - 120, 250, 240, 50, COLORS.rest);
+    this.drawButton('升级卡牌', W / 2 - 120, 320, 240, 50, COLORS.mana);
+  },
+
+  drawGameOver() {
+    ctx.fillStyle = COLORS.danger;
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('你倒下了...', W / 2, 200);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`到达: 第${this.chapter}章 第${this.currentLayer + 1}层`, W / 2, 260);
+    ctx.fillText(`击杀: ${this.stats.enemiesKilled} | 出牌: ${this.stats.cardsPlayed}`, W / 2, 290);
+    ctx.fillText(`总伤害: ${this.stats.damageDealt} | 总治疗: ${this.stats.hpHealed}`, W / 2, 320);
+    this.drawButton('重新开始', W / 2 - 80, 380, 160, 50, COLORS.accent);
+    this.drawButton('返回主菜单', W / 2 - 80, 450, 160, 50, COLORS.textDim);
+  },
+
+  drawVictory() {
+    ctx.fillStyle = COLORS.gold;
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('通关！', W / 2, 150);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '20px sans-serif';
+    ctx.fillText('你征服了地牢！', W / 2, 200);
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`总伤害: ${this.stats.damageDealt}`, W / 2, 260);
+    ctx.fillText(`总治疗: ${this.stats.hpHealed}`, W / 2, 290);
+    ctx.fillText(`出牌数: ${this.stats.cardsPlayed}`, W / 2, 320);
+    ctx.fillText(`击杀数: ${this.stats.enemiesKilled}`, W / 2, 350);
+    ctx.fillText(`获得金币: ${this.stats.goldEarned}`, W / 2, 380);
+    this.drawButton('再来一局', W / 2 - 80, 430, 160, 50, COLORS.accent);
+    this.drawButton('返回主菜单', W / 2 - 80, 500, 160, 50, COLORS.textDim);
+  },
+
+  drawStatusBar() {
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(0, H - 40, W, 40);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`❤ ${this.player.hp}/${this.player.maxHp}`, 10, H - 15);
+    ctx.fillStyle = COLORS.gold;
+    ctx.fillText(`💰 ${this.player.gold}`, 120, H - 15);
+    ctx.fillStyle = COLORS.text;
+    ctx.fillText(`🃏 ${this.deck.length}张`, 220, H - 15);
+    ctx.textAlign = 'right';
+    ctx.fillText(`遗物: ${this.player.relics.map(r => r.icon || '?').join(' ')}`, W - 10, H - 15);
+  },
+
+  drawButton(text, x, y, w, h, color) {
+    ctx.fillStyle = color || COLORS.accent;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + w / 2, y + h / 2);
+    ctx.textBaseline = 'alphabetic';
+  },
+
+  getClickableAreas() {
+    const areas = [];
+    switch (this.state) {
+      case GameState.MENU:
+        areas.push({ x: W / 2 - 100, y: 300, w: 200, h: 50, action: 'start' });
+        break;
+      case GameState.MAP:
+        this.map.forEach((layer, layerIdx) => {
+          layer.forEach((node, nodeIdx) => {
+            if (!node.visited) {
+              areas.push({
+                x: node.screenX - 20, y: node.screenY - 20, w: 40, h: 40,
+                action: 'node', layerIdx, nodeIdx
+              });
+            }
+          });
+        });
+        break;
+      case GameState.BATTLE:
+        areas.push({ x: W / 2 - 60, y: H - 35, w: 120, h: 30, action: 'end_turn' });
+        const handY = H - 120;
+        const cardW = 80, cardH = 100;
+        const totalW = this.hand.length * (cardW + 5);
+        const startX = (W - totalW) / 2;
+        this.hand.forEach((card, i) => {
+          areas.push({
+            x: startX + i * (cardW + 5), y: handY - 20, w: cardW, h: cardH + 20,
+            action: 'play_card', cardIndex: i
+          });
+        });
+        break;
+      case GameState.CARD_SELECT:
+        const rw = 140, rh = 180;
+        const rtW = this.rewardCards.length * (rw + 20);
+        const rsX = (W - rtW) / 2;
+        this.rewardCards.forEach((card, i) => {
+          areas.push({ x: rsX + i * (rw + 20), y: 120, w: rw, h: rh, action: 'select_card', cardIndex: i });
+        });
+        areas.push({ x: W / 2 - 60, y: 340, w: 120, h: 40, action: 'skip_reward' });
+        break;
+      case GameState.SHOP:
+        const siW = 120, siH = 140;
+        const siCols = 4;
+        const siStartX = (W - siCols * (siW + 10)) / 2;
+        this.shopItems.forEach((item, i) => {
+          const col = i % siCols;
+          const row = Math.floor(i / siCols);
+          areas.push({
+            x: siStartX + col * (siW + 10), y: 90 + row * (siH + 10), w: siW, h: siH,
+            action: 'buy_item', itemIndex: i
+          });
+        });
+        areas.push({ x: W / 2 - 60, y: H - 60, w: 120, h: 40, action: 'leave_shop' });
+        break;
+      case GameState.EVENT:
+        if (this.eventResult) {
+          areas.push({ x: W / 2 - 60, y: 220, w: 120, h: 40, action: 'leave_event' });
+        } else {
+          this.currentEvent.choices.forEach((choice, i) => {
+            areas.push({ x: W / 2 - 100, y: 180 + i * 60, w: 200, h: 45, action: 'event_choice', choiceIndex: i });
+          });
+        }
+        break;
+      case GameState.REST:
+        areas.push({ x: W / 2 - 120, y: 250, w: 240, h: 50, action: 'rest_heal' });
+        areas.push({ x: W / 2 - 120, y: 320, w: 240, h: 50, action: 'rest_upgrade' });
+        break;
+      case GameState.GAME_OVER:
+        areas.push({ x: W / 2 - 80, y: 380, w: 160, h: 50, action: 'restart' });
+        areas.push({ x: W / 2 - 80, y: 450, w: 160, h: 50, action: 'menu' });
+        break;
+      case GameState.VICTORY:
+        areas.push({ x: W / 2 - 80, y: 430, w: 160, h: 50, action: 'restart' });
+        areas.push({ x: W / 2 - 80, y: 500, w: 160, h: 50, action: 'menu' });
+        break;
+    }
+    return areas;
+  },
+
+  handleClick(mx, my) {
+    SoundFX.init();
+    const areas = this.getClickableAreas();
+    for (const area of areas) {
+      if (mx >= area.x && mx <= area.x + area.w && my >= area.y && my <= area.y + area.h) {
+        switch (area.action) {
+          case 'start':
+            this.startNewGame();
+            break;
+          case 'node':
+            this.visitNode(area.layerIdx, area.nodeIdx);
+            break;
+          case 'end_turn':
+            this.endPlayerTurn();
+            break;
+          case 'play_card':
+            this.playCard(area.cardIndex);
+            break;
+          case 'select_card':
+            this.selectRewardCard(area.cardIndex);
+            break;
+          case 'skip_reward':
+            this.skipReward();
+            break;
+          case 'buy_item':
+            this.buyShopItem(area.itemIndex);
+            break;
+          case 'leave_shop':
+            this.leaveShop();
+            break;
+          case 'event_choice':
+            this.chooseEvent(area.choiceIndex);
+            break;
+          case 'leave_event':
+            this.leaveEvent();
+            break;
+          case 'rest_heal':
+            this.restHeal();
+            break;
+          case 'rest_upgrade':
+            this.restUpgrade();
+            break;
+          case 'restart':
+            this.startNewGame();
+            break;
+          case 'menu':
+            this.state = GameState.MENU;
+            break;
+        }
+        return;
+      }
+    }
+  },
+
+  handleMouseMove(mx, my) {
+    this.hoveredCardIndex = -1;
+    this.hoveredNodeIndex = -1;
+    this.hoveredShopItem = -1;
+    const areas = this.getClickableAreas();
+    let hovering = false;
+    for (const area of areas) {
+      if (mx >= area.x && mx <= area.x + area.w && my >= area.y && my <= area.y + area.h) {
+        hovering = true;
+        if (area.action === 'play_card') this.hoveredCardIndex = area.cardIndex;
+        if (area.action === 'node') this.hoveredNodeIndex = area.layerIdx * 100 + area.nodeIdx;
+        if (area.action === 'buy_item') this.hoveredShopItem = area.itemIndex;
+        break;
+      }
+    }
+    canvas.style.cursor = hovering ? 'pointer' : 'default';
+  }
+};
+
+function cardTypeColor(type) {
+  switch (type) {
+    case CardType.ATTACK: return '#ff6666';
+    case CardType.SKILL: return '#66ff66';
+    case CardType.POWER: return '#6666ff';
+    default: return '#fff';
+  }
+}
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  game.handleClick(mx, my);
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  game.handleMouseMove(mx, my);
+});
+
+game.loadSave();
+
+function gameLoop() {
+  game.update();
+  game.draw();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
