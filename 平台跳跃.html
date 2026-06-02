@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>像素冒险</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:'Microsoft YaHei',Arial,sans-serif;touch-action:none;user-select:none}
+canvas{display:block;max-width:100vw;max-height:100vh;cursor:default}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<div id="touch-area" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;display:none;">
+  <div id="t-left" style="position:absolute;left:0;bottom:0;width:35%;height:40%;pointer-events:auto;opacity:0.1;background:#fff;border-radius:0 20px 0 0;">&larr;</div>
+  <div id="t-right" style="position:absolute;left:35%;bottom:0;width:30%;height:40%;pointer-events:auto;opacity:0.1;background:#fff;">&rarr;</div>
+  <div id="t-jump" style="position:absolute;right:5%;bottom:20%;width:20%;height:25%;pointer-events:auto;opacity:0.15;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff;">A</div>
+</div>
+<script>
+(function(){
+'use strict';
+
+const c=document.getElementById('gc'),ctx=c.getContext('2d');
+const W=640,H=480,T=32;
+c.width=W;c.height=H;
+
+function resize(){
+  const r=W/H;let w=window.innerWidth,h=window.innerHeight;
+  if(w/h>r)c.style.width=(h*r)+'px',c.style.height=h+'px';
+  else c.style.width=w+'px',c.style.height=(w/r)+'px';
+}
+window.addEventListener('resize',resize);resize();
+
+// Touch support
+if('ontouchstart'in window)document.getElementById('touch-area').style.display='block';
+
+// ---- Input ----
+const keys={};
+window.addEventListener('keydown',e=>{keys[e.code]=true;e.preventDefault();});
+window.addEventListener('keyup',e=>{keys[e.code]=false;e.preventDefault();});
+const touch={left:false,right:false,jump:false};
+['touchstart','touchend'].forEach(ev=>{
+  document.addEventListener(ev,e=>{
+    for(const t of e.changedTouches){
+      const el=document.elementFromPoint(t.clientX,t.clientY);
+      if(!el||!el.id)continue;
+      const down=ev==='touchstart';
+      if(el.id==='t-left')touch.left=down;
+      if(el.id==='t-right')touch.right=down;
+      if(el.id==='t-jump')touch.jump=down;
+    }
+    e.preventDefault();
+  },{passive:false});
+});
+
+function isLeft(){return keys['ArrowLeft']||keys['KeyA']||touch.left;}
+function isRight(){return keys['ArrowRight']||keys['KeyD']||touch.right;}
+function isJump(){return keys['ArrowUp']||keys['KeyW']||keys['Space']||touch.jump;}
+
+// ---- Level System ----
+const G=13; // ground row (bottom of screen)
+const LEVELS=[];
+
+function makeLevel(addExtra){
+  const R=15,C=200;
+  const m=Array.from({length:R},()=>Array(C).fill(0));
+  // Ground at bottom 2 rows
+  for(let c=0;c<C;c++){m[G][c]=1;m[G+1][c]=1;}
+  // Fill below ground
+  for(let r=G+2;r<R;r++)for(let c=0;c<C;c++)m[r][c]=1;
+  if(addExtra)addExtra(m);
+  return m;
+}
+
+const coinData=[],enemyData=[];
+function placeGroundGap(m,startCol,width){for(let c=startCol;c<startCol+width;c++)if(c<200){m[G][c]=0;m[G+1][c]=0;}}
+function placePlatform(m,startCol,row,width){
+  for(let i=0;i<width;i++){
+    const c=startCol+i;
+    if(c<200&&row>=0&&row<G){m[row][c]=2;if(row+1<G)m[row+1][c]=m[row+1][c]===0?1:m[row+1][c];}
+  }
+}
+function placeQB(m,col,row){if(col<200&&row>=0&&row<G)m[row][col]=3;}
+function placeCoins(m,list){coinData.push(...list);}
+function placeEnemies(m,list){enemyData.push(...list);}
+
+function buildLevel(cfg){
+  coinData.length=0;enemyData.length=0;
+  const map=makeLevel(cfg.build);
+  const coins=coinData.map(([c,r])=>({x:c*T+T/2,y:r*T+T/2,w:10,h:10,collected:false,anim:Math.random()*6}));
+  const enemies=enemyData.map(([c,r])=>({x:c*T,y:r*T,w:T,h:T,alive:true,speed:0.8+Math.random()*0.5,direction:-1,anim:0}));
+  return {name:cfg.name,bg:cfg.bg,groundColor:cfg.groundColor,map,coins,enemies,
+    flagX:190*T,flagY:G*T,flagReached:false};
+}
+
+// Level definitions
+LEVELS.push(buildLevel({
+  name:'草原之旅',bg:'#5c94fc',groundColor:'#4a8c3f',
+  build(m){
+    placeGroundGap(m,18,4);placeGroundGap(m,32,3);placeGroundGap(m,50,4);
+    placeGroundGap(m,65,3);placeGroundGap(m,82,4);
+    placePlatform(m,8,10,4);placePlatform(m,14,8,3);placePlatform(m,22,9,5);
+    placePlatform(m,28,7,3);placePlatform(m,36,10,4);placePlatform(m,42,8,5);
+    placePlatform(m,55,9,3);placePlatform(m,60,7,4);placePlatform(m,70,10,3);
+    placePlatform(m,75,8,4);placePlatform(m,85,9,3);
+    placeQB(m,16,7);placeQB(m,38,9);placeQB(m,62,6);placeQB(m,78,7);
+    placeCoins(m,[[15,7],[16,6],[17,7],[30,6],[31,6],[44,7],[45,7],[56,8],[57,8]]);
+    placeEnemies(m,[[5,12],[12,12],[25,12],[40,12],[58,12],[72,12]]);
+  }
+}));
+
+LEVELS.push(buildLevel({
+  name:'地下洞穴',bg:'#2a1a0a',groundColor:'#5a4a3a',
+  build(m){
+    placeGroundGap(m,12,4);placeGroundGap(m,28,5);placeGroundGap(m,45,3);
+    placeGroundGap(m,58,4);placeGroundGap(m,75,3);placeGroundGap(m,88,4);
+    placePlatform(m,6,10,4);placePlatform(m,15,8,3);placePlatform(m,20,6,5);
+    placePlatform(m,25,10,3);placePlatform(m,33,7,4);placePlatform(m,38,5,5);
+    placePlatform(m,42,9,3);placePlatform(m,50,7,5);placePlatform(m,54,10,4);
+    placePlatform(m,62,8,3);placePlatform(m,68,6,4);placePlatform(m,80,9,5);
+    placeQB(m,21,5);placeQB(m,39,4);placeQB(m,51,6);placeQB(m,69,5);
+    placeCoins(m,[[21,4],[22,4],[39,3],[40,3],[51,5],[52,5],[69,4],[70,4]]);
+    placeEnemies(m,[[8,12],[16,12],[30,12],[48,12],[60,12],[78,12]]);
+  }
+}));
+
+LEVELS.push(buildLevel({
+  name:'云端漫步',bg:'#c8e0ff',groundColor:'#7a6a5a',
+  build(m){
+    for(let c=0;c<200;c++){m[G][c]=0;m[G+1][c]=0;}
+    placePlatform(m,0,12,6);placePlatform(m,6,10,5);placePlatform(m,12,8,4);
+    placePlatform(m,17,6,6);placePlatform(m,24,9,4);placePlatform(m,29,7,5);
+    placePlatform(m,35,5,4);placePlatform(m,40,9,5);placePlatform(m,46,7,4);
+    placePlatform(m,51,5,6);placePlatform(m,58,8,5);placePlatform(m,64,6,4);
+    placePlatform(m,69,10,4);placePlatform(m,74,7,5);placePlatform(m,80,5,4);
+    placePlatform(m,85,9,5);
+    placeQB(m,18,5);placeQB(m,52,4);placeQB(m,75,6);
+    placeCoins(m,[[18,4],[19,4],[52,3],[53,3],[75,5],[76,5],[35,4],[36,4]]);
+    placeEnemies(m,[[8,12],[20,12],[32,12],[48,12],[60,12],[78,12]]);
+  }
+}));
+
+LEVELS.push(buildLevel({
+  name:'冰雪世界',bg:'#d8e8f8',groundColor:'#c8d8e8',
+  build(m){
+    placeGroundGap(m,10,4);placeGroundGap(m,24,5);placeGroundGap(m,38,3);
+    placeGroundGap(m,52,4);placeGroundGap(m,66,5);placeGroundGap(m,80,3);
+    placePlatform(m,5,10,4);placePlatform(m,13,7,5);placePlatform(m,19,5,3);
+    placePlatform(m,28,9,4);placePlatform(m,33,6,5);placePlatform(m,42,8,3);
+    placePlatform(m,47,5,4);placePlatform(m,55,9,5);placePlatform(m,61,6,4);
+    placePlatform(m,70,8,3);placePlatform(m,74,5,5);placePlatform(m,83,10,4);
+    placeQB(m,14,6);placeQB(m,34,5);placeQB(m,56,8);placeQB(m,75,4);
+    placeCoins(m,[[14,5],[15,5],[34,4],[35,4],[56,7],[57,7],[75,3],[76,3]]);
+    placeEnemies(m,[[6,12],[15,12],[30,12],[44,12],[58,12],[72,12],[82,12]]);
+  }
+}));
+
+LEVELS.push(buildLevel({
+  name:'火山熔岩',bg:'#3a0a0a',groundColor:'#5a2a1a',
+  build(m){
+    placeGroundGap(m,8,4);placeGroundGap(m,20,5);placeGroundGap(m,34,3);
+    placeGroundGap(m,46,5);placeGroundGap(m,58,4);placeGroundGap(m,72,5);
+    placeGroundGap(m,84,4);
+    placePlatform(m,4,10,3);placePlatform(m,11,7,4);placePlatform(m,16,5,5);
+    placePlatform(m,23,9,3);placePlatform(m,28,6,4);placePlatform(m,37,8,5);
+    placePlatform(m,41,5,4);placePlatform(m,50,9,3);placePlatform(m,55,6,5);
+    placePlatform(m,63,8,4);placePlatform(m,68,5,3);placePlatform(m,77,9,5);
+    placeQB(m,17,4);placeQB(m,29,5);placeQB(m,56,5);placeQB(m,78,8);
+    placeCoins(m,[[17,3],[18,3],[29,4],[30,4],[56,4],[57,4],[78,7],[79,7]]);
+    placeEnemies(m,[[6,12],[14,12],[25,12],[40,12],[52,12],[66,12],[80,12]]);
+  }
+}));
+
+LEVELS.push(buildLevel({
+  name:'最终冲刺',bg:'#1a0a2a',groundColor:'#3a2a1a',
+  build(m){
+    for(let c=8;c<190;c+=6)for(let d=0;d<3;d++)if(c+d<190){m[G][c+d]=0;m[G+1][c+d]=0;}
+    placePlatform(m,5,10,4);placePlatform(m,9,7,3);placePlatform(m,13,5,4);
+    placePlatform(m,18,9,3);placePlatform(m,22,6,5);placePlatform(m,28,4,3);
+    placePlatform(m,32,8,4);placePlatform(m,37,5,3);placePlatform(m,41,9,5);
+    placePlatform(m,47,6,4);placePlatform(m,52,4,3);placePlatform(m,56,8,5);
+    placePlatform(m,62,5,4);placePlatform(m,67,9,3);placePlatform(m,71,6,5);
+    placePlatform(m,77,4,3);placePlatform(m,81,10,4);placePlatform(m,86,7,5);
+    placeQB(m,14,4);placeQB(m,48,5);placeQB(m,72,5);placeQB(m,87,6);
+    placeCoins(m,[[14,3],[15,3],[48,4],[49,4],[72,4],[73,4],[87,5],[88,5]]);
+    placeEnemies(m,[[6,12],[12,12],[20,12],[30,12],[44,12],[54,12],[65,12],[75,12],[84,12]]);
+  }
+}));
+
+// ---- Player ----
+let player;
+function createPlayer(){
+  return{x:2*T,y:G*T-T-28,w:20,h:28,vx:0,vy:0,onGround:false,lives:3,score:0,coins:0,dead:false,invincible:0,facing:1};
+}
+
+let cameraX,gameState,levelIndex;
+
+function initGame(){
+  levelIndex=0;gameState='title';player=createPlayer();
+}
+
+function startLevel(idx){
+  if(idx>=LEVELS.length){gameState='win';return;}
+  levelIndex=idx;gameState='playing';
+  const lv=LEVELS[idx];
+  player=createPlayer();cameraX=0;
+}
+
+// ---- Physics ----
+const GRAVITY=0.45,JUMP_VEL=-11,PLAYER_SPEED=4;
+
+function isSolid(t){return t>=1&&t<=7;}
+function getTile(c,r){if(r<0||r>=15||c<0||c>=200)return 0;return LEVELS[levelIndex].map[r][c];}
+
+function aabb(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+
+function updatePlayer(){
+  const p=player;if(p.dead)return;
+  let dx=0;
+  if(isRight())dx=1;
+  if(isLeft())dx=-1;
+  if(dx!==0)p.facing=dx;
+  p.vx=dx*PLAYER_SPEED;
+
+  if(isJump()&&p.onGround){p.vy=JUMP_VEL;p.onGround=false;}
+  if(!isJump()&&p.vy<JUMP_VEL*0.5&&p.vy<-2)p.vy*=0.85;
+
+  p.vy+=GRAVITY;if(p.vy>12)p.vy=12;
+
+  // X collision
+  p.x+=p.vx;
+  const px1=Math.floor(p.x/T),px2=Math.floor((p.x+p.w-1)/T);
+  const py1=Math.floor(p.y/T),py2=Math.floor((p.y+p.h-1)/T);
+  for(let r=py1;r<=py2;r++)for(let c=px1;c<=px2;c++){
+    if(isSolid(getTile(c,r))){
+      if(p.vx>0){p.x=c*T-p.w;p.vx=0;}else if(p.vx<0){p.x=c*T+T;p.vx=0;}
+    }
+  }
+
+  // Y collision
+  p.y+=p.vy;p.onGround=false;
+  const px1y=Math.floor(p.x/T),px2y=Math.floor((p.x+p.w-1)/T);
+  const py1y=Math.floor(p.y/T),py2y=Math.floor((p.y+p.h-1)/T);
+  for(let r=py1y;r<=py2y;r++)for(let c=px1y;c<=px2y;c++){
+    if(isSolid(getTile(c,r))){
+      if(p.vy>0){p.y=r*T-p.h;p.onGround=true;p.vy=0;}
+      else if(p.vy<0){
+        // Hit block from below
+        if(getTile(c,r)===3){LEVELS[levelIndex].map[r][c]=2;p.score+=100;spawnCoinFX(c*T+T/2,r*T);}
+        p.y=r*T+T;p.vy=0;
+      }
+    }
+  }
+
+  if(p.y>H+50){playerDie();return;}
+  if(p.invincible>0)p.invincible--;
+
+  cameraX=p.x-W*0.35;if(cameraX<0)cameraX=0;const maxCam=190*T-W;if(cameraX>maxCam)cameraX=maxCam;
+
+  const lv=LEVELS[levelIndex];
+  // Coins
+  for(const coin of lv.coins){
+    if(!coin.collected&&Math.abs(p.x+p.w/2-coin.x)<T*0.6&&Math.abs(p.y+p.h/2-coin.y)<T*0.6){
+      coin.collected=true;p.coins++;p.score+=50;spawnCoinFX(coin.x,coin.y);
+    }
+  }
+  // Enemies
+  for(const e of lv.enemies){
+    if(!e.alive)continue;
+    e.anim+=0.05;e.x+=e.speed*e.direction;
+    const tx=Math.floor((e.x+(e.direction>0?T+1:0))/T);
+    const ty=Math.floor((e.y+T+1)/T);
+    if(ty<G&&!isSolid(getTile(tx,ty)))e.direction*=-1;
+    else if(ty>=G){
+      const gx=Math.floor(e.x/T);
+      if(!isSolid(getTile(gx,G))){e.direction*=-1;}
+    }
+    if(e.y>H+T)e.alive=false;
+    if(aabb(p,{x:e.x,y:e.y,w:e.w,h:e.h})){
+      if(p.vy>0&&p.y+p.h-e.y<16){
+        e.alive=false;p.vy=-6;p.score+=200;spawnStompFX(e.x+T/2,e.y+T/2);
+      }else if(p.invincible<=0){playerDie();return;}
+    }
+  }
+  // Flag
+  if(p.x>=lv.flagX-10&&!lv.flagReached){
+    lv.flagReached=true;
+    if(levelIndex<LEVELS.length-1){p.score+=500;gameState='levelComplete';}
+    else{gameState='win';}
+  }
+}
+
+function playerDie(){
+  player.dead=true;player.lives--;
+  if(player.lives>=0)setTimeout(()=>{
+    const lv=LEVELS[levelIndex];
+    player.x=2*T;player.y=G*T-T-28;player.vx=0;player.vy=0;player.dead=false;player.invincible=120;cameraX=0;
+  },1000);
+  else gameState='gameover';
+}
+
+// ---- Effects ----
+let effects=[];
+function spawnCoinFX(x,y){effects.push({type:'coin',x,y,vy:-5,life:25});}
+function spawnStompFX(x,y){
+  for(let i=0;i<8;i++)effects.push({type:'stomp',x:x+Math.random()*16-8,y:y+Math.random()*16-8,
+    vx:Math.random()*5-2.5,vy:-Math.random()*6-2,life:20});
+}
+function updateEffects(){
+  for(let i=effects.length-1;i>=0;i--){
+    const e=effects[i];
+    if(e.type==='coin'){e.y+=e.vy;e.vy+=0.3;e.life--;}
+    if(e.type==='stomp'){e.x+=e.vx;e.y+=e.vy;e.vy+=0.3;e.life--;}
+    if(e.life<=0)effects.splice(i,1);
+  }
+}
+
+// ---- Drawing ----
+function drawBackground(lv){
+  ctx.fillStyle=lv.bg;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,0.03)';
+  for(let i=0;i<6;i++){const hx=(-cameraX*0.15+i*180)%(W+200)-100;ctx.beginPath();ctx.arc(hx+100,H-20+Math.sin(i*3)*15,80+Math.sin(i)*30,Math.PI,0);ctx.fill();}
+}
+
+function drawTiles(lv){
+  const sc=Math.floor(cameraX/T),ec=Math.min(sc+Math.ceil(W/T)+2,200);
+  for(let r=0;r<15;r++)for(let c=sc;c<ec;c++){
+    const t=lv.map[r][c];if(t===0)continue;
+    const x=c*T-cameraX,y=r*T;
+    if(t===1){
+      ctx.fillStyle=lv.groundColor;ctx.fillRect(x,y,T,T);
+      ctx.strokeStyle='rgba(0,0,0,0.1)';ctx.strokeRect(x,y,T,T);
+      if(r===G||(r>0&&lv.map[r-1][c]===0)){ctx.fillStyle='#5ab84a';ctx.fillRect(x,y,T,4);}
+    }else if(t===2){
+      ctx.fillStyle='#c87840';ctx.fillRect(x,y,T,T);
+      ctx.strokeStyle='#a06030';ctx.strokeRect(x,y,T,T);
+      ctx.fillStyle='#b06830';ctx.fillRect(x+1,y+1,T-2,2);ctx.fillRect(x+1,y+T/2,T-2,2);ctx.fillRect(x+T/2,y+1,2,T/2-1);ctx.fillRect(x+T/2,y+T/2+1,2,T/2-1);
+    }else if(t===3){
+      const glow=Math.sin(Date.now()/300)*0.2+0.8;
+      ctx.fillStyle=`rgba(200,160,64,${glow})`;ctx.fillRect(x,y,T,T);
+      ctx.strokeStyle='#a08020';ctx.strokeRect(x,y,T,T);
+      ctx.fillStyle='#ffe888';ctx.fillRect(x+3,y+3,T-6,T-6);
+      ctx.fillStyle='#a06020';ctx.font='bold 18px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('?',x+T/2,y+T/2);
+    }
+  }
+}
+
+function drawPlayer(p){
+  if(p.dead)return;
+  if(p.invincible>0&&Math.floor(p.invincible/4)%2===0)return;
+  const x=Math.round(p.x-cameraX),y=Math.round(p.y);
+  ctx.save();
+  // Body
+  ctx.fillStyle='#e84040';ctx.fillRect(x+2,y+8,p.w-4,14);
+  // Head
+  ctx.fillStyle='#ffcc88';ctx.fillRect(x+2,y,p.w-4,10);
+  // Hat
+  ctx.fillStyle='#d02020';ctx.fillRect(x,y-2,p.w,6);ctx.fillRect(x+3,y-6,p.w-6,5);
+  // Eyes
+  ctx.fillStyle='#000';ctx.fillRect(x+5+p.facing*5,y+3,2,2);ctx.fillRect(x+9+p.facing*5,y+3,2,2);
+  // Feet
+  ctx.fillStyle='#884422';ctx.fillRect(x+2,y+22,7,6);ctx.fillRect(x+11,y+22,7,6);
+  // Arms
+  ctx.fillStyle='#ffcc88';ctx.fillRect(x-2,y+10,4,8);ctx.fillRect(x+18,y+10,4,8);
+  ctx.restore();
+}
+
+function drawEnemies(lv){
+  for(const e of lv.enemies){
+    if(!e.alive)continue;
+    const x=Math.round(e.x-cameraX),y=Math.round(e.y);
+    if(x<-T||x>W+T)continue;
+    ctx.fillStyle='#8a4430';
+    ctx.beginPath();ctx.arc(x+T/2,y+T/2,T*0.45,Math.PI,0);ctx.fill();
+    ctx.fillRect(x,y+T/2,T,T/2);
+    const fo=Math.sin(e.anim*8)*2;
+    ctx.fillStyle='#000';ctx.fillRect(x+4,y+T-8+fo,8,8-fo);ctx.fillRect(x+T-12,y+T-8-fo,8,8+fo);
+    ctx.fillStyle='#fff';ctx.fillRect(x+8,y+6,6,6);ctx.fillRect(x+T-14,y+6,6,6);
+    ctx.fillStyle='#000';ctx.fillRect(x+10,y+9,3,3);ctx.fillRect(x+T-12,y+9,3,3);
+    ctx.strokeStyle='#000';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(x+7,y+4);ctx.lineTo(x+14,y+7);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+T-7,y+4);ctx.lineTo(x+T-14,y+7);ctx.stroke();
+  }
+}
+
+function drawCoins(lv){
+  for(const c of lv.coins){
+    if(c.collected)continue;
+    const x=c.x-cameraX;if(x<-20||x>W+20)continue;
+    const pu=Math.sin(Date.now()/200)*2;
+    ctx.fillStyle='#ffd700';ctx.beginPath();ctx.arc(x,c.y+pu,6,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#ffec80';ctx.beginPath();ctx.arc(x-1,c.y-1+pu,4,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function drawFlag(lv){
+  const x=lv.flagX-cameraX;if(x<-20||x>W+20)return;
+  ctx.fillStyle='#888';ctx.fillRect(x+6,lv.flagY-12*T,4,12*T);
+  ctx.fillStyle='#ff4444';ctx.beginPath();ctx.arc(x+8,lv.flagY-12*T,6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#44ff44';
+  ctx.beginPath();ctx.moveTo(x+10,lv.flagY-11*T);ctx.lineTo(x+40,lv.flagY-10*T);ctx.lineTo(x+10,lv.flagY-9*T);ctx.fill();
+  // "GOAL" text
+  ctx.fillStyle='#fff';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('GOAL',x+25,lv.flagY-11.5*T);
+}
+
+function drawHUD(){
+  ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(0,0,W,30);
+  ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.textAlign='left';ctx.textBaseline='middle';
+  ctx.fillText('🍄 '+LEVELS[levelIndex].name,10,15);
+  ctx.textAlign='center';ctx.fillText('❤️ x'+player.lives,W/2-40,15);
+  ctx.fillText('🪙 '+player.coins,W/2+50,15);
+  ctx.textAlign='right';ctx.fillText('🏆 '+player.score,W-10,15);
+  // Level indicator
+  ctx.fillStyle='#aaa';ctx.font='12px Arial';ctx.textAlign='center';
+  ctx.fillText('Lv '+(levelIndex+1)+'/'+LEVELS.length,W/2,28);
+}
+
+function drawTitle(){
+  ctx.fillStyle='linear-gradient'? '#5c94fc' : '#5c94fc';ctx.fillRect(0,0,W,H);
+  drawTITLEbg();
+  ctx.fillStyle='#fff';ctx.font='bold 52px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('🍄 像素冒险',W/2,120);
+  ctx.font='16px "Microsoft YaHei",Arial';
+  ctx.fillText('WASD/方向键 移动 · 空格/↑ 跳跃',W/2,210);
+  ctx.fillText('踩扁敌人 · 收集金币 · 到达旗帜过关',W/2,240);
+  ctx.fillText('共 6 关 · 3 条命 · R键重开本关',W/2,270);
+  ctx.fillStyle='#ffd700';ctx.font='bold 22px Arial';
+  ctx.fillText('按 空格/Enter 或 点击 开始',W/2,340);
+  // Draw a little player
+  ctx.save();ctx.translate(W/2-12,400);ctx.fillStyle='#e84040';ctx.fillRect(2,8,16,14);
+  ctx.fillStyle='#ffcc88';ctx.fillRect(2,0,16,10);ctx.fillStyle='#d02020';ctx.fillRect(0,-2,20,6);
+  ctx.fillStyle='#000';ctx.fillRect(7,3,4,2);ctx.restore();
+}
+function drawTITLEbg(){
+  ctx.fillStyle='#5c94fc';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#4a8c3f';ctx.fillRect(0,H-64,W,64);
+  ctx.fillStyle='#5ab84a';ctx.fillRect(0,H-64,W,4);
+  // Clouds
+  ctx.fillStyle='rgba(255,255,255,0.5)';ctx.beginPath();ctx.arc(120,80,36,0,Math.PI*2);ctx.arc(140,70,28,0,Math.PI*2);ctx.arc(150,85,30,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(480,100,40,0,Math.PI*2);ctx.arc(500,90,30,0,Math.PI*2);ctx.arc(510,105,32,0,Math.PI*2);ctx.fill();
+}
+
+function drawWin(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#ffd700';ctx.font='bold 52px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('🎉 全部通关！',W/2,130);
+  ctx.fillStyle='#fff';ctx.font='24px Arial';
+  ctx.fillText('得分: '+player.score+'  |  金币: '+player.coins,W/2,210);
+  ctx.fillText('❤️ 剩余: '+player.lives,W/2,250);
+  ctx.fillStyle='#aaa';ctx.font='16px Arial';
+  ctx.fillText('按 空格/点击 重新开始',W/2,330);
+}
+
+function drawGameOver(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#ff4444';ctx.font='bold 48px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('💀 游戏结束',W/2,140);
+  ctx.fillStyle='#fff';ctx.font='20px Arial';
+  ctx.fillText('得分: '+player.score+'  |  金币: '+player.coins,W/2,220);
+  ctx.fillText('按 空格/点击 重新开始',W/2,300);
+}
+
+function drawLevelComplete(){
+  ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#44ff44';ctx.font='bold 40px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('🎉 过关！',W/2,140);
+  ctx.fillStyle='#fff';ctx.font='18px Arial';
+  ctx.fillText(LEVELS[levelIndex].name+' 通关 · +500分',W/2,200);
+  ctx.fillStyle='#ffd700';ctx.font='16px Arial';
+  ctx.fillText('按 空格/点击 进入下一关',W/2,280);
+}
+
+// ---- Main Loop ----
+function update(){
+  updateEffects();
+  if(gameState==='playing')updatePlayer();
+}
+
+function draw(){
+  if(gameState==='title'){drawTitle();return;}
+  if(gameState==='win'){drawWin();return;}
+  if(gameState==='gameover'){drawGameOver();return;}
+  const lv=LEVELS[levelIndex];
+  drawBackground(lv);drawTiles(lv);drawCoins(lv);
+  drawEnemies(lv);drawFlag(lv);drawPlayer(player);drawHUD();
+  if(gameState==='levelComplete')drawLevelComplete();
+}
+
+function loop(){update();draw();requestAnimationFrame(loop);}
+
+// ---- User Input ----
+c.addEventListener('click',e=>{
+  if(gameState==='title'){startLevel(0);return;}
+  if(gameState==='gameover'||gameState==='win'){initGame();return;}
+  if(gameState==='levelComplete'){startLevel(levelIndex+1);return;}
+});
+
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'||e.code==='Enter'){
+    if(gameState==='title'){e.preventDefault();startLevel(0);}
+    else if(gameState==='gameover'){e.preventDefault();initGame();}
+    else if(gameState==='win'){e.preventDefault();initGame();}
+    else if(gameState==='levelComplete'){e.preventDefault();startLevel(levelIndex+1);}
+  }
+  if(e.code==='KeyR'&&gameState==='playing'){player.lives=3;startLevel(levelIndex);}
+});
+
+// ---- Start ----
+initGame();
+loop();
+
+})();
+</script>
+</body>
+</html>
