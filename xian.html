@@ -57,6 +57,14 @@ html,body{width:100%;height:100%;overflow:hidden;background:#0a0a12;font-family:
 /* Event choice overlay */
 #event-overlay{position:absolute;z-index:10;bottom:0;left:0;right:0;padding:12px;background:linear-gradient(0deg,rgba(0,0,0,0.95),rgba(0,0,0,0.85));border-top:2px solid rgba(212,175,55,0.4);display:none}
 
+/* Swipe indicator */
+#swipe-indicator{position:fixed;top:50%;transform:translateY(-50%);z-index:20;padding:8px 14px;border-radius:20px;background:rgba(212,175,55,0.85);color:#0a0a12;font-size:13px;font-weight:bold;pointer-events:none;opacity:0;transition:opacity 0.2s}
+#swipe-indicator.left{left:10px}
+#swipe-indicator.right{right:10px}
+
+/* Fast-tap: remove 300ms delay */
+.action-btn,.choice-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+
 /* Responsive */
 @media(max-width:400px){
   .action-btn{font-size:12px;padding:8px 2px;min-width:50px}
@@ -99,6 +107,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#0a0a12;font-family:
   </div>
 
   <div id="event-overlay"></div>
+  <div id="swipe-indicator" class="left"></div>
 </div>
 
 <script>
@@ -1226,6 +1235,218 @@ function animateCanvas(time){
   drawBackground(time);
   requestAnimationFrame(animateCanvas);
 }
+
+// ============================================================
+// TOUCH GESTURE SYSTEM
+// ============================================================
+(function(){
+  const SWIPE_THRESHOLD = 50;
+  const SWIPE_VELOCITY_THRESHOLD = 0.3;
+  const swipeIndicator = document.getElementById('swipe-indicator');
+  let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+  let touchCurrentX = 0, touchCurrentY = 0;
+  let isSwiping = false, swipeDirection = null;
+  let indicatorTimer = null;
+  let outputPages = [];
+  let currentPage = 0;
+
+  function showSwipeIndicator(dir, text){
+    swipeIndicator.className = dir;
+    swipeIndicator.textContent = text;
+    swipeIndicator.style.opacity = '1';
+    if(indicatorTimer) clearTimeout(indicatorTimer);
+    indicatorTimer = setTimeout(()=>{ swipeIndicator.style.opacity = '0' }, 600);
+  }
+
+  // Build page index from textLines for page-turning
+  function buildPages(){
+    const PAGE_LINES = 12;
+    outputPages = [];
+    for(let i = 0; i < textLines.length; i += PAGE_LINES){
+      outputPages.push(i);
+    }
+    currentPage = outputPages.length - 1;
+  }
+
+  function scrollToPage(pageIdx){
+    if(pageIdx < 0) pageIdx = 0;
+    if(pageIdx >= outputPages.length) pageIdx = outputPages.length - 1;
+    currentPage = pageIdx;
+    const lines = outputEl.querySelectorAll('.text-line');
+    if(lines.length === 0) return;
+    const targetLine = lines[outputPages[pageIdx]];
+    if(targetLine){
+      outputEl.scrollTo({ top: targetLine.offsetTop - 12, behavior: 'smooth' });
+    }
+  }
+
+  // Gesture on the output area for swipe page-turn
+  const outputWrap = document.getElementById('output-wrap');
+  outputWrap.addEventListener('touchstart', function(e){
+    const touch = e.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchCurrentX = touch.clientX;
+    touchCurrentY = touch.clientY;
+    touchStartTime = Date.now();
+    isSwiping = false;
+    swipeDirection = null;
+  }, { passive: true });
+
+  outputWrap.addEventListener('touchmove', function(e){
+    const touch = e.touches[0];
+    touchCurrentX = touch.clientX;
+    touchCurrentY = touch.clientY;
+    const dx = touchCurrentX - touchStartX;
+    const dy = touchCurrentY - touchStartY;
+    if(!swipeDirection && (Math.abs(dx) > 15 || Math.abs(dy) > 15)){
+      swipeDirection = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+    }
+    if(swipeDirection === 'horizontal' && Math.abs(dx) > SWIPE_THRESHOLD){
+      isSwiping = true;
+    }
+  }, { passive: true });
+
+  outputWrap.addEventListener('touchend', function(e){
+    const dx = touchCurrentX - touchStartX;
+    const dy = touchCurrentY - touchStartY;
+    const elapsed = Date.now() - touchStartTime;
+    const velocity = Math.abs(dx) / elapsed;
+
+    if(isSwiping && Math.abs(dx) > SWIPE_THRESHOLD && velocity > SWIPE_VELOCITY_THRESHOLD){
+      if(dx < 0){
+        // Swipe left → scroll to top (oldest)
+        buildPages();
+        scrollToPage(0);
+        showSwipeIndicator('left', '翻至最早');
+      } else {
+        // Swipe right → scroll to bottom (newest)
+        buildPages();
+        scrollToPage(outputPages.length - 1);
+        showSwipeIndicator('right', '翻至最新');
+      }
+    }
+    isSwiping = false;
+    swipeDirection = null;
+  }, { passive: true });
+
+  // Swipe on the whole game container for navigation hints
+  const container = document.getElementById('game-container');
+  let containerTouchStartX = 0, containerTouchStartY = 0;
+  let containerSwiping = false, containerSwipeDir = null;
+
+  container.addEventListener('touchstart', function(e){
+    if(e.target.closest('#output-wrap')) return;
+    const touch = e.touches[0];
+    containerTouchStartX = touch.clientX;
+    containerTouchStartY = touch.clientY;
+    containerSwiping = false;
+    containerSwipeDir = null;
+  }, { passive: true });
+
+  container.addEventListener('touchmove', function(e){
+    if(e.target.closest('#output-wrap')) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - containerTouchStartX;
+    const dy = touch.clientY - containerTouchStartY;
+    if(!containerSwipeDir && (Math.abs(dx) > 15 || Math.abs(dy) > 15)){
+      containerSwipeDir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+    }
+    if(containerSwipeDir === 'h' && Math.abs(dx) > SWIPE_THRESHOLD){
+      containerSwiping = true;
+    }
+  }, { passive: true });
+
+  container.addEventListener('touchend', function(e){
+    if(e.target.closest('#output-wrap')) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - containerTouchStartX;
+    if(containerSwiping && Math.abs(dx) > SWIPE_THRESHOLD){
+      // On the action area, swipe triggers the first/last action button as navigation hint
+      const buttons = document.querySelectorAll('.action-btn:not(:disabled)');
+      if(buttons.length > 0){
+        if(dx < 0 && buttons.length >= 2){
+          showSwipeIndicator('left', '');
+        } else if(dx > 0 && buttons.length >= 2){
+          showSwipeIndicator('right', '');
+        }
+      }
+    }
+    containerSwiping = false;
+    containerSwipeDir = null;
+  }, { passive: true });
+
+  // Fast-tap system: attach touchstart to all dynamically created buttons
+  function attachFastTap(element, handler){
+    let tapHandled = false;
+    element.addEventListener('touchstart', function(e){
+      e.preventDefault();
+      tapHandled = true;
+      handler.call(this, e);
+    }, { passive: false });
+    element.addEventListener('click', function(e){
+      if(tapHandled){ tapHandled = false; return; }
+      handler.call(this, e);
+    });
+  }
+
+  // Monkey-patch showActions to use fast-tap
+  const originalShowActions = window.showActions;
+  window.showActions = function(btns){
+    const c=document.getElementById('action-buttons');
+    c.innerHTML='';
+    document.getElementById('choice-buttons').innerHTML='';
+    document.getElementById('event-overlay').style.display='none';
+    btns.forEach(b=>{
+      const el=document.createElement('button');
+      el.className='action-btn';
+      el.innerHTML=b.text+(b.sub?' <span class="sub">'+b.sub+'</span>':'');
+      if(b.disabled){ el.disabled=true; el.onclick=b.onclick; }
+      else { attachFastTap(el, b.onclick); }
+      c.appendChild(el);
+    });
+    buildPages();
+  };
+
+  // Monkey-patch showChoices to use fast-tap
+  const originalShowChoices = window.showChoices;
+  window.showChoices = function(choices){
+    const c=document.getElementById('choice-buttons');
+    c.innerHTML='';
+    document.getElementById('action-buttons').innerHTML='';
+    document.getElementById('event-overlay').style.display='none';
+    choices.forEach(ch=>{
+      const el=document.createElement('button');
+      el.className='choice-btn';
+      el.textContent=ch.text;
+      attachFastTap(el, ()=>{
+        document.getElementById('choice-buttons').innerHTML='';
+        ch.effect(G.player);
+        if(G.phase==='event') finishEvent();
+      });
+      c.appendChild(el);
+    });
+    buildPages();
+  };
+
+  // Monkey-patch addText to auto-scroll and rebuild pages
+  const originalAddText = window.addText;
+  window.addText = function(text, cls){
+    const d=document.createElement('div');
+    d.className='text-line'+(cls?'':'');
+    if(cls) d.innerHTML='<span class="'+cls+'">'+text+'</span>';
+    else d.textContent=text;
+    outputEl.appendChild(d);
+    textLines.push({text,cls});
+    // Auto-scroll to bottom on new text
+    requestAnimationFrame(()=>{ outputEl.scrollTop=outputEl.scrollHeight; });
+    buildPages();
+    currentPage = outputPages.length - 1;
+  };
+
+  // Expose buildPages for manual calls
+  window.rebuildPages = buildPages;
+})();
 
 // ============================================================
 // START
