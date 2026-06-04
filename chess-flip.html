@@ -26,6 +26,8 @@ const SCREEN = {MENU:0,DIFFICULTY:1,PLAYING:2,GAMEOVER:3,STATS:4,SETTINGS:5};
 
 let W,H,T;
 let screen = SCREEN.MENU;
+let menuCircles = [];
+let woodGrainCache = {};
 let difficulty = 1; // 0=简单,1=普通,2=困难
 let isVsAI = true;
 
@@ -66,6 +68,8 @@ function resize() {
   W = Math.floor(w); H = Math.floor(h); T = Math.floor(W / COLS);
   c.width = W; c.height = H;
   c.style.width = W + 'px'; c.style.height = H + 'px';
+  generateMenuCircles();
+  generateWoodGrainCache();
 }
 window.addEventListener('resize', resize);
 resize();
@@ -367,6 +371,8 @@ function switchTurn() {
 
 function endGame(w) {
   winner = w;
+  selected = null;
+  validMoves = [];
   const endTid = setTimeout(() => {
     screen = SCREEN.GAMEOVER;
     const won = (isVsAI && w === 'r') || (!isVsAI && w === 'r');
@@ -822,7 +828,41 @@ function updateEatParticles(dt) {
 // ==================== Drawing ====================
 function easeOutQuad(t) { return t * (2 - t); }
 
-function drawWoodBg(x, y, s) {
+function seededRand(seed) {
+  let x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+function generateMenuCircles() {
+  menuCircles = [];
+  for (let i = 0; i < 5; i++) {
+    menuCircles.push({
+      cx: W * (0.2 + seededRand(i * 7 + 1) * 0.6),
+      cy: H * (0.2 + seededRand(i * 13 + 3) * 0.6),
+      r: 40 + seededRand(i * 19 + 5) * 80
+    });
+  }
+}
+
+function generateWoodGrainCache() {
+  woodGrainCache = {};
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const key = r + ',' + c;
+      const lines = [];
+      for (let i = 0; i < 3; i++) {
+        const seed = r * 100 + c * 10 + i;
+        lines.push({
+          offset: (seededRand(seed) - 0.5) * 5,
+          skew: (seededRand(seed + 50) - 0.5) * 8
+        });
+      }
+      woodGrainCache[key] = lines;
+    }
+  }
+}
+
+function drawWoodBg(x, y, s, row, col) {
   const grad = ctx.createLinearGradient(x, y, x+s, y+s);
   grad.addColorStop(0, '#3a2210');
   grad.addColorStop(0.3, '#4a2a14');
@@ -830,14 +870,15 @@ function drawWoodBg(x, y, s) {
   grad.addColorStop(1, '#2d1808');
   ctx.fillStyle = grad;
   ctx.beginPath(); ctx.roundRect(x, y, s, s, 3); ctx.fill();
-  // Grain lines
   ctx.strokeStyle = 'rgba(90,60,30,0.15)';
   ctx.lineWidth = 1;
-  for (let i = 0; i < 3; i++) {
-    const gx = x + s * (0.2 + i * 0.3) + (Math.random()-0.5)*5;
+  const key = row + ',' + col;
+  const lines = woodGrainCache[key] || [];
+  for (let i = 0; i < lines.length; i++) {
+    const gx = x + s * (0.2 + i * 0.3) + lines[i].offset;
     ctx.beginPath();
     ctx.moveTo(gx, y+2);
-    ctx.lineTo(gx + (Math.random()-0.5)*8, y+s-2);
+    ctx.lineTo(gx + lines[i].skew, y+s-2);
     ctx.stroke();
   }
 }
@@ -926,7 +967,8 @@ function drawBoard() {
         ctx.fillRect(x, y, s, s);
         continue;
       }
-      drawWoodBg(x, y, s);
+      drawWoodBg(x, y, s, r, c);
+      if (moveAnim && moveAnim.toRow === r && moveAnim.toCol === c) continue;
       if (p.flipped) {
         drawPieceAt(x, y, s, p);
       } else {
@@ -1059,12 +1101,12 @@ function drawTopBar() {
     ctx.font = 'bold ' + Math.floor(bh*0.3) + 'px "Microsoft YaHei",sans-serif';
     ctx.fillText(turn === 'r' ? '红方' : '黑方', W/2, bh/2);
 
-    // Timer
-    ctx.textAlign = 'right';
+    // Timer (placed left of black count to avoid overlap)
     const tm = Math.ceil(turnTimer);
     ctx.fillStyle = tm <= 10 ? '#ff4444' : '#aaa';
     ctx.font = Math.floor(bh*0.3) + 'px "Microsoft YaHei",sans-serif';
-    ctx.fillText('⏱ ' + tm + 's', W - bh*0.3 - 10, bh/2);
+    ctx.textAlign = 'right';
+    ctx.fillText('⏱ ' + tm + 's', W - 80, bh/2);
   }
 
   // Top bar bottom line
@@ -1176,10 +1218,8 @@ function drawMenu() {
 
   // Decorative circles
   ctx.fillStyle = 'rgba(200,100,50,0.03)';
-  for (let i = 0; i < 5; i++) {
-    const cx = W * (0.2 + Math.random() * 0.6);
-    const cy = H * (0.2 + Math.random() * 0.6);
-    ctx.beginPath(); ctx.arc(cx, cy, 40 + Math.random() * 80, 0, Math.PI*2); ctx.fill();
+  for (const mc of menuCircles) {
+    ctx.beginPath(); ctx.arc(mc.cx, mc.cy, mc.r, 0, Math.PI*2); ctx.fill();
   }
 
   // Title
@@ -1560,7 +1600,6 @@ function autoPlayerAction() {
     const pick = u[idx];
     if (pick) handleFlip(pick.row, pick.col);
   } else {
-    // No flips and no moves — check if game should end
     const myPieces = getFlippedPieces(turn);
     if (myPieces.length === 0) {
       const opp = turn === 'r' ? 'b' : 'r';
@@ -1568,6 +1607,18 @@ function autoPlayerAction() {
       msg = winner === 'r' ? '🎉 红方胜利！' : '🎉 黑方胜利！';
       msgTimer = 9999;
       endGame(opp);
+    } else {
+      let hasMove = false;
+      for (const fp of myPieces) {
+        if (getValidMoves(board, fp.row, fp.col).length > 0) { hasMove = true; break; }
+      }
+      if (!hasMove) {
+        const opp = turn === 'r' ? 'b' : 'r';
+        winner = opp;
+        msg = (turn === 'r' ? '红方' : '黑方') + '无棋可走，判负';
+        msgTimer = 9999;
+        endGame(opp);
+      }
     }
   }
 }
@@ -1636,7 +1687,6 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 }
 
 // ==================== Boot ====================
-initGame();
 loop();
 
 })();

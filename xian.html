@@ -155,7 +155,7 @@ const EVENTS = [
     condition:()=>true,
     text:'一个黑衣老头忽然出现在你面前，咧嘴一笑，露出一口黄牙。"小友，老夫这里有件好东西，保你满意。"',
     choices:[
-      { text:'买下（灵石-200）', effect:p=>{ if(p.spiritStone>=200){ p.spiritStone-=200; let r=Math.random(); if(r<0.3){ p.pills.push('培元丹'); addText('获得【培元丹】×3','success') } else if(r<0.6){ addText('是一块废铁……上当了。','danger') } else { p.cultivation+=200; addText('获得一块灵玉，修为+200','success') } } else { addText('灵石不够，老头嗤笑一声消失了。','danger') } }},
+      { text:'买下（灵石-200）', effect:p=>{ if(p.spiritStone>=200){ p.spiritStone-=200; let r=Math.random(); if(r<0.3){ for(let _i=0;_i<3;_i++) p.pills.push('培元丹'); addText('获得【培元丹】×3','success') } else if(r<0.6){ addText('是一块废铁……上当了。','danger') } else { p.cultivation+=200; addText('获得一块灵玉，修为+200','success') } } else { addText('灵石不够，老头嗤笑一声消失了。','danger') } }},
       { text:'先看看再说', effect:p=>{ if(p.spiritStone>=150){ p.spiritStone-=150; p.qiAffinity+=1; addText('买下一枚古玉，灵气亲和+1','success') } else { addText('灵石不够。','danger') } }},
       { text:'不感兴趣', effect:()=>{ addText('老头嘟囔着消失。无事发生。') } }
     ]
@@ -481,11 +481,12 @@ function showChoices(choices){
   choices.forEach(ch=>{
     const el=document.createElement('button');
     el.className='choice-btn';
-    el.textContent=ch.text;
+    el.innerHTML=ch.text+(ch.sub?' <span class="sub">'+ch.sub+'</span>':'');
+    var isEventChoice=(G.phase==='event');
     fastTap(el, function(){
       document.getElementById('choice-buttons').innerHTML='';
       ch.effect(G.player);
-      if(G.phase==='event') finishEvent();
+      if(isEventChoice && G.phase==='event') finishEvent();
     });
     c.appendChild(el);
   });
@@ -555,7 +556,7 @@ function checkEraTransition(p){
     addText('你踏入修仙界的黄金岁月，修炼效率大幅提升。','success');
     if(p.cultivation>=REALMS[p.realmIndex+1]?.cultivationReq * 1.5){
       let rate=0.3+p.qiAffinity*0.005;
-      if(Math.random()<rate){ advanceRealm(p); addText('瓶颈松动，顺势突破！','success') }
+      if(Math.random()<rate){ advanceRealm(p); if(G.phase==='ending') return; addText('瓶颈松动，顺势突破！','success') }
       else addText('瓶颈有所松动，但还差一些火候。','info');
     }
   }
@@ -620,7 +621,7 @@ function tryBreakthrough(){
   const next=REALMS[p.realmIndex+1];
   if(!next){ addText('你已达最高境界。'); return false; }
   if(p.cultivation<next.cultivationReq){ addText('修为不足。需要'+next.cultivationReq+'修为（当前'+Math.floor(p.cultivation)+'）','danger'); return false; }
-  if(next.pill && !p.pills.includes(next.pill) && next.pill){
+  if(next.pill && !p.pills.includes(next.pill)){
     addText('突破需要【'+next.pill+'】，你没有。','danger');
     return false;
   }
@@ -658,7 +659,7 @@ function actionCultivate(){
     endTurn(); return;
   }
   let base=10+p.qiAffinity*0.5;
-  let era=getEra(p.age);
+  let era=getEra(p.turn);
   let eff=p.cultivationEfficiency;
   if(p.skill==='引气诀') eff*=1.1;
   else if(p.skill==='青云诀') eff*=1.25;
@@ -773,7 +774,7 @@ function actionSeclusion(){
     addText('你结束了闭关。','info');
     p.inSeclusion=false;
     tryBreakthrough();
-    advanceMonth();
+    if(G.phase!=='ending') advanceMonth();
     return;
   }
   showChoices([
@@ -794,7 +795,7 @@ function actionSeclusion(){
 
 function actionBreakthrough(){
   tryBreakthrough();
-  advanceMonth();
+  if(G.phase!=='ending') advanceMonth();
 }
 
 // ============================================================
@@ -825,6 +826,7 @@ function advanceMonth(){
       if(next && p.cultivation>=next.cultivationReq){
         if(Math.random()<rate){
           advanceRealm(p);
+          if(G.phase==='ending') return;
         } else {
           addText('闭关突破失败……','danger');
           p.cultivation=Math.floor(p.cultivation*0.9);
@@ -835,6 +837,7 @@ function advanceMonth(){
     }
   }
   checkEraTransition(p);
+  if(G.phase==='ending') return;
   updateUI();
   if(p.lifespan<=0){
     triggerEnding('lifespan_end');
@@ -860,10 +863,11 @@ function advanceMonth(){
     addText('【第'+(eraIdx+1)*10+'年 · 时代大事件】','title');
     addText(ee.text);
     ee.effects.forEach(e=>addText(e,'info'));
-    if(eraIdx===0||eraIdx===1) p.cultivation+=300;
+    if(eraIdx===0) p.cultivation+=300;
+    else if(eraIdx===1){ p.cultivation+=300; p.spiritStone+=200; }
     else if(eraIdx===3||eraIdx===4) p.cultivation+=500;
     else if(eraIdx===6) p.spiritStone+=1000;
-    else if(eraIdx===8) p.cultivation+=5000;
+    else if(eraIdx===9) p.cultivation+=5000;
     updateUI();
   }
   // Random events
@@ -877,7 +881,7 @@ function advanceMonth(){
   if(next && p.cultivation>=next.cultivationReq && !p.inSeclusion && G.phase!=='event'){
     addText('你的修为已满，可以考虑突破了。','info');
     showChoices([
-      {text:'尝试突破', effect:()=>{ tryBreakthrough(); endTurn(); }},
+      {text:'尝试突破', effect:()=>{ tryBreakthrough(); if(G.phase!=='ending') endTurn(); }},
       {text:'再积累一段时间', effect:()=>{ endTurn(); }}
     ]);
     return;

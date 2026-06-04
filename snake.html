@@ -122,7 +122,7 @@ document.addEventListener('keydown',()=>initAudio(),{once:true});
 function load(cb){let n=0;SKINS.forEach(nm=>{let i=new Image();i.onload=()=>{sheets[nm]=i;n++;if(n>=SKINS.length)cb();};i.onerror=()=>{n++;if(n>=SKINS.length)cb();};i.src='assets/贪吃蛇大作战/BattleSnake/snakes/snakesSets/'+nm+'.png';});setTimeout(()=>{if(!loadOK)cb();},3000);}
 
 // ===== FOOD =====
-function sf(){let mx=cv.width/TS|0,my=cv.height/TS|0,x,y;do{x=Math.random()*mx|0;y=Math.random()*my|0;}while(sn.some(s=>s.x===x&&s.y===y));food={x,y};}
+function sf(){let mx=cv.width/TS|0,my=cv.height/TS|0,x,y;do{x=Math.random()*mx|0;y=Math.random()*my|0;}while(sn.some(s=>s.x===x&&s.y===y)||npcList.some(n=>n.body.some(s=>s.x===x&&s.y===y)));food={x,y};}
 
 // ===== ITEMS =====
 function spawnItem(){
@@ -133,7 +133,7 @@ function spawnItem(){
 	do{x=Math.random()*mx|0;y=Math.random()*my|0;}while(sn.some(s=>s.x===x&&s.y===y)||items.some(it=>it.x===x&&it.y===y)||(food.x===x&&food.y===y));
 	items.push({x,y,type});
 }
-let itemTimer=0;
+let lastItemTime=Date.now();
 
 function applyItem(type){
 	initAudio();
@@ -313,6 +313,7 @@ function updateNPCs(){
 
 	for(let npc of npcList){
 		if(!npc.alive)continue;
+		if(effects.freeze)continue;
 
 		// Chaos effect: reverse direction
 		let ndir=effects.chaos?{x:-npc.dir.x,y:-npc.dir.y}:npcAI(npc,mx,my);
@@ -417,7 +418,7 @@ function ig(lvl,m){
 	if(mt){clearInterval(mt);mt=null;}
 	rs();let cy2=cv.height/TS/2|0;sn=[];
 	for(let i=6;i>=0;i--)sn.push({x:wrap(3+i,cv.width/TS|0),y:cy2});
-	dir={x:1,y:0};nd={x:1,y:0};go=false;sc=0;items=[];itemTimer=0;
+	dir={x:1,y:0};nd={x:1,y:0};go=false;sc=0;items=[];lastItemTime=Date.now();
 	effects={};Object.keys(effectTimers).forEach(k=>{clearTimeout(effectTimers[k]);delete effectTimers[k];});
 	npcList=[];
 	document.getElementById('sc').textContent='0';
@@ -464,15 +465,21 @@ function tk(){
 	}
 
 	// Item spawn timer (~5s interval)
-	itemTimer++;if(itemTimer>=(150/spd)*5){itemTimer=0;spawnItem();}
+	if(Date.now()-lastItemTime>=5000){lastItemTime=Date.now();spawnItem();}
 
 	updateNPCs();
 
 	// Campaign win condition
-	if(mode==='campaign'&&sc>=CAMPAIGN_LEVELS[cLvl].target){
+	if(!go&&mode==='campaign'&&sc>=CAMPAIGN_LEVELS[cLvl].target){
 		go=true;if(mt){clearInterval(mt);mt=null;}
 		completeLevel(sc);rd();return;
 	}
+
+	// Magnet effect: attract food toward player
+	if(effects.magnet&&food.x!==void 0){let fdx=sn[0].x-food.x,fdy=sn[0].y-food.y,fDist=Math.abs(fdx)+Math.abs(fdy);if(fDist<=8&&fDist>0){if(Math.abs(fdx)>=Math.abs(fdy))food.x=wrap(food.x+Math.sign(fdx),mx);else food.y=wrap(food.y+Math.sign(fdy),my);}}
+
+	// Speed effect: extra movement step
+	if(effects.speed&&!go){let sh=sn[0],snx=wrap(sh.x+dir.x,mx),sny=wrap(sh.y+dir.y,my);if(!sn.slice(1).some(s=>s.x===snx&&s.y===sny)||effects.star){sn.unshift({x:snx,y:sny});if(snx===food.x&&sny===food.y){sc+=10;document.getElementById('sc').textContent=sc;sfxEat();sf();if(sc>hs){hs=sc;localStorage.setItem('snakeHS',String(hs));}}else sn.pop();checkNPCsCollision(mx,my);npcList=npcList.filter(n=>n.alive);}}
 
 	rd();
 }
@@ -573,7 +580,7 @@ function showMenu(){
 		'<button onclick="closeMsg();ig()">🎮 经典模式</button>'+
 		'<button onclick="closeMsg();showLevelSelect()">🏆 闯关模式</button>';
 	document.getElementById('msg').style.display='flex';}
-function selSkin(i){si=i;closeMsg();ig();}
+function selSkin(i){si=i;closeMsg();if(mode==='campaign')startLevel(cLvl);else ig();}
 
 // ===== CAMPAIGN (Phase 3) =====
 function showLevelSelect(){

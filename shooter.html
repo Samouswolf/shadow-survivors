@@ -21,7 +21,7 @@ html, body {
 canvas {
     display: block;
     background: #0a0a1a;
-    image-rendering: auto;
+    image-rendering: pixelated;
     max-width: 100vw;
     max-height: 100vh;
 }
@@ -258,6 +258,7 @@ const spritesheet = new Image();
 
 // --- Sound system (procedural Web Audio API) ---
 let audioCtx = null;
+let explosionBuffer = null;
 
 function getAudioContext() {
     if (!audioCtx) {
@@ -287,14 +288,16 @@ function playSound(type) {
                 break;
             }
             case 'explosion': {
-                const bufferSize = Math.floor(ctx.sampleRate * 0.3);
-                const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-                const data = buffer.getChannelData(0);
-                for (let i = 0; i < bufferSize; i++) {
-                    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 3);
+                if (!explosionBuffer) {
+                    const bufferSize = Math.floor(ctx.sampleRate * 0.3);
+                    explosionBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+                    const data = explosionBuffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 3);
+                    }
                 }
                 const noise = ctx.createBufferSource();
-                noise.buffer = buffer;
+                noise.buffer = explosionBuffer;
                 const gain = ctx.createGain();
                 gain.gain.setValueAtTime(0.12, ctx.currentTime);
                 gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
@@ -392,6 +395,8 @@ let game = {
     isMobile: false,
     touchX: W/2,
     touchY: H-150,
+    touchDirX: 0,
+    touchDirY: 0,
     touchActive: false,
     autoFire: false,
     fireTimer: 0,
@@ -401,6 +406,9 @@ let game = {
     shieldTimer: 0,
     invincibleTimer: 0,
     spawnTimer: 0,
+    speedPowerupTimer: 0,
+    pendingGameOver: false,
+    pendingGameOverTimer: 0,
 };
 
 // --- Sprite loading ---
@@ -495,12 +503,10 @@ function updatePlayer(dt) {
     if (game.keys['ArrowDown'] || game.keys['KeyS']) dy = 1;
 
     if (game.touchActive) {
-        const tx = game.touchX - W/2;
-        const ty = game.touchY - (H - 100);
-        const dist = Math.sqrt(tx*tx + ty*ty);
-        if (dist > 5) {
-            dx = tx / dist;
-            dy = ty / dist;
+        const dist = Math.sqrt(game.touchDirX * game.touchDirX + game.touchDirY * game.touchDirY);
+        if (dist > 0.1) {
+            dx = game.touchDirX / dist;
+            dy = game.touchDirY / dist;
         }
     }
 
@@ -541,6 +547,14 @@ function updatePlayer(dt) {
         game.comboTimer -= dt;
         if (game.comboTimer <= 0) {
             game.combo = 0;
+        }
+    }
+
+    // Speed powerup timer
+    if (game.speedPowerupTimer > 0) {
+        game.speedPowerupTimer -= dt;
+        if (game.speedPowerupTimer <= 0) {
+            p.speed = PLAYER_SPEED;
         }
     }
 
@@ -679,7 +693,7 @@ function updateEnemies(dt) {
         if (e.movePattern === 1) {
             e.x += Math.sin(e.time * 2) * 60 * dt;
         } else if (e.movePattern === 2) {
-            e.x += (Math.random() - 0.5) * 40 * dt;
+            e.x += (e.typeIdx % 2 === 0 ? 1 : -1) * 40 * dt;
         }
 
         e.x = Math.max(e.w/2, Math.min(W - e.w/2, e.x));
@@ -825,7 +839,7 @@ function updateBoss(boss, dt) {
                 w: type.w * SHIP_SCALE, h: type.h * SHIP_SCALE,
                 hp: 1, maxHp: 1,
                 speed: 100, score: 100,
-                sprite: 'spaceShips_002',
+                sprite: type.sprite,
                 typeIdx: 0,
                 fireRate: 0,
                 fireTimer: 0,
@@ -903,10 +917,8 @@ function collectPowerup(pu) {
             break;
         case 'speed':
             game.player.speed = PLAYER_SPEED * 1.5;
+            game.speedPowerupTimer = 5;
             showMessage('加速!', '#ffdd44');
-            setTimeout(() => {
-                if (game.player) game.player.speed = PLAYER_SPEED;
-            }, 5000);
             break;
         case 'bomb':
             game.bombs = Math.min(MAX_BOMBS, game.bombs + 1);
@@ -1023,11 +1035,13 @@ function detonateBomb() {
 
     for (const e of game.enemies) {
         if (e.alive) {
-            if (!e.isBoss) {
-                game.score += e.score;
-                spawnScorePopup(e.x, e.y - 20, e.score);
-            } else {
+            game.score += e.score;
+            spawnScorePopup(e.x, e.y - 20, e.score);
+            if (e.isBoss) {
                 game.bossActive = false;
+                for (let k = 0; k < 3; k++) {
+                    spawnPowerup(e.x + (Math.random() - 0.5) * 60, e.y);
+                }
             }
             spawnExplosion(e.x, e.y, e.isBoss ? 30 : 12, '#ff6644', '#ffaa00');
         }
@@ -1110,6 +1124,7 @@ function checkCollisions() {
 
     // Enemy bullets vs player
     if (game.invincibleTimer <= 0) {
+        let playerHitThisFrame = false;
         for (let bi = game.enemyBullets.length - 1; bi >= 0; bi--) {
             const b = game.enemyBullets[bi];
             if (rectCollide(
@@ -1118,26 +1133,29 @@ function checkCollisions() {
             )) {
                 game.enemyBullets.splice(bi, 1);
                 playerHit();
+                playerHitThisFrame = true;
                 break;
             }
         }
 
-        // Enemies vs player
-        for (const e of game.enemies) {
-            if (!e.alive) continue;
-            if (rectCollide(
-                { x: p.x, y: p.y, w: p.w - 10, h: p.h - 10 },
-                { x: e.x, y: e.y, w: e.w, h: e.h }
-            )) {
-                playerHit();
-                if (e.isBoss) break;
-                e.hp -= 3;
-                if (e.hp <= 0) {
-                    e.alive = false;
-                    game.score += e.score;
-                    spawnExplosion(e.x, e.y, 15, '#ff6644', '#ffaa00');
+        // Enemies vs player (skip if already hit this frame)
+        if (!playerHitThisFrame && game.invincibleTimer <= 0) {
+            for (const e of game.enemies) {
+                if (!e.alive) continue;
+                if (rectCollide(
+                    { x: p.x, y: p.y, w: p.w - 10, h: p.h - 10 },
+                    { x: e.x, y: e.y, w: e.w, h: e.h }
+                )) {
+                    playerHit();
+                    if (e.isBoss) break;
+                    e.hp -= 3;
+                    if (e.hp <= 0) {
+                        e.alive = false;
+                        game.score += e.score;
+                        spawnExplosion(e.x, e.y, 15, '#ff6644', '#ffaa00');
+                    }
+                    break;
                 }
-                break;
             }
         }
     }
@@ -1181,9 +1199,8 @@ function playerHit() {
     if (game.lives <= 0) {
         game.player.alive = false;
         spawnExplosion(game.player.x, game.player.y, 50, '#ff4400', '#ffdd00');
-        setTimeout(() => {
-            gameOver();
-        }, 1000);
+        game.pendingGameOver = true;
+        game.pendingGameOverTimer = 1.0;
     }
 }
 
@@ -1204,11 +1221,11 @@ function startWave() {
     game.enemiesRemaining = game.maxEnemiesPerWave;
     game.spawnTimer = 0.5;
 
+    const baseDifficulty = 1 + Math.floor(game.wave / 2);
     if (game.wave % BOSS_WAVE_INTERVAL === 1 && game.wave > 1) {
-        // Post-boss wave: fewer enemies but stronger
-        game.difficulty += 2;
+        game.difficulty = baseDifficulty + 2;
     } else {
-        game.difficulty = 1 + Math.floor(game.wave / 2);
+        game.difficulty = baseDifficulty;
     }
 
     showMessage('第 ' + game.wave + ' 波', '#88ccff');
@@ -1436,22 +1453,27 @@ function render() {
             ctx.globalAlpha = 1;
         }
 
-        // Bullets
-        for (const b of game.bullets) {
+        // Bullets (batched shadow)
+        if (game.bullets.length > 0) {
             ctx.fillStyle = '#44ddff';
             ctx.shadowColor = '#44ddff';
             ctx.shadowBlur = 8;
-            ctx.fillRect(b.x - 2, b.y - b.h/2, 4, b.h);
+            for (const b of game.bullets) {
+                ctx.fillRect(b.x - 2, b.y - b.h/2, 4, b.h);
+            }
             ctx.shadowBlur = 0;
         }
 
-        // Enemy bullets
-        for (const b of game.enemyBullets) {
+        // Enemy bullets (batched shadow)
+        if (game.enemyBullets.length > 0) {
             ctx.fillStyle = '#ff4444';
             ctx.shadowColor = '#ff4444';
             ctx.shadowBlur = 8;
             ctx.beginPath();
-            ctx.arc(b.x, b.y, b.w/2, 0, Math.PI * 2);
+            for (const b of game.enemyBullets) {
+                ctx.moveTo(b.x + b.w/2, b.y);
+                ctx.arc(b.x, b.y, b.w/2, 0, Math.PI * 2);
+            }
             ctx.fill();
             ctx.shadowBlur = 0;
         }
@@ -1526,12 +1548,8 @@ function setupTouch() {
                 const knobY = Math.sin(angle) * clampedDist;
                 knob.style.transform = 'translate(-50%,-50%) translate(' + knobX + 'px,' + knobY + 'px)';
 
-                // Map to game coordinates
-                const vpRect = canvas.getBoundingClientRect();
-                const scaleX = W / vpRect.width;
-                const scaleY = H / vpRect.height;
-                game.touchX = (t.clientX - vpRect.left) * scaleX;
-                game.touchY = (t.clientY - vpRect.top) * scaleY;
+                game.touchDirX = dx / maxDist;
+                game.touchDirY = dy / maxDist;
                 game.touchActive = true;
             }
         }
@@ -1542,6 +1560,8 @@ function setupTouch() {
                 joyId = null;
                 knob.style.transform = 'translate(-50%,-50%) translate(0,0)';
                 game.touchActive = false;
+                game.touchDirX = 0;
+                game.touchDirY = 0;
             }
         }
     });
@@ -1549,6 +1569,8 @@ function setupTouch() {
         joyId = null;
         knob.style.transform = 'translate(-50%,-50%) translate(0,0)';
         game.touchActive = false;
+        game.touchDirX = 0;
+        game.touchDirY = 0;
     });
 
     // Fire button as touch area
@@ -1657,6 +1679,11 @@ function startGame() {
     game.bossWarningShown = false;
     game.screenShake = 0;
     game.waveTimer = 0;
+    game.speedPowerupTimer = 0;
+    game.pendingGameOver = false;
+    game.pendingGameOverTimer = 0;
+    game.touchDirX = 0;
+    game.touchDirY = 0;
     game.enemies = [];
     game.bullets = [];
     game.enemyBullets = [];
@@ -1731,6 +1758,15 @@ function gameLoop(timestamp) {
         updateScreenShake(dt);
         if (game.screenFlash > 0) game.screenFlash -= dt * 3;
         checkCollisions();
+
+        // Pending game-over timer
+        if (game.pendingGameOver) {
+            game.pendingGameOverTimer -= dt;
+            if (game.pendingGameOverTimer <= 0) {
+                game.pendingGameOver = false;
+                gameOver();
+            }
+        }
     } else if (game.state === 'paused') {
         // Still render when paused
     }
