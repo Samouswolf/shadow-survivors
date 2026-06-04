@@ -27,7 +27,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#0a0a12;font-family:
 #cultivation-bar-label{position:absolute;top:-14px;right:0;font-size:10px;color:#888;pointer-events:none}
 
 /* Text output area */
-#output-wrap{position:relative;z-index:1;flex:1;overflow:hidden;margin:4px 8px;border-radius:6px;background:rgba(0,0,0,0.6);border:1px solid rgba(212,175,55,0.15)}
+#output-wrap{position:relative;z-index:1;flex:1;overflow:hidden;margin:4px 8px;border-radius:6px;background:rgba(0,0,0,0.6);border:1px solid rgba(212,175,55,0.15);touch-action:pan-y}
 #output-scroll{height:100%;overflow-y:auto;padding:12px 14px;scroll-behavior:smooth}
 #output-scroll::-webkit-scrollbar{width:4px}
 #output-scroll::-webkit-scrollbar-thumb{background:rgba(212,175,55,0.3);border-radius:2px}
@@ -445,6 +445,19 @@ function addText(text, cls=''){
   outputEl.scrollTop=outputEl.scrollHeight;
 }
 
+function fastTap(element, handler){
+  let tapped = false;
+  element.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    tapped = true;
+    handler.call(this, e);
+  }, { passive: false });
+  element.addEventListener('click', function(e){
+    if(tapped){ tapped = false; return; }
+    handler.call(this, e);
+  });
+}
+
 function showActions(btns){
   const c=document.getElementById('action-buttons');
   c.innerHTML='';
@@ -454,8 +467,8 @@ function showActions(btns){
     const el=document.createElement('button');
     el.className='action-btn';
     el.innerHTML=b.text+(b.sub?' <span class="sub">'+b.sub+'</span>':'');
-    el.onclick=b.onclick;
-    if(b.disabled){ el.disabled=true }
+    if(b.disabled){ el.disabled=true; el.onclick=b.onclick; }
+    else { fastTap(el, b.onclick); }
     c.appendChild(el);
   });
 }
@@ -469,11 +482,11 @@ function showChoices(choices){
     const el=document.createElement('button');
     el.className='choice-btn';
     el.textContent=ch.text;
-    el.onclick=()=>{
+    fastTap(el, function(){
       document.getElementById('choice-buttons').innerHTML='';
       ch.effect(G.player);
       if(G.phase==='event') finishEvent();
-    };
+    });
     c.appendChild(el);
   });
 }
@@ -1017,7 +1030,7 @@ function triggerEnding(type){
   el.className='action-btn';
   el.textContent='重新开始';
   el.style.cssText='flex:1;padding:14px;font-size:16px;background:linear-gradient(135deg,rgba(212,175,55,0.3),rgba(180,140,40,0.3));border-color:#d4af37;color:#d4af37';
-  el.onclick=()=>{ initGame(); };
+  fastTap(el, function(){ initGame(); });
   btns.appendChild(el);
   document.getElementById('choice-buttons').innerHTML='';
   document.getElementById('event-overlay').style.display='none';
@@ -1255,10 +1268,9 @@ function animateCanvas(time){
     swipeIndicator.textContent = text;
     swipeIndicator.style.opacity = '1';
     if(indicatorTimer) clearTimeout(indicatorTimer);
-    indicatorTimer = setTimeout(()=>{ swipeIndicator.style.opacity = '0' }, 600);
+    indicatorTimer = setTimeout(function(){ swipeIndicator.style.opacity = '0' }, 600);
   }
 
-  // Build page index from textLines for page-turning
   function buildPages(){
     const PAGE_LINES = 12;
     outputPages = [];
@@ -1280,7 +1292,7 @@ function animateCanvas(time){
     }
   }
 
-  // Gesture on the output area for swipe page-turn
+  // Swipe on the output area for page-turn
   const outputWrap = document.getElementById('output-wrap');
   outputWrap.addEventListener('touchstart', function(e){
     const touch = e.touches[0];
@@ -1309,19 +1321,15 @@ function animateCanvas(time){
 
   outputWrap.addEventListener('touchend', function(e){
     const dx = touchCurrentX - touchStartX;
-    const dy = touchCurrentY - touchStartY;
     const elapsed = Date.now() - touchStartTime;
     const velocity = Math.abs(dx) / elapsed;
 
     if(isSwiping && Math.abs(dx) > SWIPE_THRESHOLD && velocity > SWIPE_VELOCITY_THRESHOLD){
+      buildPages();
       if(dx < 0){
-        // Swipe left → scroll to top (oldest)
-        buildPages();
         scrollToPage(0);
         showSwipeIndicator('left', '翻至最早');
       } else {
-        // Swipe right → scroll to bottom (newest)
-        buildPages();
         scrollToPage(outputPages.length - 1);
         showSwipeIndicator('right', '翻至最新');
       }
@@ -1330,122 +1338,50 @@ function animateCanvas(time){
     swipeDirection = null;
   }, { passive: true });
 
-  // Swipe on the whole game container for navigation hints
+  // Swipe on game container (non-output areas) for navigation
   const container = document.getElementById('game-container');
-  let containerTouchStartX = 0, containerTouchStartY = 0;
-  let containerSwiping = false, containerSwipeDir = null;
+  let cStartX = 0, cStartY = 0;
+  let cSwiping = false, cDir = null;
 
   container.addEventListener('touchstart', function(e){
     if(e.target.closest('#output-wrap')) return;
     const touch = e.touches[0];
-    containerTouchStartX = touch.clientX;
-    containerTouchStartY = touch.clientY;
-    containerSwiping = false;
-    containerSwipeDir = null;
+    cStartX = touch.clientX;
+    cStartY = touch.clientY;
+    cSwiping = false;
+    cDir = null;
   }, { passive: true });
 
   container.addEventListener('touchmove', function(e){
     if(e.target.closest('#output-wrap')) return;
     const touch = e.touches[0];
-    const dx = touch.clientX - containerTouchStartX;
-    const dy = touch.clientY - containerTouchStartY;
-    if(!containerSwipeDir && (Math.abs(dx) > 15 || Math.abs(dy) > 15)){
-      containerSwipeDir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+    const dx = touch.clientX - cStartX;
+    const dy = touch.clientY - cStartY;
+    if(!cDir && (Math.abs(dx) > 15 || Math.abs(dy) > 15)){
+      cDir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
     }
-    if(containerSwipeDir === 'h' && Math.abs(dx) > SWIPE_THRESHOLD){
-      containerSwiping = true;
+    if(cDir === 'h' && Math.abs(dx) > SWIPE_THRESHOLD){
+      cSwiping = true;
     }
   }, { passive: true });
 
   container.addEventListener('touchend', function(e){
     if(e.target.closest('#output-wrap')) return;
-    const touch = e.changedTouches[0];
-    const dx = touch.clientX - containerTouchStartX;
-    if(containerSwiping && Math.abs(dx) > SWIPE_THRESHOLD){
-      // On the action area, swipe triggers the first/last action button as navigation hint
-      const buttons = document.querySelectorAll('.action-btn:not(:disabled)');
-      if(buttons.length > 0){
-        if(dx < 0 && buttons.length >= 2){
-          showSwipeIndicator('left', '');
-        } else if(dx > 0 && buttons.length >= 2){
-          showSwipeIndicator('right', '');
-        }
+    if(cSwiping){
+      buildPages();
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - cStartX;
+      if(dx < 0){
+        scrollToPage(0);
+        showSwipeIndicator('left', '翻至最早');
+      } else {
+        scrollToPage(outputPages.length - 1);
+        showSwipeIndicator('right', '翻至最新');
       }
     }
-    containerSwiping = false;
-    containerSwipeDir = null;
+    cSwiping = false;
+    cDir = null;
   }, { passive: true });
-
-  // Fast-tap system: attach touchstart to all dynamically created buttons
-  function attachFastTap(element, handler){
-    let tapHandled = false;
-    element.addEventListener('touchstart', function(e){
-      e.preventDefault();
-      tapHandled = true;
-      handler.call(this, e);
-    }, { passive: false });
-    element.addEventListener('click', function(e){
-      if(tapHandled){ tapHandled = false; return; }
-      handler.call(this, e);
-    });
-  }
-
-  // Monkey-patch showActions to use fast-tap
-  const originalShowActions = window.showActions;
-  window.showActions = function(btns){
-    const c=document.getElementById('action-buttons');
-    c.innerHTML='';
-    document.getElementById('choice-buttons').innerHTML='';
-    document.getElementById('event-overlay').style.display='none';
-    btns.forEach(b=>{
-      const el=document.createElement('button');
-      el.className='action-btn';
-      el.innerHTML=b.text+(b.sub?' <span class="sub">'+b.sub+'</span>':'');
-      if(b.disabled){ el.disabled=true; el.onclick=b.onclick; }
-      else { attachFastTap(el, b.onclick); }
-      c.appendChild(el);
-    });
-    buildPages();
-  };
-
-  // Monkey-patch showChoices to use fast-tap
-  const originalShowChoices = window.showChoices;
-  window.showChoices = function(choices){
-    const c=document.getElementById('choice-buttons');
-    c.innerHTML='';
-    document.getElementById('action-buttons').innerHTML='';
-    document.getElementById('event-overlay').style.display='none';
-    choices.forEach(ch=>{
-      const el=document.createElement('button');
-      el.className='choice-btn';
-      el.textContent=ch.text;
-      attachFastTap(el, ()=>{
-        document.getElementById('choice-buttons').innerHTML='';
-        ch.effect(G.player);
-        if(G.phase==='event') finishEvent();
-      });
-      c.appendChild(el);
-    });
-    buildPages();
-  };
-
-  // Monkey-patch addText to auto-scroll and rebuild pages
-  const originalAddText = window.addText;
-  window.addText = function(text, cls){
-    const d=document.createElement('div');
-    d.className='text-line'+(cls?'':'');
-    if(cls) d.innerHTML='<span class="'+cls+'">'+text+'</span>';
-    else d.textContent=text;
-    outputEl.appendChild(d);
-    textLines.push({text,cls});
-    // Auto-scroll to bottom on new text
-    requestAnimationFrame(()=>{ outputEl.scrollTop=outputEl.scrollHeight; });
-    buildPages();
-    currentPage = outputPages.length - 1;
-  };
-
-  // Expose buildPages for manual calls
-  window.rebuildPages = buildPages;
 })();
 
 // ============================================================

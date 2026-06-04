@@ -6,12 +6,42 @@
 <title>火柴人格斗</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#0a0a12;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:'Microsoft YaHei',Arial,sans-serif;touch-action:none;user-select:none}
+html,body{width:100%;height:100%;background:#0a0a12;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:'Microsoft YaHei',Arial,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
 canvas{display:block;max-width:100vw;max-height:100vh}
+#touch-controls{position:absolute;bottom:0;left:0;width:100%;height:45%;display:none;pointer-events:none;z-index:10}
+.touch-panel{position:absolute;bottom:8px;display:grid;grid-template-columns:repeat(2,1fr);gap:6px;pointer-events:none}
+.touch-panel.p1{left:8px}
+.touch-panel.p2{right:8px}
+.tbtn{pointer-events:auto;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:rgba(255,255,255,0.85);border-radius:10px;min-width:54px;min-height:54px;-webkit-tap-highlight-color:transparent}
+.tbtn:active{transform:scale(0.9)}
+.tbtn.dir{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2)}
+.tbtn.atk{border:1px solid rgba(255,255,255,0.15)}
+.tbtn.punch{background:rgba(255,200,50,0.25)}
+.tbtn.kick{background:rgba(50,200,255,0.25)}
+.tbtn.block{background:rgba(100,255,100,0.2)}
+.tbtn.special{background:rgba(255,50,50,0.3)}
 </style>
 </head>
 <body>
 <canvas id="gc"></canvas>
+<div id="touch-controls">
+  <div class="touch-panel p1">
+    <div class="tbtn dir" data-player="1" data-action="left">&larr;</div>
+    <div class="tbtn dir" data-player="1" data-action="right">&rarr;</div>
+    <div class="tbtn block" data-player="1" data-action="block">挡</div>
+    <div class="tbtn punch" data-player="1" data-action="punch">拳</div>
+    <div class="tbtn kick" data-player="1" data-action="kick">踢</div>
+    <div class="tbtn special" data-player="1" data-action="special">必</div>
+  </div>
+  <div class="touch-panel p2">
+    <div class="tbtn dir" data-player="2" data-action="left">&larr;</div>
+    <div class="tbtn dir" data-player="2" data-action="right">&rarr;</div>
+    <div class="tbtn block" data-player="2" data-action="block">挡</div>
+    <div class="tbtn punch" data-player="2" data-action="punch">拳</div>
+    <div class="tbtn kick" data-player="2" data-action="kick">踢</div>
+    <div class="tbtn special" data-player="2" data-action="special">必</div>
+  </div>
+</div>
 <script>
 (function(){
 'use strict';
@@ -26,6 +56,58 @@ window.addEventListener('resize',resize);resize();
 const keys={};
 window.addEventListener('keydown',e=>{keys[e.code]=true;e.preventDefault();});
 window.addEventListener('keyup',e=>{keys[e.code]=false;});
+
+// ---- Touch Controls ----
+const touchKeyMap={
+  '1':{left:'KeyA',right:'KeyD',punch:'KeyF',kick:'KeyG',block:'KeyS',special:'KeyH'},
+  '2':{left:'ArrowLeft',right:'ArrowRight',punch:'KeyJ',kick:'KeyK',block:'ArrowDown',special:'KeyL'}
+};
+const isTouchDevice='ontouchstart'in window||navigator.maxTouchPoints>0;
+if(isTouchDevice){
+  document.getElementById('touch-controls').style.display='block';
+  const activeTouches=new Map();
+  function handleTouch(e,down){
+    e.preventDefault();
+    if(down&&(gameState==='title')){startFight();return;}
+    if(down&&(gameState==='ko')){initGame();return;}
+    for(let i=0;i<e.changedTouches.length;i++){
+      const t=e.changedTouches[i];
+      if(down){
+        const el=document.elementFromPoint(t.clientX,t.clientY);
+        if(!el||!el.dataset.action)continue;
+        const player=el.dataset.player;
+        const action=el.dataset.action;
+        const code=touchKeyMap[player][action];
+        if(code){keys[code]=true;activeTouches.set(t.identifier,{code,el});}
+      }else{
+        const info=activeTouches.get(t.identifier);
+        if(info){keys[info.code]=false;activeTouches.delete(t.identifier);}
+      }
+    }
+  }
+  const tc=document.getElementById('touch-controls');
+  tc.addEventListener('touchstart',e=>handleTouch(e,true),{passive:false});
+  tc.addEventListener('touchend',e=>handleTouch(e,false),{passive:false});
+  tc.addEventListener('touchcancel',e=>handleTouch(e,false),{passive:false});
+  window.addEventListener('touchend',e=>{
+    for(let i=0;i<e.changedTouches.length;i++){
+      const info=activeTouches.get(e.changedTouches[i].identifier);
+      if(info){keys[info.code]=false;activeTouches.delete(e.changedTouches[i].identifier);}
+    }
+  },{passive:false});
+  window.addEventListener('touchcancel',e=>{
+    for(let i=0;i<e.changedTouches.length;i++){
+      const info=activeTouches.get(e.changedTouches[i].identifier);
+      if(info){keys[info.code]=false;activeTouches.delete(e.changedTouches[i].identifier);}
+    }
+  },{passive:false});
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){
+      activeTouches.forEach(info=>{keys[info.code]=false;});
+      activeTouches.clear();
+    }
+  });
+}
 
 // ---- Fighter System ----
 const GROUND_Y=420;
@@ -369,10 +451,14 @@ function drawTitle(){
   ctx.font='16px "Microsoft YaHei",Arial';
   ctx.fillText('P1: A/D 移动 · F拳 · G踢 · S格挡 · H必杀',W/2,220);
   ctx.fillText('P2: ←→ 移动 · J拳 · K踢 · ↓格挡 · L必杀',W/2,250);
+  if(isTouchDevice){
+    ctx.fillStyle='#aaa';ctx.font='14px Arial';
+    ctx.fillText('触屏：底部虚拟按键操作',W/2,280);
+  }
   ctx.fillStyle='#aaa';ctx.font='14px Arial';
-  ctx.fillText('三局两胜 · 拳击手 vs 忍者',W/2,300);
+  ctx.fillText('三局两胜 · 拳击手 vs 忍者',W/2,310);
   ctx.fillStyle='#ffd700';ctx.font='bold 22px Arial';
-  ctx.fillText('按 空格/Enter 或 点击 开始',W/2,370);
+  ctx.fillText('按 空格/Enter 或 点击 开始',W/2,380);
 
   // Demo fighters
   const t=Date.now()/500;
