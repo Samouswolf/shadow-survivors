@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>叠叠乐</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    background: #0a0a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+#gameCanvas {
+    background: #0f0f2a;
+    border: 2px solid #1a1a3a;
+    border-radius: 10px;
+    image-rendering: pixelated;
+}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ============ 画布尺寸 ============
+const BASE_WIDTH = 400;
+const BASE_HEIGHT = 700;
+canvas.width = BASE_WIDTH;
+canvas.height = BASE_HEIGHT;
+
+// ============ 游戏状态 ============
+const STATE = { MENU: 0, PLAYING: 1, GAME_OVER: 2 };
+
+// ============ 配置常量 ============
+const BLOCK_HEIGHT = 30;
+const PERFECT_THRESHOLD = 5;   // 像素误差内算完美
+const INITIAL_SPEED = 1.5;
+const SPEED_INCREMENT = 0.15;  // 每层速度增量
+const MAX_SPEED = 6;
+const BASE_BLOCK_WIDTH = 200;
+const GROUND_Y = BASE_HEIGHT - 60;
+
+// 色彩渐变（从底部到顶部）
+const COLORS = [
+    '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c',
+    '#3498db', '#9b59b6', '#e91e63', '#00bcd4', '#8bc34a',
+    '#ff5722', '#795548', '#607d8b', '#ff9800', '#4caf50'
+];
+
+// ============ 游戏变量 ============
+let gameState = STATE.MENU;
+let blocks = [];
+let currentBlock = null;
+let fallingFragments = [];
+let particles = [];
+let flashAlpha = 0;
+let cameraY = 0;
+let targetCameraY = 0;
+let score = 0;
+let highScore = parseInt(localStorage.getItem('stacker_highScore')) || 0;
+let comboCount = 0;  // 连续完美计数
+let shakeTimer = 0;
+let shakeIntensity = 0;
+
+// ============ 方块数据结构 ============
+function createBlock(x, y, width) {
+    return { x: x, y: y, width: width, height: BLOCK_HEIGHT };
+}
+
+function createMovingBlock(prevBlock) {
+    const w = prevBlock.width;
+    // 从左侧或右侧随机出发
+    const startLeft = Math.random() < 0.5;
+    const x = startLeft ? -w : BASE_WIDTH;
+    const y = prevBlock.y - BLOCK_HEIGHT;
+    const speed = Math.min(INITIAL_SPEED + (blocks.length) * SPEED_INCREMENT, MAX_SPEED);
+    return {
+        x: x,
+        y: y,
+        width: w,
+        height: BLOCK_HEIGHT,
+        speed: startLeft ? speed : -speed,
+        moving: true
+    };
+}
+
+// ============ 粒子系统 ============
+function spawnParticles(x, y, w, color, count) {
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            x: x + Math.random() * w,
+            y: y,
+            vx: (Math.random() - 0.5) * 4,
+            vy: -Math.random() * 3 - 1,
+            life: 1,
+            decay: 0.015 + Math.random() * 0.02,
+            size: 2 + Math.random() * 4,
+            color: color
+        });
+    }
+}
+
+function spawnPerfectParticles(x, y, w) {
+    for (let i = 0; i < 30; i++) {
+        particles.push({
+            x: x + Math.random() * w,
+            y: y,
+            vx: (Math.random() - 0.5) * 6,
+            vy: -Math.random() * 5 - 2,
+            life: 1,
+            decay: 0.01 + Math.random() * 0.015,
+            size: 3 + Math.random() * 5,
+            color: ['#ffd700', '#fff', '#ffec8b', '#ffa500'][Math.floor(Math.random() * 4)]
+        });
+    }
+}
+
+// ============ 掉落碎片 ============
+function spawnFragments(x, y, width, color) {
+    if (width <= 0) return;
+    fallingFragments.push({
+        x: x,
+        y: y,
+        width: width,
+        height: BLOCK_HEIGHT,
+        vy: 0,
+        color: color,
+        alpha: 1
+    });
+}
+
+// ============ 初始化游戏 ============
+function initGame() {
+    blocks = [];
+    currentBlock = null;
+    fallingFragments = [];
+    particles = [];
+    flashAlpha = 0;
+    cameraY = 0;
+    targetCameraY = 0;
+    score = 0;
+    comboCount = 0;
+    shakeTimer = 0;
+    shakeIntensity = 0;
+
+    // 地基方块
+    const baseX = (BASE_WIDTH - BASE_BLOCK_WIDTH) / 2;
+    blocks.push(createBlock(baseX, GROUND_Y, BASE_BLOCK_WIDTH));
+
+    // 第一个移动方块
+    currentBlock = createMovingBlock(blocks[0]);
+    currentBlock.x = (BASE_WIDTH - currentBlock.width) / 2; // 第一块居中静止
+    currentBlock.moving = false;
+}
+
+// ============ 放置方块 ============
+function placeBlock() {
+    if (!currentBlock || !currentBlock.moving) return;
+
+    const prev = blocks[blocks.length - 1];
+    const cur = currentBlock;
+
+    // 计算重叠区域
+    const overlapLeft = Math.max(cur.x, prev.x);
+    const overlapRight = Math.min(cur.x + cur.width, prev.x + prev.width);
+    const overlapWidth = overlapRight - overlapLeft;
+
+    if (overlapWidth <= 0) {
+        // 完全偏离 — 游戏结束
+        gameOver();
+        return;
+    }
+
+    // 检查是否完美对齐
+    const offset = Math.abs(cur.x - prev.x);
+    const isPerfect = offset <= PERFECT_THRESHOLD;
+
+    if (isPerfect) {
+        // 完美对齐：保持与下方相同宽度，不裁剪
+        comboCount++;
+        const perfectBlock = createBlock(prev.x, cur.y, prev.width);
+        blocks.push(perfectBlock);
+
+        // 完美加分：基础分 + 连击奖励
+        const bonus = comboCount >= 3 ? comboCount * 2 : 1;
+        score += bonus;
+
+        // 特效
+        flashAlpha = 1;
+        spawnPerfectParticles(perfectBlock.x, perfectBlock.y, perfectBlock.width);
+        shakeTimer = 8;
+        shakeIntensity = 3;
+    } else {
+        // 非完美：裁剪
+        comboCount = 0;
+        const placedBlock = createBlock(overlapLeft, cur.y, overlapWidth);
+        blocks.push(placedBlock);
+        score++;
+
+        // 掉落碎片
+        if (cur.x < prev.x) {
+            // 左侧突出部分掉落
+            spawnFragments(cur.x, cur.y, overlapLeft - cur.x, getColor(blocks.length - 1));
+        } else if (cur.x + cur.width > prev.x + prev.width) {
+            // 右侧突出部分掉落
+            spawnFragments(overlapRight, cur.y, (cur.x + cur.width) - overlapRight, getColor(blocks.length - 1));
+        }
+
+        // 普通粒子
+        spawnParticles(overlapLeft, cur.y, overlapWidth, getColor(blocks.length - 1), 8);
+        shakeTimer = 4;
+        shakeIntensity = 1.5;
+    }
+
+    // 相机跟随
+    if (blocks[blocks.length - 1].y - cameraY < BASE_HEIGHT * 0.4) {
+        targetCameraY = blocks[blocks.length - 1].y - BASE_HEIGHT * 0.4;
+    }
+
+    // 检查剩余宽度是否太小
+    const lastBlock = blocks[blocks.length - 1];
+    if (lastBlock.width < 5) {
+        gameOver();
+        return;
+    }
+
+    // 生成下一个移动方块
+    currentBlock = createMovingBlock(lastBlock);
+}
+
+// ============ 游戏结束 ============
+function gameOver() {
+    gameState = STATE.GAME_OVER;
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('stacker_highScore', highScore);
+    }
+    // 掉落当前移动方块
+    if (currentBlock && currentBlock.moving) {
+        spawnFragments(currentBlock.x, currentBlock.y, currentBlock.width, getColor(blocks.length));
+    }
+    currentBlock = null;
+}
+
+// ============ 获取颜色 ============
+function getColor(index) {
+    return COLORS[index % COLORS.length];
+}
+
+// ============ 更新逻辑 ============
+function update() {
+    // 相机平滑跟随
+    cameraY += (targetCameraY - cameraY) * 0.08;
+
+    // 屏幕震动
+    if (shakeTimer > 0) shakeTimer--;
+
+    // 闪光衰减
+    if (flashAlpha > 0) flashAlpha -= 0.04;
+
+    if (gameState !== STATE.PLAYING) return;
+
+    // 移动方块
+    if (currentBlock && currentBlock.moving) {
+        currentBlock.x += currentBlock.speed;
+        // 边界反弹
+        if (currentBlock.x + currentBlock.width > BASE_WIDTH) {
+            currentBlock.x = BASE_WIDTH - currentBlock.width;
+            currentBlock.speed = -Math.abs(currentBlock.speed);
+        } else if (currentBlock.x < 0) {
+            currentBlock.x = 0;
+            currentBlock.speed = Math.abs(currentBlock.speed);
+        }
+    }
+
+    // 更新碎片
+    for (let i = fallingFragments.length - 1; i >= 0; i--) {
+        const f = fallingFragments[i];
+        f.vy += 0.3;
+        f.y += f.vy;
+        f.alpha -= 0.01;
+        if (f.alpha <= 0 || f.y > BASE_HEIGHT - cameraY + 200) {
+            fallingFragments.splice(i, 1);
+        }
+    }
+
+    // 更新粒子
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.08;
+        p.life -= p.decay;
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+}
+
+// ============ 渲染 ============
+function render() {
+    ctx.clearRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    // 背景渐变
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, BASE_HEIGHT);
+    bgGrad.addColorStop(0, '#0a0a2e');
+    bgGrad.addColorStop(1, '#1a0a2e');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    // 屏幕震动偏移
+    let shakeX = 0, shakeY = 0;
+    if (shakeTimer > 0) {
+        shakeX = (Math.random() - 0.5) * shakeIntensity;
+        shakeY = (Math.random() - 0.5) * shakeIntensity;
+    }
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY - cameraY);
+
+    // 绘制背景网格线（辅助视觉参照）
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    const gridStart = Math.floor(cameraY / 50) * 50;
+    for (let gy = gridStart; gy < cameraY + BASE_HEIGHT + 50; gy += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, gy);
+        ctx.lineTo(BASE_WIDTH, gy);
+        ctx.stroke();
+    }
+
+    // 绘制地基装饰
+    ctx.fillStyle = '#2a2a4a';
+    ctx.fillRect(0, GROUND_Y + BLOCK_HEIGHT, BASE_WIDTH, 200);
+
+    // 绘制已放置的方块
+    for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        drawBlock(b.x, b.y, b.width, b.height, getColor(i), 1);
+    }
+
+    // 绘制当前移动方块
+    if (currentBlock) {
+        const bobY = currentBlock.moving ? Math.sin(Date.now() * 0.005) * 1.5 : 0;
+        drawBlock(currentBlock.x, currentBlock.y + bobY, currentBlock.width, currentBlock.height, getColor(blocks.length), 0.9);
+    }
+
+    // 绘制掉落碎片
+    for (const f of fallingFragments) {
+        ctx.globalAlpha = f.alpha;
+        drawBlock(f.x, f.y, f.width, f.height, f.color, 1);
+        ctx.globalAlpha = 1;
+    }
+
+    // 绘制粒子
+    for (const p of particles) {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+
+    // 完美闪光效果
+    if (flashAlpha > 0) {
+        ctx.fillStyle = `rgba(255, 215, 0, ${flashAlpha * 0.3})`;
+        ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+    }
+
+    // HUD
+    drawHUD();
+}
+
+function drawBlock(x, y, w, h, color, alpha) {
+    ctx.globalAlpha = alpha;
+    // 主体
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    // 高光
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(x, y, w, h / 3);
+    // 阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(x, y + h * 0.7, w, h * 0.3);
+    // 边框
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+    ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+    // 顶部半透明条
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, BASE_WIDTH, 50);
+
+    // 高度（层数）
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('高度: ' + score, 16, 33);
+
+    // 最高记录
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffd700';
+    ctx.font = '16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('最高: ' + highScore, BASE_WIDTH - 16, 30);
+
+    // 连击显示
+    if (comboCount >= 2) {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('连击 x' + comboCount + '!', BASE_WIDTH / 2, 30);
+    }
+
+    // 游戏结束画面
+    if (gameState === STATE.GAME_OVER) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#e74c3c';
+        ctx.font = 'bold 36px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('游戏结束', BASE_WIDTH / 2, BASE_HEIGHT / 2 - 60);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('高度: ' + score, BASE_WIDTH / 2, BASE_HEIGHT / 2 - 10);
+
+        if (score >= highScore && score > 0) {
+            ctx.fillStyle = '#ffd700';
+            ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+            ctx.fillText('新纪录!', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 25);
+        }
+
+        ctx.fillStyle = '#aaa';
+        ctx.font = '16px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('点击/空格 重新开始', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 65);
+    }
+
+    // 菜单画面
+    if (gameState === STATE.MENU) {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#3498db';
+        ctx.font = 'bold 42px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('叠叠乐', BASE_WIDTH / 2, BASE_HEIGHT / 2 - 80);
+
+        ctx.fillStyle = '#ddd';
+        ctx.font = '18px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('精准堆叠方块，挑战极限高度', BASE_WIDTH / 2, BASE_HEIGHT / 2 - 35);
+
+        ctx.fillStyle = '#aaa';
+        ctx.font = '15px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('点击 / 空格键 放置方块', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 20);
+        ctx.fillText('完美对齐 = 不裁剪 + 加分', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 48);
+
+        if (highScore > 0) {
+            ctx.fillStyle = '#ffd700';
+            ctx.font = '16px "Segoe UI", Arial, sans-serif';
+            ctx.fillText('最高记录: ' + highScore, BASE_WIDTH / 2, BASE_HEIGHT / 2 + 90);
+        }
+
+        // 闪烁提示
+        const blink = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
+        ctx.fillStyle = `rgba(52, 152, 219, ${blink})`;
+        ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('点击开始', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 140);
+    }
+}
+
+// ============ 游戏循环 ============
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ============ 交互处理 ============
+function handleInput() {
+    if (gameState === STATE.MENU) {
+        gameState = STATE.PLAYING;
+        initGame();
+        return;
+    }
+    if (gameState === STATE.GAME_OVER) {
+        gameState = STATE.PLAYING;
+        initGame();
+        return;
+    }
+    if (gameState === STATE.PLAYING) {
+        placeBlock();
+    }
+}
+
+// 鼠标/触摸
+canvas.addEventListener('click', handleInput);
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    handleInput();
+}, { passive: false });
+
+// 键盘
+document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        handleInput();
+    }
+});
+
+// ============ 响应式画布 ============
+function resizeCanvas() {
+    const ratio = BASE_WIDTH / BASE_HEIGHT;
+    let w = window.innerWidth;
+    let h = window.innerHeight;
+    if (w / h > ratio) {
+        w = h * ratio;
+    } else {
+        h = w / ratio;
+    }
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============ 启动 ============
+gameLoop();
+</script>
+</body>
+</html>

@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>迷宫逃脱</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-user-select:none}
+body{background:#0a0a12;color:#ddd;font:14px 'Microsoft YaHei',sans-serif;overflow:hidden;width:100vw;height:100vh;display:flex;flex-direction:column}
+#hdr{display:flex;justify-content:space-between;align-items:center;padding:4px 10px;height:36px;flex-shrink:0;background:rgba(10,8,20,.8)}
+#hdr .t{color:#ffd700;font-weight:bold;font-size:14px;cursor:pointer}
+#hdr .r{color:#888;font-size:12px}#hdr .r span{color:#ffd700;font-weight:bold}
+canvas{display:block;width:100%;flex:1;background:#1a1a2a;image-rendering:pixelated;touch-action:none}
+#ftr{display:flex;justify-content:center;align-items:center;gap:8px;padding:4px 8px;height:36px;flex-shrink:0;background:rgba(10,8,20,.8)}
+#ftr button{padding:2px 12px;border:1px solid rgba(255,255,255,.08);border-radius:3px;background:rgba(255,255,255,.03);color:#888;cursor:pointer;font:11px sans-serif}
+#ftr button.on{border-color:#ffd700;color:#ffd700}
+#ftr .s{padding:0 4px;font-size:11px;color:#666}
+#msg{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;justify-content:center;align-items:center}
+#msg>div{background:rgba(15,10,30,.96);border:1px solid rgba(150,130,200,.25);border-radius:10px;padding:20px;text-align:center;max-width:380px;width:90%}
+#msg h2{color:#c49bff;font-size:16px;margin-bottom:8px}
+#msg p{color:#aaa;font-size:13px;line-height:1.6;margin-bottom:12px}
+#msg button{padding:8px 24px;border:1px solid rgba(255,215,0,.25);border-radius:6px;background:rgba(255,215,0,.08);color:#ffd700;cursor:pointer;font:14px 'Microsoft YaHei',sans-serif;margin:3px}
+#msg button:hover{background:rgba(255,215,0,.15)}
+#msg .item-info{display:grid;grid-template-columns:1fr 1fr;gap:4px;text-align:left;font-size:12px;color:#bbb;margin:8px 0}
+#msg .item-info div{padding:3px 6px;background:rgba(255,255,255,.03);border-radius:4px}
+@media(max-width:500px){#hdr .t{font-size:12px}#hdr .r{font-size:10px}}
+</style></head>
+<body>
+<div id="hdr"><span class="t" onclick="showMenu()">🏰 迷宫逃脱</span><span class="r">⭐ <span id="sc">0</span> | ⏱ <span id="tm">0:00</span> | 💡 <span id="hints">3</span> | 关卡 <span id="lvlShow">1</span></span></div>
+<canvas id="c"></canvas>
+<div id="ftr"><button onclick="showMenu()">⏸ 菜单</button><span class="s">方向键/WASD | H提示 | 滑动触屏</span></div>
+<div id="msg"><div id="msgC"></div></div>
+<script>
+// ===== CONSTANTS =====
+const LEVEL_CONFIGS = [
+    { name: '初入迷宫',   cols: 10, rows: 10, stars: 3,  hints: 5, fog: 2.5, desc: '熟悉迷宫的基本操作' },
+    { name: '渐入深处',   cols: 12, rows: 12, stars: 5,  hints: 4, fog: 2.0, desc: '迷宫变大了，星星更多' },
+    { name: '迷雾笼罩',   cols: 15, rows: 15, stars: 7,  hints: 3, fog: 1.5, desc: '视野缩小，小心迷路' },
+    { name: '复杂路径',   cols: 18, rows: 18, stars: 10, hints: 3, fog: 1.5, desc: '更大的迷宫，更多挑战' },
+    { name: '终极逃脱',   cols: 20, rows: 20, stars: 15, hints: 2, fog: 1.2, desc: '最终挑战，你能逃出去吗？' }
+];
+
+const WALL_COLOR = '#2a2a3a';
+const PATH_COLOR = '#0f0f1a';
+const PLAYER_COLOR = '#ffd700';
+const EXIT_COLOR = '#44ff88';
+const STAR_COLOR = '#ffdd00';
+const HINT_COLOR = 'rgba(100,200,255,0.3)';
+const FOG_COLOR = 'rgba(0,0,0,0.92)';
+const EXPLORED_COLOR = 'rgba(0,0,0,0.6)';
+const MINIMAP_BG = 'rgba(10,10,20,0.85)';
+const MINIMAP_WALL = '#3a3a4a';
+const MINIMAP_PATH = '#1a1a2a';
+const MINIMAP_PLAYER = '#ffd700';
+const MINIMAP_EXIT = '#44ff88';
+const MINIMAP_STAR = '#ffdd00';
+
+// ===== GAME STATE =====
+var G = {
+    state: 'menu', // menu, playing, paused, levelComplete, gameComplete
+    level: 0,
+    cols: 10,
+    rows: 10,
+    grid: [],       // 2D: 0=wall, 1=path
+    player: { x: 0, y: 0 },
+    exit: { x: 0, y: 0 },
+    stars: [],      // [{x,y, collected}]
+    starCount: 0,
+    collectedStars: 0,
+    totalStars: 0,
+    hints: 5,
+    maxHints: 5,
+    hintPath: [],   // current hint path cells
+    hintTimer: 0,
+    fogRadius: 2.5,
+    explored: [],   // 2D boolean
+    timer: 0,       // milliseconds
+    timerRunning: false,
+    bestTimes: [null, null, null, null, null],
+    moveCount: 0,
+    animFrame: 0,
+    lastTime: 0,
+    cellSize: 32,
+    offsetX: 0,
+    offsetY: 0,
+    touchStartX: 0,
+    touchStartY: 0,
+    touchMoved: false
+};
+
+// ===== MAZE GENERATION (DFS / Recursive Backtracker) =====
+function generateMaze(cols, rows) {
+    // Initialize grid: all walls
+    var grid = [];
+    for (var y = 0; y < rows * 2 + 1; y++) {
+        grid[y] = [];
+        for (var x = 0; x < cols * 2 + 1; x++) {
+            grid[y][x] = 0; // wall
+        }
+    }
+
+    // Carve cells using DFS
+    var visited = [];
+    for (var i = 0; i < rows; i++) {
+        visited[i] = [];
+        for (var j = 0; j < cols; j++) {
+            visited[i][j] = false;
+        }
+    }
+
+    var stack = [];
+    var startCellX = 0;
+    var startCellY = 0;
+    visited[startCellY][startCellX] = true;
+    grid[startCellY * 2 + 1][startCellX * 2 + 1] = 1; // carve start cell
+    stack.push({ x: startCellX, y: startCellY });
+
+    var directions = [
+        { dx: 0, dy: -1 }, // up
+        { dx: 1, dy: 0 },  // right
+        { dx: 0, dy: 1 },  // down
+        { dx: -1, dy: 0 }  // left
+    ];
+
+    while (stack.length > 0) {
+        var current = stack[stack.length - 1];
+        var neighbors = [];
+
+        for (var d = 0; d < 4; d++) {
+            var nx = current.x + directions[d].dx;
+            var ny = current.y + directions[d].dy;
+            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !visited[ny][nx]) {
+                neighbors.push({ x: nx, y: ny, dir: d });
+            }
+        }
+
+        if (neighbors.length > 0) {
+            // Pick random neighbor
+            var chosen = neighbors[Math.floor(Math.random() * neighbors.length)];
+            visited[chosen.y][chosen.x] = true;
+
+            // Carve the wall between current and chosen
+            var wallX = current.x * 2 + 1 + directions[chosen.dir].dx;
+            var wallY = current.y * 2 + 1 + directions[chosen.dir].dy;
+            grid[wallY][wallX] = 1; // carve wall
+            grid[chosen.y * 2 + 1][chosen.x * 2 + 1] = 1; // carve cell
+
+            stack.push({ x: chosen.x, y: chosen.y });
+        } else {
+            stack.pop(); // backtrack
+        }
+    }
+
+    return grid;
+}
+
+// ===== BFS SHORTEST PATH =====
+function findShortestPath(grid, startX, startY, endX, endY) {
+    var rows = grid.length;
+    var cols = grid[0].length;
+    var visited = [];
+    var parent = [];
+    for (var y = 0; y < rows; y++) {
+        visited[y] = [];
+        parent[y] = [];
+        for (var x = 0; x < cols; x++) {
+            visited[y][x] = false;
+            parent[y][x] = null;
+        }
+    }
+
+    var queue = [{ x: startX, y: startY }];
+    visited[startY][startX] = true;
+
+    var dirs = [
+        { dx: 0, dy: -1 },
+        { dx: 1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 }
+    ];
+
+    while (queue.length > 0) {
+        var cur = queue.shift();
+        if (cur.x === endX && cur.y === endY) {
+            // Reconstruct path
+            var path = [];
+            var node = { x: endX, y: endY };
+            while (node) {
+                path.unshift({ x: node.x, y: node.y });
+                node = parent[node.y][node.x];
+            }
+            return path;
+        }
+
+        for (var d = 0; d < 4; d++) {
+            var nx = cur.x + dirs[d].dx;
+            var ny = cur.y + dirs[d].dy;
+            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !visited[ny][nx] && grid[ny][nx] === 1) {
+                visited[ny][nx] = true;
+                parent[ny][nx] = { x: cur.x, y: cur.y };
+                queue.push({ x: nx, y: ny });
+            }
+        }
+    }
+
+    return []; // no path found
+}
+
+// ===== PLACE STARS =====
+function placeStars(grid, count, playerX, playerY, exitX, exitY) {
+    var pathCells = [];
+    var rows = grid.length;
+    var cols = grid[0].length;
+    for (var y = 0; y < rows; y++) {
+        for (var x = 0; x < cols; x++) {
+            if (grid[y][x] === 1 && !(x === playerX && y === playerY) && !(x === exitX && y === exitY)) {
+                pathCells.push({ x: x, y: y });
+            }
+        }
+    }
+
+    // Shuffle and pick
+    for (var i = pathCells.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = pathCells[i];
+        pathCells[i] = pathCells[j];
+        pathCells[j] = tmp;
+    }
+
+    var stars = [];
+    var actualCount = Math.min(count, pathCells.length);
+    for (var s = 0; s < actualCount; s++) {
+        stars.push({ x: pathCells[s].x, y: pathCells[s].y, collected: false, animPhase: Math.random() * Math.PI * 2 });
+    }
+    return stars;
+}
+
+// ===== INIT LEVEL =====
+function initLevel(levelIdx) {
+    var cfg = LEVEL_CONFIGS[levelIdx];
+    G.level = levelIdx;
+    G.cols = cfg.cols;
+    G.rows = cfg.rows;
+    G.fogRadius = cfg.fog;
+    G.hints = cfg.hints;
+    G.maxHints = cfg.hints;
+    G.collectedStars = 0;
+    G.moveCount = 0;
+    G.hintPath = [];
+    G.hintTimer = 0;
+    G.timer = 0;
+    G.timerRunning = true;
+    G.stars = [];
+    G.state = 'playing';
+
+    // Generate maze (grid dimensions are 2*cols+1 x 2*rows+1)
+    G.grid = generateMaze(cfg.cols, cfg.rows);
+
+    // Player starts at top-left path cell
+    G.player = { x: 1, y: 1 };
+
+    // Exit at bottom-right path cell
+    var gridW = cfg.cols * 2 + 1;
+    var gridH = cfg.rows * 2 + 1;
+    G.exit = { x: gridW - 2, y: gridH - 2 };
+
+    // Place stars
+    G.stars = placeStars(G.grid, cfg.stars, G.player.x, G.player.y, G.exit.x, G.exit.y);
+    G.totalStars = G.stars.length;
+
+    // Initialize explored map
+    G.explored = [];
+    for (var y = 0; y < gridH; y++) {
+        G.explored[y] = [];
+        for (var x = 0; x < gridW; x++) {
+            G.explored[y][x] = false;
+        }
+    }
+
+    updateExplored();
+    updateUI();
+    resizeCanvas();
+}
+
+function updateExplored() {
+    var radius = Math.ceil(G.fogRadius);
+    for (var dy = -radius; dy <= radius; dy++) {
+        for (var dx = -radius; dx <= radius; dx++) {
+            var ex = G.player.x + dx;
+            var ey = G.player.y + dy;
+            if (ex >= 0 && ex < G.grid[0].length && ey >= 0 && ey < G.grid.length) {
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= G.fogRadius) {
+                    G.explored[ey][ex] = true;
+                }
+            }
+        }
+    }
+}
+
+// ===== MOVEMENT =====
+function movePlayer(dx, dy) {
+    if (G.state !== 'playing') return;
+
+    var nx = G.player.x + dx;
+    var ny = G.player.y + dy;
+
+    // Bounds check
+    if (nx < 0 || nx >= G.grid[0].length || ny < 0 || ny >= G.grid.length) return;
+
+    // Wall check
+    if (G.grid[ny][nx] !== 1) return;
+
+    G.player.x = nx;
+    G.player.y = ny;
+    G.moveCount++;
+
+    updateExplored();
+
+    // Check star collection
+    for (var i = 0; i < G.stars.length; i++) {
+        if (!G.stars[i].collected && G.stars[i].x === nx && G.stars[i].y === ny) {
+            G.stars[i].collected = true;
+            G.collectedStars++;
+        }
+    }
+
+    // Check exit
+    if (nx === G.exit.x && ny === G.exit.y) {
+        levelComplete();
+    }
+
+    // Invalidate hint path when player moves off it
+    if (G.hintPath.length > 0) {
+        var onHint = false;
+        for (var h = 0; h < G.hintPath.length; h++) {
+            if (G.hintPath[h].x === nx && G.hintPath[h].y === ny) {
+                onHint = true;
+                break;
+            }
+        }
+        if (!onHint) {
+            G.hintPath = [];
+            G.hintTimer = 0;
+        }
+    }
+
+    updateUI();
+}
+
+// ===== HINT SYSTEM =====
+function useHint() {
+    if (G.state !== 'playing' || G.hints <= 0) return;
+
+    var path = findShortestPath(G.grid, G.player.x, G.player.y, G.exit.x, G.exit.y);
+    if (path.length > 0) {
+        G.hintPath = path;
+        G.hintTimer = 180; // 3 seconds at 60fps
+        G.hints--;
+        updateUI();
+    }
+}
+
+// ===== LEVEL COMPLETE =====
+function levelComplete() {
+    G.timerRunning = false;
+    G.state = 'levelComplete';
+
+    // Save best time
+    if (G.bestTimes[G.level] === null || G.timer < G.bestTimes[G.level]) {
+        G.bestTimes[G.level] = G.timer;
+    }
+
+    var starScore = G.collectedStars * 100;
+    var timeBonus = Math.max(0, 300000 - G.timer) / 1000; // bonus for finishing under 5 min
+    var hintBonus = G.hints * 50;
+    var totalScore = starScore + Math.floor(timeBonus) + hintBonus;
+
+    var isLast = G.level >= LEVEL_CONFIGS.length - 1;
+    if (isLast) {
+        G.state = 'gameComplete';
+    }
+
+    showLevelComplete(starScore, Math.floor(timeBonus), hintBonus, totalScore, isLast);
+}
+
+// ===== FORMAT TIME =====
+function formatTime(ms) {
+    var totalSec = Math.floor(ms / 1000);
+    var min = Math.floor(totalSec / 60);
+    var sec = totalSec % 60;
+    return min + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+// ===== UPDATE UI =====
+function updateUI() {
+    document.getElementById('sc').textContent = G.collectedStars;
+    document.getElementById('tm').textContent = formatTime(G.timer);
+    document.getElementById('hints').textContent = G.hints;
+    document.getElementById('lvlShow').textContent = (G.level + 1);
+}
+
+// ===== RENDERING =====
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+    canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+
+    if (G.state === 'menu') return;
+
+    // Calculate cell size to fit maze
+    var gridW = G.grid[0].length;
+    var gridH = G.grid.length;
+    var maxCellW = canvas.width / gridW;
+    var maxCellH = canvas.height / gridH;
+    G.cellSize = Math.floor(Math.min(maxCellW, maxCellH));
+    G.offsetX = Math.floor((canvas.width - G.cellSize * gridW) / 2);
+    G.offsetY = Math.floor((canvas.height - G.cellSize * gridH) / 2);
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function render() {
+    var W = canvas.width;
+    var H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    if (G.state === 'menu') {
+        renderMenu(W, H);
+        return;
+    }
+
+    if (!G.grid || G.grid.length === 0) return;
+
+    var cs = G.cellSize;
+    var ox = G.offsetX;
+    var oy = G.offsetY;
+    var gridW = G.grid[0].length;
+    var gridH = G.grid.length;
+
+    // Draw maze
+    for (var y = 0; y < gridH; y++) {
+        for (var x = 0; x < gridW; x++) {
+            var px = ox + x * cs;
+            var py = oy + y * cs;
+
+            // Check if explored
+            if (!G.explored[y][x]) {
+                ctx.fillStyle = '#000';
+                ctx.fillRect(px, py, cs, cs);
+                continue;
+            }
+
+            // Distance from player for fog
+            var dx = x - G.player.x;
+            var dy = y - G.player.y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+
+            // Base color
+            if (G.grid[y][x] === 0) {
+                ctx.fillStyle = WALL_COLOR;
+            } else {
+                ctx.fillStyle = PATH_COLOR;
+            }
+            ctx.fillRect(px, py, cs, cs);
+
+            // Fog overlay for explored but distant cells
+            if (dist > G.fogRadius) {
+                ctx.fillStyle = EXPLORED_COLOR;
+                ctx.fillRect(px, py, cs, cs);
+            }
+        }
+    }
+
+    // Draw hint path
+    if (G.hintPath.length > 0 && G.hintTimer > 0) {
+        var alpha = Math.min(1, G.hintTimer / 60);
+        ctx.fillStyle = 'rgba(100,200,255,' + (0.3 * alpha) + ')';
+        for (var h = 0; h < G.hintPath.length; h++) {
+            var hp = G.hintPath[h];
+            if (G.explored[hp.y][hp.x]) {
+                ctx.fillRect(ox + hp.x * cs + 2, oy + hp.y * cs + 2, cs - 4, cs - 4);
+            }
+        }
+    }
+
+    // Draw stars
+    for (var i = 0; i < G.stars.length; i++) {
+        var star = G.stars[i];
+        if (star.collected) continue;
+        if (!G.explored[star.y][star.x]) continue;
+
+        var dx2 = star.x - G.player.x;
+        var dy2 = star.y - G.player.y;
+        var dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        if (dist2 > G.fogRadius) continue;
+
+        var sx = ox + star.x * cs + cs / 2;
+        var sy = oy + star.y * cs + cs / 2;
+        var starSize = cs * 0.3;
+        var pulse = Math.sin(G.animFrame * 0.05 + star.animPhase) * 0.15 + 0.85;
+
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.scale(pulse, pulse);
+        ctx.fillStyle = STAR_COLOR;
+        drawStar(ctx, 0, 0, starSize, starSize * 0.45, 5);
+        ctx.restore();
+    }
+
+    // Draw exit
+    if (G.explored[G.exit.y][G.exit.x]) {
+        var exDx = G.exit.x - G.player.x;
+        var exDy = G.exit.y - G.player.y;
+        var exDist = Math.sqrt(exDx * exDx + exDy * exDy);
+        if (exDist <= G.fogRadius || G.explored[G.exit.y][G.exit.x]) {
+            var ex = ox + G.exit.x * cs;
+            var ey = oy + G.exit.y * cs;
+            var pulse2 = Math.sin(G.animFrame * 0.04) * 0.2 + 0.8;
+            ctx.fillStyle = EXIT_COLOR;
+            ctx.globalAlpha = pulse2;
+            ctx.fillRect(ex + 2, ey + 2, cs - 4, cs - 4);
+            ctx.globalAlpha = 1;
+
+            // Exit icon
+            ctx.fillStyle = '#fff';
+            ctx.font = Math.floor(cs * 0.6) + 'px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🚪', ex + cs / 2, ey + cs / 2);
+        }
+    }
+
+    // Draw player
+    var playerPX = ox + G.player.x * cs + cs / 2;
+    var playerPY = oy + G.player.y * cs + cs / 2;
+    var playerRadius = cs * 0.35;
+
+    // Player glow
+    var glowGrad = ctx.createRadialGradient(playerPX, playerPY, 0, playerPX, playerPY, cs);
+    glowGrad.addColorStop(0, 'rgba(255,215,0,0.15)');
+    glowGrad.addColorStop(1, 'rgba(255,215,0,0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(playerPX - cs, playerPY - cs, cs * 2, cs * 2);
+
+    // Player body
+    ctx.fillStyle = PLAYER_COLOR;
+    ctx.beginPath();
+    ctx.arc(playerPX, playerPY, playerRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Player face
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(playerPX - playerRadius * 0.3, playerPY - playerRadius * 0.2, playerRadius * 0.12, 0, Math.PI * 2);
+    ctx.arc(playerPX + playerRadius * 0.3, playerPY - playerRadius * 0.2, playerRadius * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw minimap
+    renderMinimap(W, H);
+}
+
+function drawStar(ctx, cx, cy, outerR, innerR, points) {
+    ctx.beginPath();
+    for (var i = 0; i < points * 2; i++) {
+        var r = i % 2 === 0 ? outerR : innerR;
+        var angle = (i * Math.PI / points) - Math.PI / 2;
+        var x = cx + Math.cos(angle) * r;
+        var y = cy + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
+function renderMinimap(W, H) {
+    var gridW = G.grid[0].length;
+    var gridH = G.grid.length;
+
+    // Minimap size
+    var mmSize = Math.min(120, W * 0.2, H * 0.25);
+    var mmCellW = mmSize / gridW;
+    var mmCellH = mmSize / gridH;
+    var mmX = W - mmSize - 10;
+    var mmY = 10;
+
+    // Background
+    ctx.fillStyle = MINIMAP_BG;
+    ctx.fillRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
+
+    // Border
+    ctx.strokeStyle = 'rgba(150,130,200,0.3)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
+
+    // Draw cells
+    for (var y = 0; y < gridH; y++) {
+        for (var x = 0; x < gridW; x++) {
+            if (!G.explored[y][x]) continue;
+
+            var px = mmX + x * mmCellW;
+            var py = mmY + y * mmCellH;
+
+            if (G.grid[y][x] === 0) {
+                ctx.fillStyle = MINIMAP_WALL;
+            } else {
+                ctx.fillStyle = MINIMAP_PATH;
+            }
+            ctx.fillRect(px, py, Math.ceil(mmCellW), Math.ceil(mmCellH));
+        }
+    }
+
+    // Stars on minimap
+    for (var i = 0; i < G.stars.length; i++) {
+        if (G.stars[i].collected) continue;
+        if (!G.explored[G.stars[i].y][G.stars[i].x]) continue;
+        ctx.fillStyle = MINIMAP_STAR;
+        ctx.fillRect(mmX + G.stars[i].x * mmCellW, mmY + G.stars[i].y * mmCellH, Math.max(2, mmCellW), Math.max(2, mmCellH));
+    }
+
+    // Exit on minimap
+    if (G.explored[G.exit.y][G.exit.x]) {
+        ctx.fillStyle = MINIMAP_EXIT;
+        ctx.fillRect(mmX + G.exit.x * mmCellW, mmY + G.exit.y * mmCellH, Math.max(3, mmCellW * 1.5), Math.max(3, mmCellH * 1.5));
+    }
+
+    // Player on minimap
+    ctx.fillStyle = MINIMAP_PLAYER;
+    ctx.fillRect(mmX + G.player.x * mmCellW - 1, mmY + G.player.y * mmCellH - 1, Math.max(3, mmCellW * 2), Math.max(3, mmCellH * 2));
+
+    // Label
+    ctx.fillStyle = 'rgba(150,130,200,0.6)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('小地图', mmX, mmY + mmSize + 4);
+}
+
+function renderMenu(W, H) {
+    // Background gradient
+    var grad = ctx.createRadialGradient(W / 2, H * 0.3, 0, W / 2, H * 0.3, W * 0.6);
+    grad.addColorStop(0, 'rgba(100,60,200,0.15)');
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Title
+    ctx.fillStyle = '#c49bff';
+    ctx.font = 'bold ' + Math.floor(W * 0.06) + 'px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🏰 迷宫逃脱', W / 2, H * 0.15);
+
+    ctx.fillStyle = '#888';
+    ctx.font = Math.floor(W * 0.025) + 'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('随机迷宫 · 星星收集 · 雾中探索', W / 2, H * 0.22);
+
+    // Level buttons
+    var btnW = Math.min(280, W * 0.7);
+    var btnH = 50;
+    var startY = H * 0.32;
+    var gap = 12;
+
+    G._menuButtons = [];
+
+    for (var i = 0; i < LEVEL_CONFIGS.length; i++) {
+        var cfg = LEVEL_CONFIGS[i];
+        var by = startY + i * (btnH + gap);
+        var bx = (W - btnW) / 2;
+
+        // Button background
+        var isUnlocked = i === 0 || G.bestTimes[i - 1] !== null;
+        if (isUnlocked) {
+            ctx.fillStyle = 'rgba(200,150,255,0.08)';
+            ctx.strokeStyle = 'rgba(200,150,255,0.25)';
+        } else {
+            ctx.fillStyle = 'rgba(50,50,50,0.3)';
+            ctx.strokeStyle = 'rgba(50,50,50,0.2)';
+        }
+        ctx.lineWidth = 1;
+
+        // Rounded rect
+        ctx.beginPath();
+        ctx.roundRect(bx, by, btnW, btnH, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        // Text
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = isUnlocked ? '#fff' : '#555';
+        ctx.font = 'bold 14px "Microsoft YaHei",sans-serif';
+        ctx.fillText((i + 1) + '. ' + cfg.name, bx + 12, by + btnH * 0.35);
+
+        ctx.fillStyle = isUnlocked ? '#888' : '#444';
+        ctx.font = '11px "Microsoft YaHei",sans-serif';
+        ctx.fillText(cfg.cols + 'x' + cfg.rows + ' | ⭐' + cfg.stars + ' | 💡' + cfg.hints, bx + 12, by + btnH * 0.7);
+
+        // Best time
+        if (G.bestTimes[i] !== null) {
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#ffd700';
+            ctx.font = '12px "Microsoft YaHei",sans-serif';
+            ctx.fillText('🏆 ' + formatTime(G.bestTimes[i]), bx + btnW - 12, by + btnH * 0.5);
+        } else if (!isUnlocked) {
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#555';
+            ctx.font = '14px sans-serif';
+            ctx.fillText('🔒', bx + btnW - 12, by + btnH * 0.5);
+        }
+
+        G._menuButtons.push({ x: bx, y: by, w: btnW, h: btnH, level: i, unlocked: isUnlocked });
+    }
+
+    // Instructions
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#555';
+    ctx.font = '12px "Microsoft YaHei",sans-serif';
+    ctx.fillText('方向键/WASD 移动 | H 显示路径 | 收集星星到达出口', W / 2, H * 0.9);
+}
+
+// ===== MENU =====
+function showMenu() {
+    G.state = 'menu';
+    G.timerRunning = false;
+    updateUI();
+}
+
+function showLevelComplete(starScore, timeBonus, hintBonus, totalScore, isLast) {
+    var msgEl = document.getElementById('msgC');
+    var html = '<h2>' + (isLast ? '🎉 恭喜通关！' : '✨ 关卡完成！') + '</h2>';
+    html += '<p>' + LEVEL_CONFIGS[G.level].name + '</p>';
+    html += '<div class="item-info">';
+    html += '<div>⭐ 星星: ' + G.collectedStars + '/' + G.totalStars + ' (+' + starScore + ')</div>';
+    html += '<div>⏱ 时间: ' + formatTime(G.timer) + ' (+' + timeBonus + ')</div>';
+    html += '<div>💡 剩余提示: ' + G.hints + ' (+' + hintBonus + ')</div>';
+    html += '<div>👣 步数: ' + G.moveCount + '</div>';
+    html += '</div>';
+    html += '<p style="color:#ffd700;font-size:16px">总分: ' + totalScore + '</p>';
+
+    if (G.bestTimes[G.level] === G.timer) {
+        html += '<p style="color:#44ff88">🏆 新纪录！</p>';
+    }
+
+    if (isLast) {
+        html += '<button onclick="showMenu()">🏠 返回菜单</button>';
+    } else {
+        html += '<button onclick="nextLevel()">➡️ 下一关</button>';
+        html += '<button onclick="showMenu()">🏠 菜单</button>';
+    }
+
+    msgEl.innerHTML = html;
+    document.getElementById('msg').style.display = 'flex';
+}
+
+function nextLevel() {
+    document.getElementById('msg').style.display = 'none';
+    if (G.level < LEVEL_CONFIGS.length - 1) {
+        initLevel(G.level + 1);
+    }
+}
+
+// ===== GAME LOOP =====
+function gameLoop(timestamp) {
+    if (G.lastTime === 0) G.lastTime = timestamp;
+    var dt = timestamp - G.lastTime;
+    G.lastTime = timestamp;
+
+    // Update timer
+    if (G.timerRunning && G.state === 'playing') {
+        G.timer += dt;
+        updateUI();
+    }
+
+    // Update hint timer
+    if (G.hintTimer > 0) {
+        G.hintTimer--;
+    }
+
+    G.animFrame++;
+
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ===== INPUT HANDLING =====
+document.addEventListener('keydown', function(e) {
+    if (G.state === 'menu') return;
+
+    var key = e.key.toLowerCase();
+    switch (key) {
+        case 'arrowup':
+        case 'w':
+            e.preventDefault();
+            movePlayer(0, -1);
+            break;
+        case 'arrowdown':
+        case 's':
+            e.preventDefault();
+            movePlayer(0, 1);
+            break;
+        case 'arrowleft':
+        case 'a':
+            e.preventDefault();
+            movePlayer(-1, 0);
+            break;
+        case 'arrowright':
+        case 'd':
+            e.preventDefault();
+            movePlayer(1, 0);
+            break;
+        case 'h':
+            useHint();
+            break;
+        case 'escape':
+            showMenu();
+            break;
+    }
+});
+
+// Touch controls
+canvas.addEventListener('touchstart', function(e) {
+    if (G.state !== 'playing') return;
+    e.preventDefault();
+    var touch = e.touches[0];
+    G.touchStartX = touch.clientX;
+    G.touchStartY = touch.clientY;
+    G.touchMoved = false;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    G.touchMoved = true;
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    if (G.state !== 'playing') return;
+    e.preventDefault();
+    if (!G.touchMoved) {
+        // Tap - use hint
+        useHint();
+        return;
+    }
+
+    var touch = e.changedTouches[0];
+    var dx = touch.clientX - G.touchStartX;
+    var dy = touch.clientY - G.touchStartY;
+    var absDx = Math.abs(dx);
+    var absDy = Math.abs(dy);
+    var threshold = 20;
+
+    if (Math.max(absDx, absDy) < threshold) return;
+
+    if (absDx > absDy) {
+        movePlayer(dx > 0 ? 1 : -1, 0);
+    } else {
+        movePlayer(0, dy > 0 ? 1 : -1);
+    }
+}, { passive: false });
+
+// Mouse click on menu
+canvas.addEventListener('click', function(e) {
+    if (G.state !== 'menu') return;
+    if (!G._menuButtons) return;
+
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = canvas.width / rect.width;
+    var scaleY = canvas.height / rect.height;
+    var mx = (e.clientX - rect.left) * scaleX;
+    var my = (e.clientY - rect.top) * scaleY;
+
+    for (var i = 0; i < G._menuButtons.length; i++) {
+        var btn = G._menuButtons[i];
+        if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+            if (btn.unlocked) {
+                initLevel(btn.level);
+            }
+            break;
+        }
+    }
+});
+
+// ===== ROUNDRECT POLYFILL =====
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        this.moveTo(x + r[0], y);
+        this.lineTo(x + w - r[1], y);
+        this.arcTo(x + w, y, x + w, y + r[1], r[1]);
+        this.lineTo(x + w, y + h - r[2]);
+        this.arcTo(x + w, y + h, x + w - r[2], y + h, r[2]);
+        this.lineTo(x + r[3], y + h);
+        this.arcTo(x, y + h, x, y + h - r[3], r[3]);
+        this.lineTo(x, y + r[0]);
+        this.arcTo(x, y, x + r[0], y, r[0]);
+        this.closePath();
+        return this;
+    };
+}
+
+// ===== START =====
+G.state = 'menu';
+updateUI();
+requestAnimationFrame(gameLoop);
+</script></body></html>

@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>忍者跑酷</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #1a1a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: 'Segoe UI', sans-serif;
+    overflow: hidden;
+}
+#gameContainer {
+    position: relative;
+    width: 800px;
+    max-width: 100vw;
+}
+canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #0f0f23;
+    border: 2px solid #333;
+    border-radius: 8px;
+}
+#ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    justify-content: space-between;
+    color: white;
+    font-size: 18px;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+    pointer-events: none;
+}
+#score { font-weight: bold; }
+#highScore { color: #ffd700; }
+#startScreen, #gameOverScreen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0,0,0,0.85);
+    color: white;
+    border-radius: 8px;
+    z-index: 10;
+}
+#startScreen h1, #gameOverScreen h1 {
+    font-size: 48px;
+    margin-bottom: 20px;
+    color: #ff6b6b;
+    text-shadow: 3px 3px 6px rgba(0,0,0,0.8);
+}
+#startScreen p, #gameOverScreen p {
+    font-size: 20px;
+    margin: 10px 0;
+}
+.btn {
+    margin-top: 20px;
+    padding: 15px 40px;
+    font-size: 24px;
+    background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+.btn:hover { transform: scale(1.05); }
+#finalScore { font-size: 36px; color: #ffd700; margin: 10px 0; }
+#powerupIndicator {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-size: 16px;
+    padding: 5px 15px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 20px;
+    display: none;
+}
+</style>
+</head>
+<body>
+<div id="gameContainer">
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div id="ui">
+        <div>
+            <span id="score">距离: 0 | 金币: 0 | 钻石: 0</span>
+        </div>
+        <div id="highScore">最高分: 0</div>
+    </div>
+    <div id="startScreen">
+        <h1>忍者跑酷</h1>
+        <p>点击或按空格键跳跃</p>
+        <p>支持二段跳</p>
+        <p>收集金币和钻石获得分数</p>
+        <button class="btn" onclick="startGame()">开始游戏</button>
+    </div>
+    <div id="gameOverScreen" style="display:none">
+        <h1>游戏结束</h1>
+        <p>最终分数</p>
+        <div id="finalScore">0</div>
+        <p id="finalStats"></p>
+        <button class="btn" onclick="startGame()">再来一次</button>
+    </div>
+    <div id="powerupIndicator"></div>
+</div>
+
+<script>
+// ==================== 配置 ====================
+const CONFIG = {
+    CANVAS_W: 800,
+    CANVAS_H: 400,
+    GROUND_Y: 340,
+    GRAVITY: 0.6,
+    JUMP_FORCE: -12,
+    BASE_SPEED: 5,
+    MAX_SPEED: 12,
+    SPEED_INCREASE: 0.001,
+    OBSTACLE_INTERVAL_MIN: 60,
+    OBSTACLE_INTERVAL_MAX: 120,
+    COLLECTIBLE_INTERVAL_MIN: 30,
+    COLLECTIBLE_INTERVAL_MAX: 60,
+    POWERUP_CHANCE: 0.15,
+    MAGNET_DURATION: 300,
+    SHIELD_DURATION: 1,
+    BOOST_DURATION: 180,
+    BOOST_SPEED_MULT: 1.5
+};
+
+// ==================== 游戏状态 ====================
+var G = {
+    state: 'menu', // menu, playing, over
+    speed: CONFIG.BASE_SPEED,
+    distance: 0,
+    coins: 0,
+    diamonds: 0,
+    score: 0,
+    highScore: parseInt(localStorage.getItem('ninjaRunHighScore') || '0'),
+    frame: 0,
+    obstacleTimer: 0,
+    collectibleTimer: 0,
+    // 玩家
+    player: {
+        x: 100,
+        y: CONFIG.GROUND_Y,
+        w: 40,
+        h: 50,
+        vy: 0,
+        jumps: 0,
+        maxJumps: 2,
+        grounded: true,
+        state: 'run', // run, jump, dead
+        animFrame: 0,
+        animTimer: 0,
+        hitbox: { x: 8, y: 5, w: 24, h: 40 }
+    },
+    // 道具状态
+    powerups: {
+        magnet: 0,
+        shield: false,
+        boost: 0
+    },
+    // 实体数组
+    obstacles: [],
+    collectibles: [],
+    particles: [],
+    // 背景
+    bgLayers: [
+        { x: 0, speed: 0.2, color: '#16213e' },
+        { x: 0, speed: 0.4, color: '#1a1a2e' },
+        { x: 0, speed: 0.6, color: '#0f3460' }
+    ]
+};
+
+// ==================== Canvas ====================
+var canvas = document.getElementById('gameCanvas');
+var ctx = canvas.getContext('2d');
+
+// ==================== 输入处理 ====================
+var keys = {};
+document.addEventListener('keydown', function(e) {
+    keys[e.code] = true;
+    if (e.code === 'Space' && G.state === 'playing') {
+        e.preventDefault();
+        jump();
+    }
+    if (e.code === 'Space' && G.state === 'menu') {
+        e.preventDefault();
+        startGame();
+    }
+});
+document.addEventListener('keyup', function(e) { keys[e.code] = false; });
+
+canvas.addEventListener('click', function() {
+    if (G.state === 'playing') jump();
+});
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (G.state === 'playing') jump();
+});
+
+// ==================== 游戏函数 ====================
+function startGame() {
+    G.state = 'playing';
+    G.speed = CONFIG.BASE_SPEED;
+    G.distance = 0;
+    G.coins = 0;
+    G.diamonds = 0;
+    G.score = 0;
+    G.frame = 0;
+    G.obstacleTimer = 0;
+    G.collectibleTimer = 0;
+    G.obstacles = [];
+    G.collectibles = [];
+    G.particles = [];
+    G.powerups = { magnet: 0, shield: false, boost: 0 };
+
+    var p = G.player;
+    p.y = CONFIG.GROUND_Y;
+    p.vy = 0;
+    p.jumps = 0;
+    p.grounded = true;
+    p.state = 'run';
+    p.animFrame = 0;
+
+    document.getElementById('startScreen').style.display = 'none';
+    document.getElementById('gameOverScreen').style.display = 'none';
+    updateUI();
+}
+
+function jump() {
+    var p = G.player;
+    if (p.jumps < p.maxJumps) {
+        p.vy = CONFIG.JUMP_FORCE;
+        p.jumps++;
+        p.grounded = false;
+        p.state = 'jump';
+        p.animFrame = 0;
+        // 跳跃粒子
+        for (var i = 0; i < 5; i++) {
+            G.particles.push(createParticle(p.x + p.w/2, p.y + p.h, '#aaa', 'jump'));
+        }
+    }
+}
+
+function gameOver() {
+    G.state = 'over';
+    G.player.state = 'dead';
+
+    // 更新最高分
+    if (G.score > G.highScore) {
+        G.highScore = G.score;
+        localStorage.setItem('ninjaRunHighScore', G.highScore.toString());
+    }
+
+    document.getElementById('finalScore').textContent = G.score;
+    document.getElementById('finalStats').textContent =
+        '距离: ' + Math.floor(G.distance) + ' | 金币: ' + G.coins + ' | 钻石: ' + G.diamonds;
+    document.getElementById('gameOverScreen').style.display = 'flex';
+    document.getElementById('highScore').textContent = '最高分: ' + G.highScore;
+}
+
+function createParticle(x, y, color, type) {
+    return {
+        x: x, y: y,
+        vx: (Math.random() - 0.5) * 4,
+        vy: type === 'jump' ? -Math.random() * 3 : (Math.random() - 0.5) * 3,
+        life: 30 + Math.random() * 20,
+        maxLife: 50,
+        color: color,
+        size: 2 + Math.random() * 3
+    };
+}
+
+function spawnObstacle() {
+    var types = ['spike', 'bird', 'wall'];
+    var type = types[Math.floor(Math.random() * types.length)];
+    var obs = { type: type, x: CONFIG.CANVAS_W + 50, passed: false };
+
+    switch(type) {
+        case 'spike':
+            obs.y = CONFIG.GROUND_Y + 20;
+            obs.w = 30;
+            obs.h = 30;
+            obs.hitbox = { x: 5, y: 5, w: 20, h: 25 };
+            break;
+        case 'bird':
+            obs.y = CONFIG.GROUND_Y - 30 - Math.random() * 80;
+            obs.w = 40;
+            obs.h = 30;
+            obs.hitbox = { x: 5, y: 5, w: 30, h: 20 };
+            obs.animFrame = 0;
+            obs.animTimer = 0;
+            break;
+        case 'wall':
+            obs.y = CONFIG.GROUND_Y - 50;
+            obs.w = 25;
+            obs.h = 50;
+            obs.hitbox = { x: 3, y: 3, w: 19, h: 44 };
+            break;
+    }
+
+    G.obstacles.push(obs);
+}
+
+function spawnCollectible() {
+    var isDiamond = Math.random() < 0.2;
+    var patterns = ['single', 'line', 'arc'];
+    var pattern = patterns[Math.floor(Math.random() * patterns.length)];
+    var baseX = CONFIG.CANVAS_W + 50;
+
+    switch(pattern) {
+        case 'single':
+            G.collectibles.push({
+                type: isDiamond ? 'diamond' : 'coin',
+                x: baseX,
+                y: CONFIG.GROUND_Y - 30 - Math.random() * 100,
+                w: isDiamond ? 20 : 16,
+                h: isDiamond ? 20 : 16,
+                animFrame: 0,
+                collected: false
+            });
+            break;
+        case 'line':
+            for (var i = 0; i < 5; i++) {
+                G.collectibles.push({
+                    type: isDiamond ? 'diamond' : 'coin',
+                    x: baseX + i * 30,
+                    y: CONFIG.GROUND_Y - 60,
+                    w: isDiamond ? 20 : 16,
+                    h: isDiamond ? 20 : 16,
+                    animFrame: 0,
+                    collected: false
+                });
+            }
+            break;
+        case 'arc':
+            for (var j = 0; j < 5; j++) {
+                var angle = (j / 4) * Math.PI;
+                G.collectibles.push({
+                    type: isDiamond ? 'diamond' : 'coin',
+                    x: baseX + j * 30,
+                    y: CONFIG.GROUND_Y - 80 + Math.sin(angle) * 40,
+                    w: isDiamond ? 20 : 16,
+                    h: isDiamond ? 20 : 16,
+                    animFrame: 0,
+                    collected: false
+                });
+            }
+            break;
+    }
+
+    // 道具生成
+    if (Math.random() < CONFIG.POWERUP_CHANCE) {
+        var powerTypes = ['magnet', 'shield', 'boost'];
+        var powerType = powerTypes[Math.floor(Math.random() * powerTypes.length)];
+        G.collectibles.push({
+            type: 'powerup',
+            powerType: powerType,
+            x: baseX + 150,
+            y: CONFIG.GROUND_Y - 50 - Math.random() * 80,
+            w: 24,
+            h: 24,
+            animFrame: 0,
+            collected: false
+        });
+    }
+}
+
+function rectCollision(a, ah, b, bh) {
+    return a.x + ah.x < b.x + bh.x + bh.w &&
+           a.x + ah.x + ah.w > b.x + bh.x &&
+           a.y + ah.y < b.y + bh.y + bh.h &&
+           a.y + ah.y + ah.h > b.y + bh.y;
+}
+
+// ==================== 更新逻辑 ====================
+function update() {
+    if (G.state !== 'playing') return;
+
+    G.frame++;
+    var p = G.player;
+    var spd = G.speed * (G.powerups.boost > 0 ? CONFIG.BOOST_SPEED_MULT : 1);
+
+    // 速度递增
+    G.speed = Math.min(CONFIG.MAX_SPEED, CONFIG.BASE_SPEED + G.distance * CONFIG.SPEED_INCREASE);
+
+    // 距离和分数
+    G.distance += spd * 0.1;
+    G.score = Math.floor(G.distance) + G.coins * 10 + G.diamonds * 50;
+
+    // 玩家物理
+    p.vy += CONFIG.GRAVITY;
+    p.y += p.vy;
+
+    if (p.y >= CONFIG.GROUND_Y) {
+        p.y = CONFIG.GROUND_Y;
+        p.vy = 0;
+        p.jumps = 0;
+        p.grounded = true;
+        if (p.state === 'jump') p.state = 'run';
+    }
+
+    // 玩家动画
+    p.animTimer++;
+    if (p.animTimer >= 6) {
+        p.animTimer = 0;
+        p.animFrame = (p.animFrame + 1) % 4;
+    }
+
+    // 道具计时
+    if (G.powerups.magnet > 0) G.powerups.magnet--;
+    if (G.powerups.boost > 0) G.powerups.boost--;
+
+    // 生成障碍物
+    G.obstacleTimer--;
+    if (G.obstacleTimer <= 0) {
+        spawnObstacle();
+        G.obstacleTimer = CONFIG.OBSTACLE_INTERVAL_MIN +
+            Math.random() * (CONFIG.OBSTACLE_INTERVAL_MAX - CONFIG.OBSTACLE_INTERVAL_MIN);
+        // 难度递增减少间隔
+        G.obstacleTimer *= Math.max(0.5, 1 - G.distance * 0.0001);
+    }
+
+    // 生成收集物
+    G.collectibleTimer--;
+    if (G.collectibleTimer <= 0) {
+        spawnCollectible();
+        G.collectibleTimer = CONFIG.COLLECTIBLE_INTERVAL_MIN +
+            Math.random() * (CONFIG.COLLECTIBLE_INTERVAL_MAX - CONFIG.COLLECTIBLE_INTERVAL_MIN);
+    }
+
+    // 更新障碍物
+    for (var i = G.obstacles.length - 1; i >= 0; i--) {
+        var obs = G.obstacles[i];
+        obs.x -= spd;
+
+        // 飞鸟动画
+        if (obs.type === 'bird') {
+            obs.animTimer++;
+            if (obs.animTimer >= 8) {
+                obs.animTimer = 0;
+                obs.animFrame = (obs.animFrame + 1) % 2;
+            }
+        }
+
+        // 碰撞检测
+        if (rectCollision(p, p.hitbox, obs, obs.hitbox)) {
+            if (G.powerups.shield) {
+                G.powerups.shield = false;
+                G.obstacles.splice(i, 1);
+                updatePowerupUI();
+                // 护盾破碎粒子
+                for (var k = 0; k < 10; k++) {
+                    G.particles.push(createParticle(p.x + p.w/2, p.y + p.h/2, '#00ffff', 'break'));
+                }
+            } else {
+                gameOver();
+                return;
+            }
+        }
+
+        // 移除超出屏幕的障碍物
+        if (obs.x + obs.w < -50) {
+            G.obstacles.splice(i, 1);
+        }
+    }
+
+    // 更新收集物
+    for (var j = G.collectibles.length - 1; j >= 0; j--) {
+        var col = G.collectibles[j];
+        col.x -= spd;
+        col.animFrame = (col.animFrame + 0.1) % 6;
+
+        // 磁铁效果
+        if (G.powerups.magnet > 0 && col.type !== 'powerup') {
+            var dx = p.x + p.w/2 - col.x;
+            var dy = p.y + p.h/2 - col.y;
+            var dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < 150) {
+                col.x += dx * 0.1;
+                col.y += dy * 0.1;
+            }
+        }
+
+        // 收集检测
+        var colHitbox = { x: 0, y: 0, w: col.w, h: col.h };
+        if (rectCollision(p, p.hitbox, col, colHitbox)) {
+            if (col.type === 'coin') {
+                G.coins++;
+                for (var c = 0; c < 5; c++) {
+                    G.particles.push(createParticle(col.x, col.y, '#ffd700', 'collect'));
+                }
+            } else if (col.type === 'diamond') {
+                G.diamonds++;
+                for (var d = 0; d < 8; d++) {
+                    G.particles.push(createParticle(col.x, col.y, '#00ffff', 'collect'));
+                }
+            } else if (col.type === 'powerup') {
+                activatePowerup(col.powerType);
+            }
+            G.collectibles.splice(j, 1);
+            updateUI();
+        }
+
+        // 移除超出屏幕的收集物
+        if (col.x + col.w < -50) {
+            G.collectibles.splice(j, 1);
+        }
+    }
+
+    // 更新粒子
+    for (var m = G.particles.length - 1; m >= 0; m--) {
+        var part = G.particles[m];
+        part.x += part.vx;
+        part.y += part.vy;
+        part.life--;
+        if (part.life <= 0) {
+            G.particles.splice(m, 1);
+        }
+    }
+
+    // 更新背景
+    for (var n = 0; n < G.bgLayers.length; n++) {
+        G.bgLayers[n].x = (G.bgLayers[n].x - spd * G.bgLayers[n].speed) % CONFIG.CANVAS_W;
+    }
+
+    updateUI();
+}
+
+function activatePowerup(type) {
+    switch(type) {
+        case 'magnet':
+            G.powerups.magnet = CONFIG.MAGNET_DURATION;
+            break;
+        case 'shield':
+            G.powerups.shield = true;
+            break;
+        case 'boost':
+            G.powerups.boost = CONFIG.BOOST_DURATION;
+            break;
+    }
+    updatePowerupUI();
+}
+
+function updateUI() {
+    document.getElementById('score').textContent =
+        '距离: ' + Math.floor(G.distance) + ' | 金币: ' + G.coins + ' | 钻石: ' + G.diamonds;
+}
+
+function updatePowerupUI() {
+    var indicator = document.getElementById('powerupIndicator');
+    var texts = [];
+    if (G.powerups.magnet > 0) texts.push('磁铁 ' + Math.ceil(G.powerups.magnet/60) + 's');
+    if (G.powerups.shield) texts.push('护盾');
+    if (G.powerups.boost > 0) texts.push('加速 ' + Math.ceil(G.powerups.boost/60) + 's');
+
+    if (texts.length > 0) {
+        indicator.textContent = texts.join(' | ');
+        indicator.style.display = 'block';
+    } else {
+        indicator.style.display = 'none';
+    }
+}
+
+// ==================== 渲染 ====================
+function render() {
+    ctx.clearRect(0, 0, CONFIG.CANVAS_W, CONFIG.CANVAS_H);
+
+    // 背景渐变
+    var gradient = ctx.createLinearGradient(0, 0, 0, CONFIG.CANVAS_H);
+    gradient.addColorStop(0, '#0f0f23');
+    gradient.addColorStop(0.5, '#1a1a2e');
+    gradient.addColorStop(1, '#16213e');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, CONFIG.CANVAS_W, CONFIG.CANVAS_H);
+
+    // 视差背景层
+    renderBackground();
+
+    // 地面
+    ctx.fillStyle = '#2d2d44';
+    ctx.fillRect(0, CONFIG.GROUND_Y + 50, CONFIG.CANVAS_W, CONFIG.CANVAS_H - CONFIG.GROUND_Y);
+    ctx.fillStyle = '#3d3d5c';
+    ctx.fillRect(0, CONFIG.GROUND_Y + 45, CONFIG.CANVAS_W, 8);
+
+    // 障碍物
+    renderObstacles();
+
+    // 收集物
+    renderCollectibles();
+
+    // 粒子
+    renderParticles();
+
+    // 玩家
+    renderPlayer();
+}
+
+function renderBackground() {
+    // 远山
+    ctx.fillStyle = '#16213e';
+    for (var i = -1; i < 3; i++) {
+        var x = G.bgLayers[0].x + i * CONFIG.CANVAS_W;
+        drawMountain(x, 200, 150, '#16213e');
+    }
+
+    // 中景建筑
+    ctx.fillStyle = '#1a1a2e';
+    for (var j = -1; j < 3; j++) {
+        var x2 = G.bgLayers[1].x + j * 400;
+        drawBuilding(x2, 180, 60, 120, '#1a1a2e');
+        drawBuilding(x2 + 150, 200, 40, 100, '#1a1a2e');
+        drawBuilding(x2 + 280, 170, 50, 130, '#1a1a2e');
+    }
+
+    // 近景栅栏
+    ctx.fillStyle = '#0f3460';
+    for (var k = -1; k < 5; k++) {
+        var x3 = G.bgLayers[2].x + k * 200;
+        drawFence(x3, CONFIG.GROUND_Y + 30, '#0f3460');
+    }
+}
+
+function drawMountain(x, baseY, height, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, baseY + height);
+    ctx.lineTo(x + 100, baseY);
+    ctx.lineTo(x + 200, baseY + height);
+    ctx.fill();
+}
+
+function drawBuilding(x, y, w, h, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    // 窗户
+    ctx.fillStyle = '#2d2d44';
+    for (var wy = y + 10; wy < y + h - 10; wy += 20) {
+        for (var wx = x + 5; wx < x + w - 5; wx += 15) {
+            ctx.fillRect(wx, wy, 8, 12);
+        }
+    }
+}
+
+function drawFence(x, y, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, 150, 3);
+    for (var fx = x; fx < x + 150; fx += 20) {
+        ctx.fillRect(fx, y - 15, 3, 18);
+    }
+}
+
+function renderPlayer() {
+    var p = G.player;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+
+    // 护盾效果
+    if (G.powerups.shield) {
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.5 + Math.sin(G.frame * 0.1) * 0.3;
+        ctx.beginPath();
+        ctx.arc(p.w/2, p.h/2, 35, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
+
+    // 加速效果
+    if (G.powerups.boost > 0) {
+        ctx.fillStyle = '#ff6b6b';
+        ctx.globalAlpha = 0.3;
+        for (var i = 0; i < 3; i++) {
+            ctx.fillRect(-10 - i * 15, 10 + Math.random() * 30, 15, 3);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // 忍者身体
+    ctx.fillStyle = '#333';
+    ctx.fillRect(10, 5, 20, 35); // 身体
+
+    // 头
+    ctx.fillStyle = '#444';
+    ctx.fillRect(8, 0, 24, 18);
+
+    // 眼睛
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillRect(20, 6, 6, 4);
+
+    // 头巾
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillRect(6, 0, 28, 5);
+    // 头巾飘带
+    ctx.fillRect(0, 0 + Math.sin(G.frame * 0.2) * 3, 8, 4);
+
+    // 腿部动画
+    if (p.state === 'run' && p.grounded) {
+        var legOffset = Math.sin(p.animFrame * Math.PI / 2) * 8;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(12, 40, 6, 10 + legOffset);
+        ctx.fillRect(22, 40, 6, 10 - legOffset);
+    } else if (p.state === 'jump') {
+        ctx.fillStyle = '#333';
+        ctx.fillRect(10, 40, 8, 8);
+        ctx.fillRect(22, 40, 8, 8);
+    }
+
+    // 死亡状态
+    if (p.state === 'dead') {
+        ctx.fillStyle = 'rgba(255,0,0,0.5)';
+        ctx.fillRect(0, 0, p.w, p.h);
+    }
+
+    ctx.restore();
+}
+
+function renderObstacles() {
+    for (var i = 0; i < G.obstacles.length; i++) {
+        var obs = G.obstacles[i];
+        ctx.save();
+        ctx.translate(obs.x, obs.y);
+
+        switch(obs.type) {
+            case 'spike':
+                // 地刺
+                ctx.fillStyle = '#8b0000';
+                ctx.beginPath();
+                ctx.moveTo(0, 30);
+                ctx.lineTo(15, 0);
+                ctx.lineTo(30, 30);
+                ctx.fill();
+                ctx.fillStyle = '#a00000';
+                ctx.beginPath();
+                ctx.moveTo(5, 30);
+                ctx.lineTo(15, 5);
+                ctx.lineTo(25, 30);
+                ctx.fill();
+                break;
+
+            case 'bird':
+                // 飞鸟
+                ctx.fillStyle = '#4a4a6a';
+                // 身体
+                ctx.fillRect(5, 8, 30, 15);
+                // 翅膀
+                var wingY = obs.animFrame === 0 ? 0 : 15;
+                ctx.fillRect(0, wingY, 12, 8);
+                ctx.fillRect(28, wingY, 12, 8);
+                // 眼睛
+                ctx.fillStyle = '#ff6b6b';
+                ctx.fillRect(30, 10, 4, 4);
+                break;
+
+            case 'wall':
+                // 墙壁
+                ctx.fillStyle = '#5c5c7a';
+                ctx.fillRect(0, 0, 25, 50);
+                ctx.fillStyle = '#6c6c8a';
+                ctx.fillRect(2, 2, 21, 15);
+                ctx.fillRect(2, 20, 21, 15);
+                ctx.fillRect(2, 38, 21, 10);
+                break;
+        }
+
+        ctx.restore();
+    }
+}
+
+function renderCollectibles() {
+    for (var i = 0; i < G.collectibles.length; i++) {
+        var col = G.collectibles[i];
+        ctx.save();
+        ctx.translate(col.x, col.y);
+
+        if (col.type === 'coin') {
+            // 金币
+            var coinScale = 0.8 + Math.sin(col.animFrame) * 0.2;
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.ellipse(col.w/2, col.h/2, col.w/2 * coinScale, col.h/2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffed4a';
+            ctx.beginPath();
+            ctx.ellipse(col.w/2, col.h/2, col.w/3 * coinScale, col.h/3, 0, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (col.type === 'diamond') {
+            // 钻石
+            ctx.fillStyle = '#00ffff';
+            ctx.beginPath();
+            ctx.moveTo(col.w/2, 0);
+            ctx.lineTo(col.w, col.h/2);
+            ctx.lineTo(col.w/2, col.h);
+            ctx.lineTo(0, col.h/2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = '#80ffff';
+            ctx.beginPath();
+            ctx.moveTo(col.w/2, 5);
+            ctx.lineTo(col.w - 5, col.h/2);
+            ctx.lineTo(col.w/2, col.h - 5);
+            ctx.lineTo(5, col.h/2);
+            ctx.closePath();
+            ctx.fill();
+        } else if (col.type === 'powerup') {
+            // 道具
+            var powerColors = {
+                magnet: '#ff69b4',
+                shield: '#00ffff',
+                boost: '#ff6b6b'
+            };
+            ctx.fillStyle = powerColors[col.powerType] || '#fff';
+            ctx.fillRect(2, 2, 20, 20);
+            ctx.fillStyle = '#fff';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            var icons = { magnet: 'M', shield: 'S', boost: 'B' };
+            ctx.fillText(icons[col.powerType], 12, 17);
+        }
+
+        ctx.restore();
+    }
+}
+
+function renderParticles() {
+    for (var i = 0; i < G.particles.length; i++) {
+        var part = G.particles[i];
+        ctx.globalAlpha = part.life / part.maxLife;
+        ctx.fillStyle = part.color;
+        ctx.fillRect(part.x, part.y, part.size, part.size);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ==================== 游戏循环 ====================
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// 初始化
+document.getElementById('highScore').textContent = '最高分: ' + G.highScore;
+gameLoop();
+</script>
+</body>
+</html>

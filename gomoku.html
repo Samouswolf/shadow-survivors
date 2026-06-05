@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>五子棋</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#1a1510;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:'Microsoft YaHei',sans-serif;touch-action:none;user-select:none}
+canvas{display:block;max-width:100vw;max-height:100vh;cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+(function(){
+'use strict';
+
+// ==================== Constants ====================
+const c = document.getElementById('gc'), ctx = c.getContext('2d');
+const BOARD_SIZE = 15;
+const SCREEN = {MENU:0, PLAYING:1, GAMEOVER:2};
+
+// ==================== Game State ====================
+let W, H, cellSize, boardX, boardY;
+let screen = SCREEN.MENU;
+let board = [];
+let turn = 'b'; // 'b'=black(player), 'w'=white(AI)
+let winner = null;
+let winLine = null;
+let moveHistory = [];
+let hoverPos = null;
+let difficulty = 1; // 0=simple, 1=medium, 2=hard
+let scores = {win:0, lose:0, draw:0};
+let animatingPiece = null;
+let lastMove = null;
+let gameOverReason = '';
+
+// ==================== Init ====================
+function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    c.addEventListener('click', handleClick);
+    c.addEventListener('mousemove', handleMove);
+    c.addEventListener('touchstart', handleTouch, {passive:false});
+    loadScores();
+    resetGame();
+}
+
+function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    c.width = W;
+    c.height = H;
+    cellSize = Math.min((W-40)/(BOARD_SIZE+1), (H-160)/(BOARD_SIZE+1));
+    boardX = (W - cellSize*(BOARD_SIZE-1))/2;
+    boardY = (H - cellSize*(BOARD_SIZE-1))/2 + 20;
+}
+
+function resetGame() {
+    board = Array(BOARD_SIZE).fill(null).map(()=>Array(BOARD_SIZE).fill(null));
+    turn = 'b';
+    winner = null;
+    winLine = null;
+    moveHistory = [];
+    hoverPos = null;
+    animatingPiece = null;
+    lastMove = null;
+    gameOverReason = '';
+}
+
+function loadScores() {
+    try {
+        const s = localStorage.getItem('gomoku_scores');
+        if (s) scores = JSON.parse(s);
+    } catch(e) {}
+}
+
+function saveScores() {
+    try {
+        localStorage.setItem('gomoku_scores', JSON.stringify(scores));
+    } catch(e) {}
+}
+
+// ==================== Input Handling ====================
+function getBoardPos(x, y) {
+    const col = Math.round((x - boardX) / cellSize);
+    const row = Math.round((y - boardY) / cellSize);
+    if (row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE) {
+        return {row, col};
+    }
+    return null;
+}
+
+function handleClick(e) {
+    const rect = c.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top) * (H / rect.height);
+    handleInput(x, y);
+}
+
+function handleMove(e) {
+    const rect = c.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top) * (H / rect.height);
+    if (screen === SCREEN.PLAYING) {
+        hoverPos = getBoardPos(x, y);
+        if (hoverPos && board[hoverPos.row][hoverPos.col]) hoverPos = null;
+    }
+}
+
+function handleTouch(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = c.getBoundingClientRect();
+    const x = (touch.clientX - rect.left) * (W / rect.width);
+    const y = (touch.clientY - rect.top) * (H / rect.height);
+    handleInput(x, y);
+}
+
+function handleInput(x, y) {
+    if (screen === SCREEN.MENU) {
+        // Check difficulty buttons
+        const btnW = 200, btnH = 50;
+        const startX = W/2 - btnW/2;
+        const startY = H/2 + 20;
+        for (let i = 0; i < 3; i++) {
+            const by = startY + i * 70;
+            if (x >= startX && x <= startX+btnW && y >= by && y <= by+btnH) {
+                difficulty = i;
+                screen = SCREEN.PLAYING;
+                resetGame();
+                return;
+            }
+        }
+    } else if (screen === SCREEN.PLAYING) {
+        if (animatingPiece) return;
+        if (turn !== 'b') return;
+
+        const pos = getBoardPos(x, y);
+        if (pos && !board[pos.row][pos.col]) {
+            placePiece(pos.row, pos.col, 'b');
+        }
+
+        // Check undo button
+        const btnX = W - 100, btnY = 20;
+        if (x >= btnX && x <= btnX+80 && y >= btnY && y <= btnY+35) {
+            undoMove();
+        }
+
+        // Check menu button
+        if (x >= 20 && x <= 100 && y >= 20 && y <= 55) {
+            screen = SCREEN.MENU;
+        }
+    } else if (screen === SCREEN.GAMEOVER) {
+        // Check buttons
+        const btnW = 160, btnH = 45;
+        const startX = W/2 - btnW - 10;
+        const startY = H/2 + 80;
+        if (x >= startX && x <= startX+btnW && y >= startY && y <= startY+btnH) {
+            resetGame();
+            screen = SCREEN.PLAYING;
+            return;
+        }
+        if (x >= W/2+10 && x <= W/2+10+btnW && y >= startY && y <= startY+btnH) {
+            screen = SCREEN.MENU;
+            return;
+        }
+    }
+}
+
+// ==================== Game Logic ====================
+function placePiece(row, col, color) {
+    board[row][col] = color;
+    moveHistory.push({row, col, color});
+    lastMove = {row, col};
+
+    // Animate
+    animatingPiece = {row, col, color, progress: 0};
+    const animStart = performance.now();
+    function animate(now) {
+        animatingPiece.progress = Math.min(1, (now - animStart) / 200);
+        if (animatingPiece.progress < 1) {
+            requestAnimationFrame(animate);
+        } else {
+            animatingPiece = null;
+            if (color === 'b') {
+                // Check win after animation
+                const w = checkWin(row, col, color);
+                if (w) {
+                    winner = color;
+                    winLine = w;
+                    gameOverReason = '你赢了！';
+                    scores.win++;
+                    saveScores();
+                    setTimeout(() => { screen = SCREEN.GAMEOVER; }, 500);
+                    return;
+                }
+                if (isBoardFull()) {
+                    winner = 'draw';
+                    gameOverReason = '平局！';
+                    scores.draw++;
+                    saveScores();
+                    setTimeout(() => { screen = SCREEN.GAMEOVER; }, 500);
+                    return;
+                }
+                turn = 'w';
+                setTimeout(aiMove, 300);
+            } else {
+                // AI just moved
+                const w = checkWin(row, col, color);
+                if (w) {
+                    winner = color;
+                    winLine = w;
+                    gameOverReason = 'AI赢了！';
+                    scores.lose++;
+                    saveScores();
+                    setTimeout(() => { screen = SCREEN.GAMEOVER; }, 500);
+                    return;
+                }
+                if (isBoardFull()) {
+                    winner = 'draw';
+                    gameOverReason = '平局！';
+                    scores.draw++;
+                    saveScores();
+                    setTimeout(() => { screen = SCREEN.GAMEOVER; }, 500);
+                    return;
+                }
+                turn = 'b';
+            }
+        }
+        render();
+    }
+    requestAnimationFrame(animate);
+}
+
+function checkWin(row, col, color) {
+    const dirs = [{dr:0,dc:1},{dr:1,dc:0},{dr:1,dc:1},{dr:1,dc:-1}];
+    for (const {dr, dc} of dirs) {
+        let cells = [{row, col}];
+        // Forward
+        for (let i = 1; i < 5; i++) {
+            const r = row + dr*i, c = col + dc*i;
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE || board[r][c] !== color) break;
+            cells.push({row:r, col:c});
+        }
+        // Backward
+        for (let i = 1; i < 5; i++) {
+            const r = row - dr*i, c = col - dc*i;
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE || board[r][c] !== color) break;
+            cells.push({row:r, col:c});
+        }
+        if (cells.length >= 5) return cells;
+    }
+    return null;
+}
+
+function isBoardFull() {
+    for (let r = 0; r < BOARD_SIZE; r++)
+        for (let c = 0; c < BOARD_SIZE; c++)
+            if (!board[r][c]) return false;
+    return true;
+}
+
+function undoMove() {
+    if (moveHistory.length < 2) return;
+    if (winner) return;
+    // Undo AI move then player move
+    const aiMove = moveHistory.pop();
+    board[aiMove.row][aiMove.col] = null;
+    const playerMove = moveHistory.pop();
+    board[playerMove.row][playerMove.col] = null;
+    lastMove = moveHistory.length > 0 ? moveHistory[moveHistory.length-1] : null;
+    turn = 'b';
+}
+
+// ==================== AI Logic ====================
+function aiMove() {
+    let pos;
+    if (difficulty === 0) pos = aiSimple();
+    else if (difficulty === 1) pos = aiMedium();
+    else pos = aiHard();
+
+    if (pos) {
+        placePiece(pos.row, pos.col, 'w');
+    }
+}
+
+function aiSimple() {
+    // Random valid position near existing pieces
+    const empty = [];
+    for (let r = 0; r < BOARD_SIZE; r++)
+        for (let c = 0; c < BOARD_SIZE; c++)
+            if (!board[r][c]) empty.push({row:r, col:c});
+
+    if (empty.length === 0) return null;
+
+    // Prefer positions near existing pieces
+    const near = empty.filter(({row, col}) => {
+        for (let dr = -1; dr <= 1; dr++)
+            for (let dc = -1; dc <= 1; dc++) {
+                const r = row+dr, c = col+dc;
+                if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c]) return true;
+            }
+        return false;
+    });
+
+    const pool = near.length > 0 ? near : empty;
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function aiMedium() {
+    // Score each position
+    let best = null, bestScore = -Infinity;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            if (board[r][c]) continue;
+            const score = evaluatePosition(r, c);
+            if (score > bestScore) {
+                bestScore = score;
+                best = {row:r, col:c};
+            }
+        }
+    }
+    return best;
+}
+
+function aiHard() {
+    // Minimax with alpha-beta pruning (depth 2)
+    let best = null, bestScore = -Infinity;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            if (board[r][c]) continue;
+            if (!hasNeighbor(r, c, 2)) continue;
+            board[r][c] = 'w';
+            const score = minimax(2, false, -Infinity, Infinity);
+            board[r][c] = null;
+            if (score > bestScore) {
+                bestScore = score;
+                best = {row:r, col:c};
+            }
+        }
+    }
+    return best || aiMedium();
+}
+
+function minimax(depth, isMax, alpha, beta) {
+    if (depth === 0) return evaluateBoard();
+
+    const color = isMax ? 'w' : 'b';
+    let bestScore = isMax ? -Infinity : Infinity;
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            if (board[r][c]) continue;
+            if (!hasNeighbor(r, c, 2)) continue;
+
+            board[r][c] = color;
+            if (checkWin(r, c, color)) {
+                board[r][c] = null;
+                return isMax ? 100000 : -100000;
+            }
+
+            const score = minimax(depth-1, !isMax, alpha, beta);
+            board[r][c] = null;
+
+            if (isMax) {
+                bestScore = Math.max(bestScore, score);
+                alpha = Math.max(alpha, score);
+            } else {
+                bestScore = Math.min(bestScore, score);
+                beta = Math.min(beta, score);
+            }
+            if (beta <= alpha) break;
+        }
+    }
+    return bestScore;
+}
+
+function hasNeighbor(row, col, dist) {
+    for (let dr = -dist; dr <= dist; dr++)
+        for (let dc = -dist; dc <= dist; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const r = row+dr, c = col+dc;
+            if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c]) return true;
+        }
+    return false;
+}
+
+function evaluateBoard() {
+    let score = 0;
+    // Evaluate all lines
+    const lines = getAllLines();
+    for (const line of lines) {
+        score += evaluateLine(line);
+    }
+    return score;
+}
+
+function getAllLines() {
+    const lines = [];
+    // Rows
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        const line = [];
+        for (let c = 0; c < BOARD_SIZE; c++) line.push({row:r, col:c});
+        lines.push(line);
+    }
+    // Cols
+    for (let c = 0; c < BOARD_SIZE; c++) {
+        const line = [];
+        for (let r = 0; r < BOARD_SIZE; r++) line.push({row:r, col:c});
+        lines.push(line);
+    }
+    // Diagonals
+    for (let i = 0; i < BOARD_SIZE*2-1; i++) {
+        const line1 = [], line2 = [];
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            const c1 = i - r, c2 = BOARD_SIZE-1-i+r;
+            if (c1 >= 0 && c1 < BOARD_SIZE) line1.push({row:r, col:c1});
+            if (c2 >= 0 && c2 < BOARD_SIZE) line2.push({row:r, col:c2});
+        }
+        if (line1.length >= 5) lines.push(line1);
+        if (line2.length >= 5) lines.push(line2);
+    }
+    return lines;
+}
+
+function evaluateLine(line) {
+    let score = 0;
+    for (let i = 0; i <= line.length - 5; i++) {
+        const window = line.slice(i, i+5);
+        const wCount = window.filter(p => board[p.row][p.col] === 'w').length;
+        const bCount = window.filter(p => board[p.row][p.col] === 'b').length;
+        if (wCount > 0 && bCount === 0) {
+            if (wCount === 5) score += 100000;
+            else if (wCount === 4) score += 10000;
+            else if (wCount === 3) score += 1000;
+            else if (wCount === 2) score += 100;
+            else score += 10;
+        }
+        if (bCount > 0 && wCount === 0) {
+            if (bCount === 5) score -= 100000;
+            else if (bCount === 4) score -= 8000;
+            else if (bCount === 3) score -= 800;
+            else if (bCount === 2) score -= 80;
+            else score -= 8;
+        }
+    }
+    return score;
+}
+
+function evaluatePosition(row, col) {
+    let score = 0;
+    // Check all 4 directions
+    const dirs = [{dr:0,dc:1},{dr:1,dc:0},{dr:1,dc:1},{dr:1,dc:-1}];
+    for (const {dr, dc} of dirs) {
+        score += evaluateDirection(row, col, dr, dc, 'w') * 1.1; // AI slightly prioritized
+        score += evaluateDirection(row, col, dr, dc, 'b'); // Defense
+    }
+    // Center bonus
+    const center = BOARD_SIZE / 2;
+    const dist = Math.abs(row - center) + Math.abs(col - center);
+    score += Math.max(0, 10 - dist);
+    return score;
+}
+
+function evaluateDirection(row, col, dr, dc, color) {
+    let count = 0, openEnds = 0;
+    // Forward
+    for (let i = 1; i <= 4; i++) {
+        const r = row+dr*i, c = col+dc*i;
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+        if (board[r][c] === color) count++;
+        else {
+            if (!board[r][c]) openEnds++;
+            break;
+        }
+    }
+    // Backward
+    for (let i = 1; i <= 4; i++) {
+        const r = row-dr*i, c = col-dc*i;
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+        if (board[r][c] === color) count++;
+        else {
+            if (!board[r][c]) openEnds++;
+            break;
+        }
+    }
+
+    if (count >= 4) return 10000;
+    if (count === 3 && openEnds === 2) return 5000;
+    if (count === 3 && openEnds === 1) return 500;
+    if (count === 2 && openEnds === 2) return 200;
+    if (count === 2 && openEnds === 1) return 50;
+    if (count === 1 && openEnds === 2) return 10;
+    return 1;
+}
+
+// ==================== Rendering ====================
+function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    if (screen === SCREEN.MENU) {
+        renderMenu();
+    } else if (screen === SCREEN.PLAYING || screen === SCREEN.GAMEOVER) {
+        renderBoard();
+        renderUI();
+        if (screen === SCREEN.GAMEOVER) renderGameOver();
+    }
+
+    requestAnimationFrame(render);
+}
+
+function renderMenu() {
+    // Background
+    ctx.fillStyle = '#1a1510';
+    ctx.fillRect(0, 0, W, H);
+
+    // Title
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(W*0.1, 60)}px "Microsoft YaHei",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('五子棋', W/2, H/2 - 120);
+
+    ctx.fillStyle = '#888';
+    ctx.font = `${Math.min(W*0.04, 20)}px "Microsoft YaHei",sans-serif`;
+    ctx.fillText('先连成五子获胜', W/2, H/2 - 70);
+
+    // Difficulty buttons
+    const btnW = 200, btnH = 50;
+    const startX = W/2 - btnW/2;
+    const startY = H/2 + 20;
+    const labels = ['简单', '中等', '困难'];
+    const colors = ['#4CAF50', '#FF9800', '#f44336'];
+
+    for (let i = 0; i < 3; i++) {
+        const by = startY + i * 70;
+        ctx.fillStyle = colors[i];
+        ctx.beginPath();
+        roundRect(ctx, startX, by, btnW, btnH, 10);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold 20px "Microsoft YaHei",sans-serif`;
+        ctx.fillText(labels[i], W/2, by + 33);
+    }
+
+    // Scores
+    if (scores.win + scores.lose + scores.draw > 0) {
+        ctx.fillStyle = '#888';
+        ctx.font = `16px "Microsoft YaHei",sans-serif`;
+        ctx.fillText(`胜: ${scores.win}  负: ${scores.lose}  平: ${scores.draw}`, W/2, H/2 + 260);
+    }
+}
+
+function renderBoard() {
+    // Board background
+    const padding = cellSize;
+    ctx.fillStyle = '#d4a84b';
+    ctx.fillRect(boardX - padding/2, boardY - padding/2,
+                 cellSize*(BOARD_SIZE-1) + padding, cellSize*(BOARD_SIZE-1) + padding);
+
+    // Wood grain effect
+    ctx.fillStyle = '#c49a3c';
+    for (let i = 0; i < 20; i++) {
+        const y = boardY - padding/2 + (cellSize*(BOARD_SIZE-1) + padding) * i/20;
+        ctx.fillRect(boardX - padding/2, y, cellSize*(BOARD_SIZE-1) + padding, 1);
+    }
+
+    // Grid lines
+    ctx.strokeStyle = '#8b6914';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        // Horizontal
+        ctx.beginPath();
+        ctx.moveTo(boardX, boardY + i*cellSize);
+        ctx.lineTo(boardX + (BOARD_SIZE-1)*cellSize, boardY + i*cellSize);
+        ctx.stroke();
+        // Vertical
+        ctx.beginPath();
+        ctx.moveTo(boardX + i*cellSize, boardY);
+        ctx.lineTo(boardX + i*cellSize, boardY + (BOARD_SIZE-1)*cellSize);
+        ctx.stroke();
+    }
+
+    // Star points
+    const stars = [3, 7, 11];
+    ctx.fillStyle = '#8b6914';
+    for (const r of stars) {
+        for (const col of stars) {
+            ctx.beginPath();
+            ctx.arc(boardX + col*cellSize, boardY + r*cellSize, 4, 0, Math.PI*2);
+            ctx.fill();
+        }
+    }
+
+    // Hover preview
+    if (hoverPos && turn === 'b' && !winner && !animatingPiece) {
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.arc(boardX + hoverPos.col*cellSize, boardY + hoverPos.row*cellSize,
+                cellSize*0.4, 0, Math.PI*2);
+        ctx.fill();
+    }
+
+    // Pieces
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[r][col]) {
+                drawPiece(r, col, board[r][col], 1);
+            }
+        }
+    }
+
+    // Animating piece
+    if (animatingPiece) {
+        drawPiece(animatingPiece.row, animatingPiece.col, animatingPiece.color, animatingPiece.progress);
+    }
+
+    // Last move indicator
+    if (lastMove && !winner) {
+        ctx.strokeStyle = '#ff0';
+        ctx.lineWidth = 2;
+        const x = boardX + lastMove.col*cellSize;
+        const y = boardY + lastMove.row*cellSize;
+        const s = cellSize * 0.15;
+        ctx.beginPath();
+        ctx.moveTo(x-s, y-s); ctx.lineTo(x+s, y-s);
+        ctx.moveTo(x+s, y-s); ctx.lineTo(x+s, y+s);
+        ctx.moveTo(x+s, y+s); ctx.lineTo(x-s, y+s);
+        ctx.moveTo(x-s, y+s); ctx.lineTo(x-s, y-s);
+        ctx.stroke();
+    }
+
+    // Win line
+    if (winLine) {
+        ctx.strokeStyle = 'rgba(255,0,0,0.7)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        const first = winLine[0];
+        const last = winLine[winLine.length-1];
+        ctx.moveTo(boardX + first.col*cellSize, boardY + first.row*cellSize);
+        ctx.lineTo(boardX + last.col*cellSize, boardY + last.row*cellSize);
+        ctx.stroke();
+    }
+}
+
+function drawPiece(row, col, color, scale) {
+    const x = boardX + col*cellSize;
+    const y = boardY + row*cellSize;
+    const r = cellSize * 0.4 * scale;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(2, 3, r, r*0.7, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // Piece
+    if (color === 'b') {
+        const grad = ctx.createRadialGradient(-r*0.3, -r*0.3, r*0.1, 0, 0, r);
+        grad.addColorStop(0, '#555');
+        grad.addColorStop(1, '#111');
+        ctx.fillStyle = grad;
+    } else {
+        const grad = ctx.createRadialGradient(-r*0.3, -r*0.3, r*0.1, 0, 0, r);
+        grad.addColorStop(0, '#fff');
+        grad.addColorStop(1, '#ccc');
+        ctx.fillStyle = grad;
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI*2);
+    ctx.fill();
+
+    // Highlight
+    ctx.fillStyle = color === 'b' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(-r*0.2, -r*0.2, r*0.3, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+function renderUI() {
+    // Turn indicator
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(W*0.04, 18)}px "Microsoft YaHei",sans-serif`;
+    ctx.textAlign = 'left';
+    const turnText = winner ? '' : (turn === 'b' ? '你的回合 (黑棋)' : 'AI思考中...');
+    ctx.fillText(turnText, 20, 40);
+
+    // Difficulty
+    const diffLabels = ['简单', '中等', '困难'];
+    ctx.fillStyle = '#888';
+    ctx.font = `14px "Microsoft YaHei",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`难度: ${diffLabels[difficulty]}`, W/2, 30);
+
+    // Scores
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `16px "Microsoft YaHei",sans-serif`;
+    ctx.fillText(`胜:${scores.win} 负:${scores.lose} 平:${scores.draw}`, W/2, 55);
+
+    // Undo button
+    if (turn === 'b' && !winner && moveHistory.length >= 2) {
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        roundRect(ctx, W-100, 20, 80, 35, 8);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `16px "Microsoft YaHei",sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('悔棋', W-60, 43);
+    }
+
+    // Menu button
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    roundRect(ctx, 20, 55, 80, 35, 8);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `16px "Microsoft YaHei",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('菜单', 60, 78);
+}
+
+function renderGameOver() {
+    // Overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Result
+    ctx.fillStyle = winner === 'b' ? '#4CAF50' : (winner === 'w' ? '#f44336' : '#FF9800');
+    ctx.font = `bold ${Math.min(W*0.08, 48)}px "Microsoft YaHei",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(gameOverReason, W/2, H/2 - 20);
+
+    // Buttons
+    const btnW = 160, btnH = 45;
+    const startX = W/2 - btnW - 10;
+    const startY = H/2 + 80;
+
+    // Replay
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath();
+    roundRect(ctx, startX, startY, btnW, btnH, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold 18px "Microsoft YaHei",sans-serif`;
+    ctx.fillText('再来一局', startX + btnW/2, startY + 30);
+
+    // Menu
+    ctx.fillStyle = '#FF9800';
+    ctx.beginPath();
+    roundRect(ctx, W/2+10, startY, btnW, btnH, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText('返回菜单', W/2+10 + btnW/2, startY + 30);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.moveTo(x+r, y);
+    ctx.lineTo(x+w-r, y);
+    ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+    ctx.lineTo(x+w, y+h-r);
+    ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    ctx.lineTo(x+r, y+h);
+    ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+    ctx.lineTo(x, y+r);
+    ctx.quadraticCurveTo(x, y, x+r, y);
+    ctx.closePath();
+}
+
+// ==================== Start ====================
+init();
+render();
+
+})();
+</script>
+</body>
+</html>

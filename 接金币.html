@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>接金币</title>
+<style>
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+	-webkit-tap-highlight-color: transparent;
+}
+body {
+	background: #0a0a2e;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	min-height: 100vh;
+	overflow: hidden;
+	font-family: 'Segoe UI', Arial, sans-serif;
+}
+#gameCanvas {
+	background: linear-gradient(180deg, #0a0a2e 0%, #1a1a4e 50%, #2a2a5e 100%);
+	border: 2px solid #3a3a7e;
+	border-radius: 10px;
+	image-rendering: pixelated;
+}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// 画布尺寸
+const W = 400;
+const H = 700;
+canvas.width = W;
+canvas.height = H;
+
+// 游戏状态
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAME_OVER: 3 };
+let gameState = STATE.MENU;
+
+// ============ 游戏变量 ============
+let score = 0;
+let lives = 3;
+let timeLeft = 60;
+let highScore = parseInt(localStorage.getItem('coinCatcher_highScore')) || 0;
+let combo = 0;
+let comboTimer = 0;
+let difficulty = 1;
+let spawnTimer = 0;
+let gameTimer = 0;
+let shakeTimer = 0;
+let shakeX = 0;
+let shakeY = 0;
+let frameCount = 0;
+
+// 掉落物类型
+const ITEM_TYPES = {
+	COIN:   { id: 0, name: '金币',   points: 10,  color: '#FFD700', emoji: '🪙', radius: 14, weight: 50 },
+	DIAMOND:{ id: 1, name: '钻石',   points: 50,  color: '#00BFFF', emoji: '💎', radius: 12, weight: 15 },
+	BOMB:   { id: 2, name: '炸弹',   points: 0,   color: '#FF4444', emoji: '💣', radius: 14, weight: 20 },
+	CLOCK:  { id: 3, name: '时钟',   points: 0,   color: '#44FF44', emoji: '⏱️', radius: 13, weight: 10 },
+	STAR:   { id: 4, name: '星星',   points: 30,  color: '#FFAA00', emoji: '⭐', radius: 13, weight: 15 },
+	HEART:  { id: 5, name: '爱心',   points: 0,   color: '#FF69B4', emoji: '❤️', radius: 13, weight: 5  },
+};
+
+// 道具类型
+const POWERUP_TYPES = {
+	MAGNET:  { id: 0, name: '磁铁',   color: '#FF00FF', emoji: '🧲', duration: 5000, weight: 40 },
+	SHIELD:  { id: 1, name: '护盾',   color: '#00FFFF', emoji: '🛡️', duration: 0,   weight: 35 },
+	DOUBLE:  { id: 2, name: '双倍',   color: '#FFD700', emoji: '✨', duration: 8000, weight: 25 },
+};
+
+// 掉落物数组
+let items = [];
+let particles = [];
+let floatingTexts = [];
+
+// 玩家角色
+let player = {
+	x: W / 2,
+	y: H - 80,
+	width: 60,
+	height: 50,
+	speed: 7,
+	targetX: W / 2,
+	dir: 0,
+	frame: 0,
+	frameTimer: 0,
+	invincible: false,
+	invincibleTimer: 0,
+	hurtTimer: 0,
+};
+
+// 道具状态
+let powerups = {
+	magnet: false,
+	magnetTimer: 0,
+	shield: false,
+	double: false,
+	doubleTimer: 0,
+};
+
+// 输入
+let keys = {};
+let mouseX = W / 2;
+let useMouseControl = false;
+let touchActive = false;
+
+// ============ 工具函数 ============
+function rand(a, b) { return a + Math.random() * (b - a); }
+function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+function dist(x1, y1, x2, y2) { return Math.sqrt((x1-x2)**2 + (y1-y2)**2); }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ============ 粒子系统 ============
+function spawnParticles(x, y, color, count) {
+	for (let i = 0; i < count; i++) {
+		particles.push({
+			x: x, y: y,
+			vx: rand(-3, 3),
+			vy: rand(-5, -1),
+			life: rand(20, 40),
+			maxLife: 40,
+			color: color,
+			size: rand(2, 5),
+		});
+	}
+}
+
+function spawnFloatingText(x, y, text, color) {
+	floatingTexts.push({
+		x: x, y: y,
+		text: text,
+		color: color,
+		life: 60,
+		maxLife: 60,
+		vy: -2,
+	});
+}
+
+// ============ 生成掉落物 ============
+function spawnItem() {
+	// 选择类型
+	let totalWeight = 0;
+	let types = Object.values(ITEM_TYPES);
+	types.forEach(t => totalWeight += t.weight);
+	let r = Math.random() * totalWeight;
+	let chosen = types[0];
+	for (let t of types) {
+		r -= t.weight;
+		if (r <= 0) { chosen = t; break; }
+	}
+
+	// 高难度下炸弹概率增加
+	if (difficulty > 3 && Math.random() < 0.15) {
+		chosen = ITEM_TYPES.BOMB;
+	}
+
+	items.push({
+		x: rand(30, W - 30),
+		y: -20,
+		type: chosen,
+		speed: rand(1.5, 2.5) + difficulty * 0.3,
+		wobble: rand(0, Math.PI * 2),
+		wobbleSpeed: rand(0.02, 0.06),
+		wobbleAmp: rand(0.3, 1.2),
+		rotation: 0,
+		rotSpeed: rand(-0.05, 0.05),
+		caught: false,
+	});
+}
+
+function spawnPowerup() {
+	let totalWeight = 0;
+	let types = Object.values(POWERUP_TYPES);
+	types.forEach(t => totalWeight += t.weight);
+	let r = Math.random() * totalWeight;
+	let chosen = types[0];
+	for (let t of types) {
+		r -= t.weight;
+		if (r <= 0) { chosen = t; break; }
+	}
+
+	items.push({
+		x: rand(40, W - 40),
+		y: -25,
+		type: chosen,
+		isPowerup: true,
+		speed: rand(1.2, 1.8),
+		wobble: 0,
+		wobbleSpeed: 0,
+		wobbleAmp: 0,
+		rotation: 0,
+		rotSpeed: 0,
+		caught: false,
+	});
+}
+
+// ============ 初始化 ============
+function initGame() {
+	score = 0;
+	lives = 3;
+	timeLeft = 60;
+	combo = 0;
+	comboTimer = 0;
+	difficulty = 1;
+	spawnTimer = 0;
+	gameTimer = 0;
+	shakeTimer = 0;
+	frameCount = 0;
+	items = [];
+	particles = [];
+	floatingTexts = [];
+	player.x = W / 2;
+	player.targetX = W / 2;
+	player.dir = 0;
+	player.frame = 0;
+	player.invincible = false;
+	player.invincibleTimer = 0;
+	player.hurtTimer = 0;
+	powerups.magnet = false;
+	powerups.magnetTimer = 0;
+	powerups.shield = false;
+	powerups.double = false;
+	powerups.doubleTimer = 0;
+}
+
+// ============ 碰撞检测 ============
+function checkCatch(item) {
+	let px = player.x;
+	let py = player.y;
+	let pr = player.width / 2;
+	let ix = item.x;
+	let iy = item.y;
+	let ir = item.type.radius || 14;
+
+	// 简单矩形+圆形碰撞
+	let dx = Math.abs(ix - px);
+	let dy = Math.abs(iy - py);
+	return dx < (pr + ir) && dy < (player.height / 2 + ir);
+}
+
+// ============ 游戏更新 ============
+function update() {
+	if (gameState !== STATE.PLAYING) return;
+
+	frameCount++;
+	gameTimer++;
+
+	// 计时
+	if (frameCount % 60 === 0) {
+		timeLeft--;
+		if (timeLeft <= 0) {
+			timeLeft = 0;
+			gameOver();
+			return;
+		}
+	}
+
+	// 难度递增
+	difficulty = 1 + Math.floor(gameTimer / 600);
+
+	// 玩家移动
+	updatePlayer();
+
+	// 生成掉落物
+	spawnTimer++;
+	let spawnInterval = Math.max(15, 45 - difficulty * 4);
+	if (spawnTimer >= spawnInterval) {
+		spawnTimer = 0;
+		spawnItem();
+		// 偶尔生成道具
+		if (Math.random() < 0.06 + difficulty * 0.01) {
+			spawnPowerup();
+		}
+	}
+
+	// 更新掉落物
+	for (let i = items.length - 1; i >= 0; i--) {
+		let item = items[i];
+		item.y += item.speed;
+		item.wobble += item.wobbleSpeed;
+		item.x += Math.sin(item.wobble) * item.wobbleAmp;
+		item.rotation += item.rotSpeed;
+
+		// 磁铁效果：自动吸附
+		if (powerups.magnet && !item.isPowerup && item.type !== ITEM_TYPES.BOMB) {
+			let dx = player.x - item.x;
+			let dy = player.y - item.y;
+			let d = Math.sqrt(dx*dx + dy*dy);
+			if (d < 150 && d > 5) {
+				item.x += (dx / d) * 4;
+				item.y += (dy / d) * 3;
+			}
+		}
+
+		// 碰撞检测
+		if (!item.caught && checkCatch(item)) {
+			item.caught = true;
+			onCatchItem(item);
+			items.splice(i, 1);
+			continue;
+		}
+
+		// 超出屏幕
+		if (item.y > H + 30) {
+			if (!item.isPowerup && item.type !== ITEM_TYPES.BOMB) {
+				// 漏掉金币等扣连击
+				combo = 0;
+			}
+			items.splice(i, 1);
+		}
+	}
+
+	// 连击计时
+	if (comboTimer > 0) {
+		comboTimer--;
+		if (comboTimer <= 0) combo = 0;
+	}
+
+	// 道具计时
+	if (powerups.magnet) {
+		powerups.magnetTimer -= 16;
+		if (powerups.magnetTimer <= 0) powerups.magnet = false;
+	}
+	if (powerups.double) {
+		powerups.doubleTimer -= 16;
+		if (powerups.doubleTimer <= 0) powerups.double = false;
+	}
+
+	// 无敌计时
+	if (player.invincible) {
+		player.invincibleTimer--;
+		if (player.invincibleTimer <= 0) player.invincible = false;
+	}
+	if (player.hurtTimer > 0) player.hurtTimer--;
+
+	// 更新粒子
+	for (let i = particles.length - 1; i >= 0; i--) {
+		let p = particles[i];
+		p.x += p.vx;
+		p.y += p.vy;
+		p.vy += 0.15;
+		p.life--;
+		if (p.life <= 0) particles.splice(i, 1);
+	}
+
+	// 更新浮动文字
+	for (let i = floatingTexts.length - 1; i >= 0; i--) {
+		let ft = floatingTexts[i];
+		ft.y += ft.vy;
+		ft.life--;
+		if (ft.life <= 0) floatingTexts.splice(i, 1);
+	}
+
+	// 震屏效果
+	if (shakeTimer > 0) {
+		shakeTimer--;
+		shakeX = rand(-3, 3);
+		shakeY = rand(-3, 3);
+	} else {
+		shakeX = 0;
+		shakeY = 0;
+	}
+}
+
+// ============ 玩家移动 ============
+function updatePlayer() {
+	let moveDir = 0;
+
+	// 键盘控制
+	if (keys['ArrowLeft'] || keys['a'] || keys['A']) moveDir = -1;
+	if (keys['ArrowRight'] || keys['d'] || keys['D']) moveDir = 1;
+
+	if (moveDir !== 0) {
+		useMouseControl = false;
+		player.targetX = player.x + moveDir * player.speed;
+	} else if (useMouseControl) {
+		player.targetX = mouseX;
+	}
+
+	// 平滑移动
+	player.x = lerp(player.x, player.targetX, 0.2);
+
+	// 边界限制
+	player.x = clamp(player.x, player.width / 2, W - player.width / 2);
+
+	// 方向
+	if (Math.abs(player.x - player.targetX) > 1) {
+		player.dir = player.x < player.targetX ? 1 : -1;
+	}
+
+	// 动画帧
+	player.frameTimer++;
+	if (player.frameTimer > 8) {
+		player.frameTimer = 0;
+		player.frame = (player.frame + 1) % 4;
+	}
+}
+
+// ============ 接住物品 ============
+function onCatchItem(item) {
+	if (item.isPowerup) {
+		// 道具效果
+		let pt = item.type;
+		spawnParticles(item.x, item.y, pt.color, 15);
+		spawnFloatingText(item.x, item.y, pt.name + '!', pt.color);
+
+		if (pt === POWERUP_TYPES.MAGNET) {
+			powerups.magnet = true;
+			powerups.magnetTimer = pt.duration;
+		} else if (pt === POWERUP_TYPES.SHIELD) {
+			powerups.shield = true;
+		} else if (pt === POWERUP_TYPES.DOUBLE) {
+			powerups.double = true;
+			powerups.doubleTimer = pt.duration;
+		}
+		return;
+	}
+
+	let t = item.type;
+
+	if (t === ITEM_TYPES.BOMB) {
+		// 炸弹
+		if (powerups.shield) {
+			powerups.shield = false;
+			spawnParticles(item.x, item.y, '#00FFFF', 12);
+			spawnFloatingText(item.x, item.y, '护盾挡住了!', '#00FFFF');
+		} else {
+			lives--;
+			shakeTimer = 15;
+			player.hurtTimer = 30;
+			spawnParticles(item.x, item.y, '#FF4444', 20);
+			spawnFloatingText(item.x, item.y, '-1命', '#FF4444');
+			if (lives <= 0) {
+				gameOver();
+			}
+		}
+		return;
+	}
+
+	if (t === ITEM_TYPES.CLOCK) {
+		timeLeft = Math.min(timeLeft + 5, 99);
+		spawnParticles(item.x, item.y, t.color, 10);
+		spawnFloatingText(item.x, item.y, '+5s', t.color);
+		return;
+	}
+
+	if (t === ITEM_TYPES.HEART) {
+		if (lives < 5) {
+			lives++;
+			spawnParticles(item.x, item.y, t.color, 12);
+			spawnFloatingText(item.x, item.y, '+1命', t.color);
+		} else {
+			score += 20;
+			spawnFloatingText(item.x, item.y, '+20', t.color);
+		}
+		return;
+	}
+
+	// 普通得分物品
+	combo++;
+	comboTimer = 120;
+	let pts = t.points;
+	let bonus = Math.floor(combo / 5) * 5;
+	pts += bonus;
+	if (powerups.double) pts *= 2;
+	score += pts;
+
+	spawnParticles(item.x, item.y, t.color, 8);
+	let txt = '+' + pts;
+	if (combo >= 5) txt += ' x' + combo;
+	spawnFloatingText(item.x, item.y, txt, t.color);
+}
+
+// ============ 游戏结束 ============
+function gameOver() {
+	gameState = STATE.GAME_OVER;
+	if (score > highScore) {
+		highScore = score;
+		localStorage.setItem('coinCatcher_highScore', highScore);
+	}
+}
+
+// ============ 绘图 ============
+function draw() {
+	ctx.save();
+	ctx.translate(shakeX, shakeY);
+
+	// 背景
+	let grad = ctx.createLinearGradient(0, 0, 0, H);
+	grad.addColorStop(0, '#0a0a2e');
+	grad.addColorStop(0.5, '#1a1a4e');
+	grad.addColorStop(1, '#2a2a5e');
+	ctx.fillStyle = grad;
+	ctx.fillRect(0, 0, W, H);
+
+	// 背景装饰 - 星星
+	ctx.fillStyle = 'rgba(255,255,255,0.3)';
+	for (let i = 0; i < 30; i++) {
+		let sx = (i * 137 + frameCount * 0.1) % W;
+		let sy = (i * 89 + frameCount * 0.05) % H;
+		let ss = (i % 3) + 1;
+		ctx.fillRect(sx, sy, ss, ss);
+	}
+
+	if (gameState === STATE.MENU) {
+		drawMenu();
+	} else if (gameState === STATE.PLAYING) {
+		drawGame();
+		drawHUD();
+	} else if (gameState === STATE.PAUSED) {
+		drawGame();
+		drawHUD();
+		drawPause();
+	} else if (gameState === STATE.GAME_OVER) {
+		drawGame();
+		drawGameOver();
+	}
+
+	ctx.restore();
+}
+
+// ============ 绘制菜单 ============
+function drawMenu() {
+	// 标题
+	ctx.textAlign = 'center';
+
+	// 金币动画
+	let titleY = 160;
+	let coinBob = Math.sin(frameCount * 0.05) * 8;
+	drawEmoji(W/2, titleY + coinBob, '🪙', 60);
+
+	ctx.fillStyle = '#FFD700';
+	ctx.font = 'bold 42px "Segoe UI", Arial';
+	ctx.fillText('接金币', W/2, titleY + 60);
+
+	ctx.fillStyle = '#aaa';
+	ctx.font = '16px "Segoe UI", Arial';
+	ctx.fillText('接住从天而降的宝物!', W/2, titleY + 90);
+
+	// 操作说明
+	let iy = 300;
+	ctx.fillStyle = '#888';
+	ctx.font = '14px "Segoe UI", Arial';
+	ctx.fillText('← → 方向键 或 鼠标/触屏移动', W/2, iy);
+	ctx.fillText('🪙 金币 +10  💎 钻石 +50  ⏱️ 时钟 +5s', W/2, iy + 30);
+	ctx.fillText('💣 炸弹 -1命  ❤️ 爱心 +1命  ⭐ 星星 +30', W/2, iy + 60);
+
+	// 道具说明
+	ctx.fillStyle = '#777';
+	ctx.font = '13px "Segoe UI", Arial';
+	ctx.fillText('🧲 磁铁自动吸附  🛡️ 护盾免疫一次  ✨ 双倍得分', W/2, iy + 100);
+
+	// 最高分
+	if (highScore > 0) {
+		ctx.fillStyle = '#FFD700';
+		ctx.font = 'bold 18px "Segoe UI", Arial';
+		ctx.fillText('最高分: ' + highScore, W/2, iy + 150);
+	}
+
+	// 开始按钮
+	let btnY = iy + 190;
+	let btnW = 180;
+	let btnH = 50;
+	let btnPulse = Math.sin(frameCount * 0.08) * 3;
+
+	ctx.fillStyle = '#FFD700';
+	ctx.beginPath();
+	roundRect(ctx, W/2 - btnW/2, btnY + btnPulse, btnW, btnH, 25);
+	ctx.fill();
+
+	ctx.fillStyle = '#1a1a2e';
+	ctx.font = 'bold 20px "Segoe UI", Arial';
+	ctx.fillText('开始游戏', W/2, btnY + btnPulse + 33);
+
+	// 60秒提示
+	ctx.fillStyle = '#666';
+	ctx.font = '12px "Segoe UI", Arial';
+	ctx.fillText('60秒限时挑战', W/2, btnY + btnPulse + 75);
+}
+
+// ============ 绘制游戏 ============
+function drawGame() {
+	// 掉落物
+	for (let item of items) {
+		drawItem(item);
+	}
+
+	// 玩家
+	drawPlayer();
+
+	// 粒子
+	for (let p of particles) {
+		let alpha = p.life / p.maxLife;
+		ctx.globalAlpha = alpha;
+		ctx.fillStyle = p.color;
+		ctx.beginPath();
+		ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+		ctx.fill();
+	}
+	ctx.globalAlpha = 1;
+
+	// 浮动文字
+	for (let ft of floatingTexts) {
+		let alpha = ft.life / ft.maxLife;
+		ctx.globalAlpha = alpha;
+		ctx.fillStyle = ft.color;
+		ctx.font = 'bold 18px "Segoe UI", Arial';
+		ctx.textAlign = 'center';
+		ctx.fillText(ft.text, ft.x, ft.y);
+	}
+	ctx.globalAlpha = 1;
+}
+
+// ============ 绘制掉落物 ============
+function drawItem(item) {
+	ctx.save();
+	ctx.translate(item.x, item.y);
+
+	if (item.isPowerup) {
+		// 道具 - 发光效果
+		let glow = Math.sin(frameCount * 0.1) * 0.3 + 0.7;
+		ctx.globalAlpha = glow;
+		ctx.fillStyle = item.type.color;
+		ctx.beginPath();
+		ctx.arc(0, 0, 20, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.globalAlpha = 1;
+
+		drawEmoji(0, 0, item.type.emoji, 24);
+	} else {
+		// 普通物品
+		if (item.type === ITEM_TYPES.BOMB) {
+			// 炸弹特殊效果
+			let pulse = Math.sin(frameCount * 0.15) * 0.1 + 1;
+			ctx.scale(pulse, pulse);
+			drawEmoji(0, 0, '💣', 26);
+		} else {
+			// 旋转
+			ctx.rotate(item.rotation);
+			drawEmoji(0, 0, item.type.emoji, 24);
+		}
+	}
+
+	ctx.restore();
+}
+
+// ============ 绘制玩家 ============
+function drawPlayer() {
+	let px = player.x;
+	let py = player.y;
+
+	ctx.save();
+	ctx.translate(px, py);
+
+	// 受伤闪烁
+	if (player.hurtTimer > 0 && player.hurtTimer % 4 < 2) {
+		ctx.globalAlpha = 0.5;
+	}
+
+	// 无敌闪烁
+	if (player.invincible && player.invincibleTimer % 6 < 3) {
+		ctx.globalAlpha = 0.6;
+	}
+
+	// 护盾效果
+	if (powerups.shield) {
+		let shieldGlow = Math.sin(frameCount * 0.1) * 0.2 + 0.5;
+		ctx.strokeStyle = `rgba(0, 255, 255, ${shieldGlow})`;
+		ctx.lineWidth = 3;
+		ctx.beginPath();
+		ctx.arc(0, 0, 38, 0, Math.PI * 2);
+		ctx.stroke();
+	}
+
+	// 磁铁效果
+	if (powerups.magnet) {
+		let magnetGlow = Math.sin(frameCount * 0.08) * 0.3 + 0.4;
+		ctx.strokeStyle = `rgba(255, 0, 255, ${magnetGlow})`;
+		ctx.lineWidth = 2;
+		ctx.setLineDash([5, 5]);
+		ctx.beginPath();
+		ctx.arc(0, 0, 50, 0, Math.PI * 2);
+		ctx.stroke();
+		ctx.setLineDash([]);
+	}
+
+	// 篮子/角色身体
+	let bob = Math.sin(frameCount * 0.1) * 2;
+
+	// 身体
+	ctx.fillStyle = '#4488FF';
+	ctx.beginPath();
+	roundRect(ctx, -25, -15 + bob, 50, 35, 8);
+	ctx.fill();
+
+	// 篮子
+	ctx.fillStyle = '#8B4513';
+	ctx.beginPath();
+	ctx.moveTo(-28, 10 + bob);
+	ctx.lineTo(28, 10 + bob);
+	ctx.lineTo(24, 25 + bob);
+	ctx.lineTo(-24, 25 + bob);
+	ctx.closePath();
+	ctx.fill();
+
+	// 篮子条纹
+	ctx.strokeStyle = '#A0522D';
+	ctx.lineWidth = 1;
+	for (let i = -20; i <= 20; i += 10) {
+		ctx.beginPath();
+		ctx.moveTo(i, 10 + bob);
+		ctx.lineTo(i * 0.85, 25 + bob);
+		ctx.stroke();
+	}
+
+	// 头部
+	ctx.fillStyle = '#FFD4A0';
+	ctx.beginPath();
+	ctx.arc(0, -22 + bob, 14, 0, Math.PI * 2);
+	ctx.fill();
+
+	// 眼睛
+	let eyeDir = player.dir || 0;
+	ctx.fillStyle = '#333';
+	ctx.beginPath();
+	ctx.arc(-5 + eyeDir * 2, -24 + bob, 2.5, 0, Math.PI * 2);
+	ctx.arc(5 + eyeDir * 2, -24 + bob, 2.5, 0, Math.PI * 2);
+	ctx.fill();
+
+	// 表情
+	if (player.hurtTimer > 0) {
+		// 受伤
+		ctx.strokeStyle = '#333';
+		ctx.lineWidth = 2;
+		ctx.beginPath();
+		ctx.arc(0, -16 + bob, 5, 0.2, Math.PI - 0.2);
+		ctx.stroke();
+	} else {
+		// 微笑
+		ctx.strokeStyle = '#333';
+		ctx.lineWidth = 1.5;
+		ctx.beginPath();
+		ctx.arc(0, -18 + bob, 4, 0.2, Math.PI - 0.2);
+		ctx.stroke();
+	}
+
+	// 双倍得分效果
+	if (powerups.double) {
+		ctx.fillStyle = '#FFD700';
+		ctx.font = 'bold 10px Arial';
+		ctx.textAlign = 'center';
+		ctx.fillText('x2', 0, -38 + bob);
+	}
+
+	ctx.globalAlpha = 1;
+	ctx.restore();
+}
+
+// ============ 绘制HUD ============
+function drawHUD() {
+	ctx.textAlign = 'left';
+
+	// 分数
+	ctx.fillStyle = '#FFD700';
+	ctx.font = 'bold 22px "Segoe UI", Arial';
+	ctx.fillText('🪙 ' + score, 15, 35);
+
+	// 连击
+	if (combo >= 5) {
+		ctx.fillStyle = '#FF8800';
+		ctx.font = 'bold 16px "Segoe UI", Arial';
+		ctx.fillText('Combo x' + combo, 15, 58);
+	}
+
+	// 生命
+	ctx.textAlign = 'center';
+	ctx.fillStyle = '#FF69B4';
+	ctx.font = '18px "Segoe UI", Arial';
+	let heartStr = '';
+	for (let i = 0; i < lives; i++) heartStr += '❤️ ';
+	ctx.fillText(heartStr.trim(), W/2, 30);
+
+	// 时间
+	ctx.textAlign = 'right';
+	let timeColor = timeLeft <= 10 ? '#FF4444' : '#FFFFFF';
+	if (timeLeft <= 10 && frameCount % 30 < 15) timeColor = '#FF8888';
+	ctx.fillStyle = timeColor;
+	ctx.font = 'bold 22px "Segoe UI", Arial';
+	ctx.fillText('⏱ ' + timeLeft + 's', W - 15, 35);
+
+	// 难度
+	ctx.fillStyle = '#888';
+	ctx.font = '12px "Segoe UI", Arial';
+	ctx.fillText('Lv.' + difficulty, W - 15, 55);
+
+	// 道具状态栏
+	let statusY = 75;
+	ctx.textAlign = 'left';
+	if (powerups.magnet) {
+		let pct = powerups.magnetTimer / POWERUP_TYPES.MAGNET.duration;
+		drawPowerupBar(10, statusY, '🧲 磁铁', pct, '#FF00FF');
+		statusY += 22;
+	}
+	if (powerups.double) {
+		let pct = powerups.doubleTimer / POWERUP_TYPES.DOUBLE.duration;
+		drawPowerupBar(10, statusY, '✨ 双倍', pct, '#FFD700');
+		statusY += 22;
+	}
+	if (powerups.shield) {
+		ctx.fillStyle = '#00FFFF';
+		ctx.font = '13px "Segoe UI", Arial';
+		ctx.fillText('🛡️ 护盾', 10, statusY + 12);
+	}
+}
+
+function drawPowerupBar(x, y, label, pct, color) {
+	ctx.fillStyle = 'rgba(0,0,0,0.5)';
+	ctx.fillRect(x, y, 100, 16);
+	ctx.fillStyle = color;
+	ctx.fillRect(x, y, 100 * pct, 16);
+	ctx.fillStyle = '#FFF';
+	ctx.font = '11px "Segoe UI", Arial';
+	ctx.textAlign = 'left';
+	ctx.fillText(label, x + 5, y + 12);
+}
+
+// ============ 绘制暂停 ============
+function drawPause() {
+	ctx.fillStyle = 'rgba(0,0,0,0.6)';
+	ctx.fillRect(0, 0, W, H);
+
+	ctx.textAlign = 'center';
+	ctx.fillStyle = '#FFF';
+	ctx.font = 'bold 36px "Segoe UI", Arial';
+	ctx.fillText('暂停', W/2, H/2 - 20);
+
+	ctx.fillStyle = '#aaa';
+	ctx.font = '16px "Segoe UI", Arial';
+	ctx.fillText('点击或按空格继续', W/2, H/2 + 20);
+}
+
+// ============ 绘制游戏结束 ============
+function drawGameOver() {
+	ctx.fillStyle = 'rgba(0,0,0,0.7)';
+	ctx.fillRect(0, 0, W, H);
+
+	ctx.textAlign = 'center';
+
+	// 标题
+	ctx.fillStyle = '#FFD700';
+	ctx.font = 'bold 36px "Segoe UI", Arial';
+	ctx.fillText('时间到!', W/2, H/2 - 100);
+
+	// 分数
+	ctx.fillStyle = '#FFF';
+	ctx.font = 'bold 28px "Segoe UI", Arial';
+	ctx.fillText('得分: ' + score, W/2, H/2 - 50);
+
+	// 最高分
+	if (score >= highScore) {
+		ctx.fillStyle = '#FFD700';
+		ctx.font = 'bold 18px "Segoe UI", Arial';
+		ctx.fillText('新纪录!', W/2, H/2 - 15);
+	} else {
+		ctx.fillStyle = '#aaa';
+		ctx.font = '16px "Segoe UI", Arial';
+		ctx.fillText('最高分: ' + highScore, W/2, H/2 - 15);
+	}
+
+	// 重新开始按钮
+	let btnY = H/2 + 30;
+	let btnW = 160;
+	let btnH = 45;
+
+	ctx.fillStyle = '#FFD700';
+	ctx.beginPath();
+	roundRect(ctx, W/2 - btnW/2, btnY, btnW, btnH, 22);
+	ctx.fill();
+
+	ctx.fillStyle = '#1a1a2e';
+	ctx.font = 'bold 18px "Segoe UI", Arial';
+	ctx.fillText('再来一次', W/2, btnY + 30);
+}
+
+// ============ 圆角矩形 ============
+function roundRect(ctx, x, y, w, h, r) {
+	ctx.moveTo(x + r, y);
+	ctx.lineTo(x + w - r, y);
+	ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+	ctx.lineTo(x + w, y + h - r);
+	ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+	ctx.lineTo(x + r, y + h);
+	ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+	ctx.lineTo(x, y + r);
+	ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
+// ============ 绘制Emoji ============
+function drawEmoji(x, y, emoji, size) {
+	ctx.font = size + 'px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", Arial';
+	ctx.textAlign = 'center';
+	ctx.textBaseline = 'middle';
+	ctx.fillText(emoji, x, y + 2);
+}
+
+// ============ 游戏循环 ============
+function gameLoop() {
+	update();
+	draw();
+	requestAnimationFrame(gameLoop);
+}
+
+// ============ 事件处理 ============
+// 键盘
+document.addEventListener('keydown', e => {
+	keys[e.key] = true;
+	if (e.key === ' ' || e.key === 'Escape') {
+		e.preventDefault();
+		if (gameState === STATE.PLAYING) {
+			gameState = STATE.PAUSED;
+		} else if (gameState === STATE.PAUSED) {
+			gameState = STATE.PLAYING;
+		}
+	}
+	if (e.key === 'Enter' || e.key === ' ') {
+		if (gameState === STATE.MENU) {
+			initGame();
+			gameState = STATE.PLAYING;
+		} else if (gameState === STATE.GAME_OVER) {
+			initGame();
+			gameState = STATE.PLAYING;
+		}
+	}
+});
+
+document.addEventListener('keyup', e => {
+	keys[e.key] = false;
+});
+
+// 鼠标
+canvas.addEventListener('mousemove', e => {
+	let rect = canvas.getBoundingClientRect();
+	let scaleX = W / rect.width;
+	mouseX = (e.clientX - rect.left) * scaleX;
+	useMouseControl = true;
+	player.targetX = mouseX;
+});
+
+canvas.addEventListener('click', e => {
+	let rect = canvas.getBoundingClientRect();
+	let scaleX = W / rect.width;
+	let scaleY = H / rect.height;
+	let cx = (e.clientX - rect.left) * scaleX;
+	let cy = (e.clientY - rect.top) * scaleY;
+
+	if (gameState === STATE.MENU) {
+		initGame();
+		gameState = STATE.PLAYING;
+	} else if (gameState === STATE.PAUSED) {
+		gameState = STATE.PLAYING;
+	} else if (gameState === STATE.GAME_OVER) {
+		// 检查按钮
+		let btnY = H/2 + 30;
+		if (cx > W/2 - 80 && cx < W/2 + 80 && cy > btnY && cy < btnY + 45) {
+			initGame();
+			gameState = STATE.PLAYING;
+		}
+	}
+});
+
+// 触屏
+canvas.addEventListener('touchstart', e => {
+	e.preventDefault();
+	touchActive = true;
+	let rect = canvas.getBoundingClientRect();
+	let scaleX = W / rect.width;
+	let touch = e.touches[0];
+	mouseX = (touch.clientX - rect.left) * scaleX;
+	useMouseControl = true;
+	player.targetX = mouseX;
+
+	if (gameState === STATE.MENU) {
+		initGame();
+		gameState = STATE.PLAYING;
+	} else if (gameState === STATE.PAUSED) {
+		gameState = STATE.PLAYING;
+	} else if (gameState === STATE.GAME_OVER) {
+		let scaleY = H / rect.height;
+		let cy = (touch.clientY - rect.top) * scaleY;
+		let btnY = H/2 + 30;
+		if (mouseX > W/2 - 80 && mouseX < W/2 + 80 && cy > btnY && cy < btnY + 45) {
+			initGame();
+			gameState = STATE.PLAYING;
+		}
+	}
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+	e.preventDefault();
+	if (!touchActive) return;
+	let rect = canvas.getBoundingClientRect();
+	let scaleX = W / rect.width;
+	let touch = e.touches[0];
+	mouseX = (touch.clientX - rect.left) * scaleX;
+	useMouseControl = true;
+	player.targetX = mouseX;
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+	e.preventDefault();
+	touchActive = false;
+}, { passive: false });
+
+// 响应式画布
+function resizeCanvas() {
+	let maxW = window.innerWidth * 0.95;
+	let maxH = window.innerHeight * 0.95;
+	let scale = Math.min(maxW / W, maxH / H, 1);
+	canvas.style.width = (W * scale) + 'px';
+	canvas.style.height = (H * scale) + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// 启动
+gameLoop();
+</script>
+</body>
+</html>
