@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>城市建造</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+'use strict';
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+let W,H,SCALE=1;
+function resize(){W=cv.width=innerWidth;H=cv.height=innerHeight;SCALE=Math.min(W/800,H/600)}
+addEventListener('resize',resize);resize();
+
+// ========== AUDIO ==========
+const AudioCtx=window.AudioContext||window.webkitAudioContext;
+let audioCtx=null;
+function ensureAudio(){if(!audioCtx)audioCtx=new AudioCtx()}
+function playTone(f,d,t,v){
+    if(!audioCtx)return;
+    const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type=t||'sine';o.frequency.value=f;g.gain.value=v||0.15;
+    g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+    o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
+}
+function sfxBuild(){playTone(440,0.1,'square',0.1);playTone(550,0.15,'square',0.08)}
+function sfxPlace(){playTone(660,0.08,'sine',0.12)}
+function sfxError(){playTone(200,0.2,'sawtooth',0.1)}
+function sfxLevel(){playTone(523,0.1,'sine',0.15);setTimeout(()=>playTone(659,0.1,'sine',0.15),100);setTimeout(()=>playTone(784,0.2,'sine',0.15),200)}
+function sfxClick(){playTone(800,0.05,'sine',0.08)}
+
+// ========== CONSTANTS ==========
+const TILE=40;
+const GRID_W=20,GRID_H=15;
+const BUILDING_TYPES=[
+    {id:'house',name:'住宅',cost:100,pop:4,color:'#4CAF50',desc:'提供4人口',icon:'🏠'},
+    {id:'farm',name:'农场',cost:80,food:8,color:'#8BC34A',desc:'提供8食物',icon:'🌾'},
+    {id:'market',name:'市场',cost:200,income:15,color:'#FF9800',desc:'每秒+15金币',icon:'🏪'},
+    {id:'factory',name:'工厂',cost:300,income:30,food:-2,color:'#795548',desc:'每秒+30金币，-2食物',icon:'🏭'},
+    {id:'park',name:'公园',cost:150,happy:10,color:'#00BCD4',desc:'+10幸福度',icon:'🌳'},
+    {id:'school',name:'学校',cost:250,happy:5,income:5,color:'#9C27B0',desc:'+5幸福度，+5金币',icon:'🏫'},
+    {id:'hospital',name:'医院',cost:350,happy:8,color:'#E91E63',desc:'+8幸福度，降低死亡率',icon:'🏥'},
+    {id:'power',name:'发电站',cost:500,energy:20,color:'#FFC107',desc:'提供20能源',icon:'⚡'},
+    {id:'road',name:'道路',cost:20,color:'#666',desc:'连接建筑',icon:'🛤️'},
+    {id:'deco',name:'装饰',cost:50,happy:3,color:'#E040FB',desc:'+3幸福度',icon:'🎨'},
+];
+const UPGRADE_COST_MULT=1.8;
+const TAX_PER_POP=2;
+
+// ========== GAME STATE ==========
+const G={
+    state:'menu', // menu/play/pause/over
+    grid:[], // 2D array: {type,level,x,y} or null
+    money:500,
+    population:0,
+    maxPop:0,
+    food:0,
+    happiness:50,
+    energy:0,
+    income:0,
+    day:1,
+    dayTimer:0,
+    dayDuration:600, // frames per day
+    score:0,
+    highScore:parseInt(localStorage.getItem('cityBuilder_highScore'))||0,
+    selectedBuilding:0,
+    cameraX:0,cameraY:0,
+    isDragging:false,
+    dragStartX:0,dragStartY:0,
+    camStartX:0,camStartY:0,
+    touchStartX:0,touchStartY:0,
+    touchMoved:false,
+    animTimer:0,
+    notifications:[],
+    gameSpeed:1,
+    totalBuildings:0,
+    gameOverReason:'',
+    paused:false,
+};
+
+// ========== GRID INIT ==========
+function initGrid(){
+    G.grid=[];
+    for(let y=0;y<GRID_H;y++){
+        G.grid[y]=[];
+        for(let x=0;x<GRID_W;x++){
+            G.grid[y][x]=null;
+        }
+    }
+}
+
+// ========== BUILDING PLACEMENT ==========
+function canPlace(gx,gy){
+    if(gx<0||gx>=GRID_W||gy<0||gy>=GRID_H)return false;
+    if(G.grid[gy][gx]!==null)return false;
+    return true;
+}
+
+function placeBuilding(gx,gy){
+    const bt=BUILDING_TYPES[G.selectedBuilding];
+    if(!canPlace(gx,gy)){sfxError();addNotification('无法放置！',-1);return false}
+    if(G.money<bt.cost){sfxError();addNotification('金币不足！',-1);return false}
+    G.money-=bt.cost;
+    G.grid[gy][gx]={type:G.selectedBuilding,level:1,x:gx,y:gy,animPhase:0};
+    G.totalBuildings++;
+    sfxPlace();
+    recalcResources();
+    return true;
+}
+
+function upgradeBuilding(gx,gy){
+    const cell=G.grid[gy][gx];
+    if(!cell)return false;
+    if(cell.level>=3){addNotification('已达最高等级！',-1);return false}
+    const cost=Math.floor(BUILDING_TYPES[cell.type].cost*UPGRADE_COST_MULT*cell.level);
+    if(G.money<cost){sfxError();addNotification('金币不足！',-1);return false}
+    G.money-=cost;
+    cell.level++;
+    sfxBuild();
+    addNotification('升级成功！Lv'+cell.level,1);
+    recalcResources();
+    return true;
+}
+
+function demolishBuilding(gx,gy){
+    const cell=G.grid[gy][gx];
+    if(!cell)return false;
+    const refund=Math.floor(BUILDING_TYPES[cell.type].cost*0.5*cell.level);
+    G.money+=refund;
+    G.grid[gy][gx]=null;
+    G.totalBuildings--;
+    sfxClick();
+    addNotification('拆除 +'+refund+'金币',1);
+    recalcResources();
+    return true;
+}
+
+// ========== RESOURCE CALC ==========
+function recalcResources(){
+    let pop=0,maxPop=0,food=0,happy=50,energy=0,income=0;
+    for(let y=0;y<GRID_H;y++){
+        for(let x=0;x<GRID_W;x++){
+            const cell=G.grid[y][x];
+            if(!cell)continue;
+            const bt=BUILDING_TYPES[cell.type];
+            const lv=cell.level;
+            const mult=1+(lv-1)*0.5;
+            if(bt.pop)maxPop+=Math.floor(bt.pop*mult);
+            if(bt.food)food+=Math.floor(bt.food*mult);
+            if(bt.happy)happy+=Math.floor(bt.happy*mult);
+            if(bt.energy)energy+=Math.floor(bt.energy*mult);
+            if(bt.income)income+=Math.floor(bt.income*mult);
+        }
+    }
+    // Adjacency bonus
+    for(let y=0;y<GRID_H;y++){
+        for(let x=0;x<GRID_W;x++){
+            const cell=G.grid[y][x];
+            if(!cell)continue;
+            const bt=BUILDING_TYPES[cell.type];
+            // Park boosts adjacent happiness
+            if(bt.id==='park'){
+                const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
+                for(const[dx,dy]of dirs){
+                    const nx=x+dx,ny=y+dy;
+                    if(nx>=0&&nx<GRID_W&&ny>=0&&ny<GRID_H&&G.grid[ny][nx]){
+                        happy+=2*cell.level;
+                    }
+                }
+            }
+            // Power boosts adjacent factories
+            if(bt.id==='power'){
+                const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
+                for(const[dx,dy]of dirs){
+                    const nx=x+dx,ny=y+dy;
+                    if(nx>=0&&nx<GRID_W&&ny>=0&&ny<GRID_H&&G.grid[ny][nx]&&BUILDING_TYPES[G.grid[ny][nx].type].id==='factory'){
+                        income+=10*cell.level;
+                    }
+                }
+            }
+        }
+    }
+    // Population limited by food
+    pop=Math.min(maxPop,food*2);
+    G.population=pop;
+    G.maxPop=maxPop;
+    G.food=food;
+    G.happiness=Math.min(100,Math.max(0,happy));
+    G.energy=energy;
+    G.income=income;
+}
+
+// ========== NOTIFICATIONS ==========
+function addNotification(text,type){
+    G.notifications.push({text,type,timer:120,alpha:1});
+    if(G.notifications.length>5)G.notifications.shift();
+}
+
+// ========== GAME LOOP ==========
+function updateGame(){
+    if(G.state!=='play'||G.paused)return;
+    G.animTimer++;
+    // Day cycle
+    G.dayTimer++;
+    if(G.dayTimer>=G.dayDuration){
+        G.dayTimer=0;
+        G.day++;
+        // Daily income
+        const dailyIncome=G.income+G.population*TAX_PER_POP;
+        G.money+=dailyIncome;
+        // Happiness affects score
+        const happyBonus=G.happiness>70?10:G.happiness>40?5:0;
+        G.score+=dailyIncome+happyBonus;
+        // Check game over conditions
+        if(G.population===0&&G.day>5){
+            G.state='over';
+            G.gameOverReason='没有居民愿意住在你的城市！';
+            endGame();
+        }
+        if(G.money<-200){
+            G.state='over';
+            G.gameOverReason='城市破产了！';
+            endGame();
+        }
+        // Random events every 10 days
+        if(G.day%10===0){
+            const evt=Math.random();
+            if(evt<0.3){
+                addNotification('丰收季节！+200金币',1);
+                G.money+=200;
+            }else if(evt<0.5){
+                addNotification('暴风雨来袭！-100金币',-1);
+                G.money-=100;
+            }
+        }
+        // Level up milestones
+        if(G.day%20===0){
+            sfxLevel();
+            addNotification('第'+G.day+'天！城市发展良好！',1);
+        }
+    }
+    // Update notifications
+    for(let i=G.notifications.length-1;i>=0;i--){
+        G.notifications[i].timer--;
+        if(G.notifications[i].timer<30)G.notifications[i].alpha=G.notifications[i].timer/30;
+        if(G.notifications[i].timer<=0)G.notifications.splice(i,1);
+    }
+    // Check achievements every 30 frames
+    if(G.animTimer%30===0)checkAchievements();
+    // Building animations
+    for(let y=0;y<GRID_H;y++){
+        for(let x=0;x<GRID_W;x++){
+            if(G.grid[y][x])G.grid[y][x].animPhase+=0.02;
+        }
+    }
+}
+
+// ========== RENDER ==========
+function drawGrid(){
+    const ox=G.cameraX,oy=G.cameraY;
+    // Grid lines
+    ctx.strokeStyle='rgba(255,255,255,0.08)';
+    ctx.lineWidth=1;
+    for(let x=0;x<=GRID_W;x++){
+        ctx.beginPath();
+        ctx.moveTo(ox+x*TILE,oy);
+        ctx.lineTo(ox+x*TILE,oy+GRID_H*TILE);
+        ctx.stroke();
+    }
+    for(let y=0;y<=GRID_H;y++){
+        ctx.beginPath();
+        ctx.moveTo(ox,oy+y*TILE);
+        ctx.lineTo(ox+GRID_W*TILE,oy+y*TILE);
+        ctx.stroke();
+    }
+}
+
+function drawBuilding(x,y,cell){
+    const bt=BUILDING_TYPES[cell.type];
+    const px=G.cameraX+x*TILE;
+    const py=G.cameraY+y*TILE;
+    const s=TILE-4;
+    const bounce=Math.sin(cell.animPhase)*1.5;
+    // Shadow
+    ctx.fillStyle='rgba(0,0,0,0.2)';
+    ctx.fillRect(px+4,py+4+s,s,s*0.1);
+    // Building body
+    ctx.fillStyle=bt.color;
+    const h=s*(0.6+cell.level*0.15);
+    ctx.fillRect(px+2,py+2+s-h+bounce,s,h);
+    // Level indicator
+    if(cell.level>1){
+        ctx.fillStyle='#FFD700';
+        ctx.font='bold 10px sans-serif';
+        ctx.textAlign='center';
+        ctx.fillText('★'.repeat(cell.level-1),px+TILE/2,py+8+bounce);
+    }
+    // Icon
+    ctx.font='18px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(bt.icon,px+TILE/2,py+TILE/2+bounce);
+    // Energy warning
+    if(bt.energy){
+        ctx.fillStyle='rgba(255,255,0,0.3+Math.sin(G.animTimer*0.1)*0.2)';
+        ctx.beginPath();
+        ctx.arc(px+TILE/2,py+TILE/2,8+Math.sin(G.animTimer*0.05)*2,0,Math.PI*2);
+        ctx.fill();
+    }
+}
+
+function drawSelectionHighlight(gx,gy){
+    const px=G.cameraX+gx*TILE;
+    const py=G.cameraY+gy*TILE;
+    const bt=BUILDING_TYPES[G.selectedBuilding];
+    if(canPlace(gx,gy)){
+        ctx.strokeStyle='rgba(76,175,80,0.8)';
+        ctx.fillStyle=bt.color+'44';
+    }else{
+        ctx.strokeStyle='rgba(244,67,54,0.8)';
+        ctx.fillStyle='rgba(244,67,54,0.2)';
+    }
+    ctx.lineWidth=2;
+    ctx.fillRect(px,py,TILE,TILE);
+    ctx.strokeRect(px,py,TILE,TILE);
+    // Preview icon
+    ctx.globalAlpha=0.5;
+    ctx.font='18px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(bt.icon,px+TILE/2,py+TILE/2);
+    ctx.globalAlpha=1;
+}
+
+function drawHUD(){
+    const pad=10;
+    const barW=W-pad*2;
+    const barH=50;
+    // Top bar background
+    ctx.fillStyle='rgba(0,0,0,0.7)';
+    ctx.fillRect(0,0,W,barH);
+    // Resources
+    ctx.font='bold 13px sans-serif';
+    ctx.textAlign='left';
+    ctx.textBaseline='middle';
+    const res=[
+        {icon:'💰',val:G.money,color:'#FFD700'},
+        {icon:'👥',val:G.population+'/'+G.maxPop,color:'#4CAF50'},
+        {icon:'🌾',val:G.food,color:'#8BC34A'},
+        {icon:'😊',val:G.happiness+'%',color:'#00BCD4'},
+        {icon:'⚡',val:G.energy,color:'#FFC107'},
+        {icon:'📈',val:'+'+G.income+'/s',color:'#FF9800'},
+    ];
+    let rx=pad;
+    for(const r of res){
+        ctx.font='16px sans-serif';
+        ctx.fillStyle='#fff';
+        ctx.fillText(r.icon,rx,barH/2);
+        ctx.font='bold 12px sans-serif';
+        ctx.fillStyle=r.color;
+        ctx.fillText(r.val,rx+20,barH/2);
+        rx+=Math.max(80,ctx.measureText(r.val).width+30);
+    }
+    // Day counter
+    ctx.textAlign='right';
+    ctx.font='bold 14px sans-serif';
+    ctx.fillStyle='#fff';
+    ctx.fillText('第'+G.day+'天',W-pad,barH/2-8);
+    ctx.font='11px sans-serif';
+    ctx.fillStyle='#aaa';
+    const dayProg=Math.floor(G.dayTimer/G.dayDuration*100);
+    ctx.fillText('进度 '+dayProg+'%',W-pad,barH/2+8);
+    // Score
+    ctx.textAlign='center';
+    ctx.font='bold 14px sans-serif';
+    ctx.fillStyle='#FFD700';
+    ctx.fillText('得分: '+G.score,W/2,barH/2);
+    // Bottom toolbar
+    const toolH=70;
+    const toolY=H-toolH;
+    ctx.fillStyle='rgba(0,0,0,0.8)';
+    ctx.fillRect(0,toolY,W,toolH);
+    // Building buttons
+    const btnW=Math.min(60,W/BUILDING_TYPES.length-4);
+    const startX=(W-btnW*BUILDING_TYPES.length-4*(BUILDING_TYPES.length-1))/2;
+    for(let i=0;i<BUILDING_TYPES.length;i++){
+        const bt=BUILDING_TYPES[i];
+        const bx=startX+i*(btnW+4);
+        const by=toolY+5;
+        const bh=toolH-10;
+        // Button bg
+        if(i===G.selectedBuilding){
+            ctx.fillStyle=bt.color;
+            ctx.fillRect(bx-2,by-2,btnW+4,bh+4);
+        }
+        ctx.fillStyle=i===G.selectedBuilding?'rgba(0,0,0,0.3)':'rgba(255,255,255,0.1)';
+        ctx.fillRect(bx,by,btnW,bh);
+        // Icon
+        ctx.font='20px sans-serif';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        ctx.fillText(bt.icon,bx+btnW/2,by+bh/2-8);
+        // Cost
+        ctx.font='bold 9px sans-serif';
+        ctx.fillStyle=G.money>=bt.cost?'#4CAF50':'#F44336';
+        ctx.fillText('$'+bt.cost,bx+btnW/2,by+bh/2+12);
+    }
+    // Speed button
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    ctx.fillRect(W-60,toolY+5,50,25);
+    ctx.font='bold 12px sans-serif';
+    ctx.fillStyle='#fff';
+    ctx.textAlign='center';
+    ctx.fillText('速度'+G.gameSpeed+'x',W-35,toolY+17);
+    // Achievements button
+    ctx.fillStyle='rgba(255,215,0,0.2)';
+    ctx.fillRect(W-120,toolY+5,50,25);
+    ctx.fillStyle='#FFD700';
+    ctx.font='bold 12px sans-serif';
+    ctx.fillText('成就',W-95,toolY+17);
+    // Notifications
+    for(let i=0;i<G.notifications.length;i++){
+        const n=G.notifications[i];
+        const ny=barH+10+i*25;
+        ctx.globalAlpha=n.alpha;
+        ctx.font='bold 13px sans-serif';
+        ctx.textAlign='center';
+        ctx.fillStyle=n.type>0?'#4CAF50':'#F44336';
+        ctx.fillText(n.text,W/2,ny);
+        ctx.globalAlpha=1;
+    }
+    // Pause hint
+    if(G.paused){
+        ctx.fillStyle='rgba(0,0,0,0.6)';
+        ctx.fillRect(0,0,W,H);
+        ctx.font='bold 40px sans-serif';
+        ctx.fillStyle='#fff';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        ctx.fillText('暂停中',W/2,H/2-20);
+        ctx.font='16px sans-serif';
+        ctx.fillStyle='#aaa';
+        ctx.fillText('点击继续 或 按P键',W/2,H/2+20);
+    }
+}
+
+function drawMenu(){
+    // Background
+    ctx.fillStyle='#1a1a2e';
+    ctx.fillRect(0,0,W,H);
+    // Title
+    ctx.font='bold 48px sans-serif';
+    ctx.fillStyle='#FFD700';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('城市建造',W/2,H*0.25);
+    // Subtitle
+    ctx.font='18px sans-serif';
+    ctx.fillStyle='#aaa';
+    ctx.fillText('建造你的梦想城市',W/2,H*0.35);
+    // Start button
+    const btnW=200,btnH=50;
+    const bx=W/2-btnW/2,by=H*0.5;
+    ctx.fillStyle='#4CAF50';
+    ctx.fillRect(bx,by,btnW,btnH);
+    ctx.font='bold 20px sans-serif';
+    ctx.fillStyle='#fff';
+    ctx.fillText('开始游戏',W/2,by+btnH/2);
+    // High score
+    ctx.font='16px sans-serif';
+    ctx.fillStyle='#FFD700';
+    ctx.fillText('最高分: '+G.highScore,W/2,by+btnH+30);
+    // Instructions
+    ctx.font='13px sans-serif';
+    ctx.fillStyle='#888';
+    const instructions=[
+        '操作说明:',
+        '鼠标/触屏: 选择建筑并点击地图放置',
+        '右键/长按: 升级建筑',
+        'Delete/双击: 拆除建筑',
+        'P键: 暂停 | 滚轮/拖拽: 移动视角',
+        '1-0键: 快速选择建筑',
+    ];
+    for(let i=0;i<instructions.length;i++){
+        ctx.fillText(instructions[i],W/2,H*0.7+i*20);
+    }
+    // Version
+    ctx.fillStyle='#444';
+    ctx.fillText('v1.0 | Canvas+JS',W/2,H-20);
+}
+
+function drawGameOver(){
+    ctx.fillStyle='rgba(0,0,0,0.8)';
+    ctx.fillRect(0,0,W,H);
+    ctx.font='bold 40px sans-serif';
+    ctx.fillStyle='#F44336';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('游戏结束',W/2,H*0.3);
+    ctx.font='18px sans-serif';
+    ctx.fillStyle='#fff';
+    ctx.fillText(G.gameOverReason,W/2,H*0.4);
+    ctx.font='bold 24px sans-serif';
+    ctx.fillStyle='#FFD700';
+    ctx.fillText('最终得分: '+G.score,W/2,H*0.5);
+    ctx.font='16px sans-serif';
+    ctx.fillStyle='#aaa';
+    ctx.fillText('最高分: '+G.highScore,W/2,H*0.55);
+    if(G.score>=G.highScore){
+        ctx.fillStyle='#4CAF50';
+        ctx.fillText('新纪录！',W/2,H*0.6);
+    }
+    // Restart button
+    const btnW=180,btnH=45;
+    const bx=W/2-btnW/2,by=H*0.7;
+    ctx.fillStyle='#4CAF50';
+    ctx.fillRect(bx,by,btnW,btnH);
+    ctx.font='bold 18px sans-serif';
+    ctx.fillStyle='#fff';
+    ctx.fillText('重新开始',W/2,by+btnH/2);
+    // Back to menu
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    ctx.fillRect(bx,by+60,btnW,btnH);
+    ctx.fillStyle='#fff';
+    ctx.fillText('返回菜单',W/2,by+60+btnH/2);
+}
+
+function drawAchievementsPanel(){
+    const panelW=300,panelH=400;
+    const px=W/2-panelW/2,py=H/2-panelH/2;
+    ctx.fillStyle='rgba(0,0,0,0.9)';
+    ctx.fillRect(px,py,panelW,panelH);
+    ctx.strokeStyle='#FFD700';
+    ctx.lineWidth=2;
+    ctx.strokeRect(px,py,panelW,panelH);
+    ctx.font='bold 18px sans-serif';
+    ctx.fillStyle='#FFD700';
+    ctx.textAlign='center';
+    ctx.textBaseline='top';
+    ctx.fillText('成就系统',W/2,py+10);
+    let ay=py+40;
+    for(const a of ACHIEVEMENTS){
+        const unlocked=achievementsUnlocked.includes(a.id);
+        ctx.fillStyle=unlocked?'rgba(76,175,80,0.2)':'rgba(255,255,255,0.05)';
+        ctx.fillRect(px+10,ay,panelW-20,32);
+        ctx.font='12px sans-serif';
+        ctx.textAlign='left';
+        ctx.fillStyle=unlocked?'#4CAF50':'#666';
+        ctx.fillText((unlocked?'✓':'✗')+' '+a.name,px+18,ay+6);
+        ctx.fillStyle=unlocked?'#aaa':'#555';
+        ctx.font='10px sans-serif';
+        ctx.fillText(a.desc+' (奖励:'+a.reward+')',px+18,ay+20);
+        ay+=38;
+    }
+    ctx.font='12px sans-serif';
+    ctx.fillStyle='#888';
+    ctx.textAlign='center';
+    ctx.fillText('点击关闭',W/2,py+panelH-20);
+}
+
+let showAchievements=false;
+
+function render(){
+    ctx.clearRect(0,0,W,H);
+    if(G.state==='menu'){
+        drawMenu();
+        return;
+    }
+    // Game background
+    ctx.fillStyle='#2d5a27';
+    ctx.fillRect(0,0,W,H);
+    drawGrid();
+    // Buildings
+    for(let y=0;y<GRID_H;y++){
+        for(let x=0;x<GRID_W;x++){
+            if(G.grid[y][x])drawBuilding(x,y,G.grid[y][x]);
+        }
+    }
+    // Hover highlight
+    if(G.state==='play'&&!G.paused&&hoverGX>=0&&hoverGY>=0&&hoverGX<GRID_W&&hoverGY<GRID_H){
+        if(!G.grid[hoverGY][hoverGX]){
+            drawSelectionHighlight(hoverGX,hoverGY);
+        }
+    }
+    drawHUD();
+    drawMinimap();
+    drawTooltip();
+    if(showAchievements)drawAchievementsPanel();
+    if(G.state==='over')drawGameOver();
+}
+
+// ========== INPUT ==========
+let mouseX=0,mouseY=0;
+let hoverGX=-1,hoverGY=-1;
+let rmbDown=false;
+
+function screenToGrid(sx,sy){
+    const gx=Math.floor((sx-G.cameraX)/TILE);
+    const gy=Math.floor((sy-G.cameraY)/TILE);
+    return{gx,gy};
+}
+
+function handleClick(sx,sy){
+    ensureAudio();
+    if(G.state==='menu'){
+        const btnW=200,btnH=50;
+        const bx=W/2-btnW/2,by=H*0.5;
+        if(sx>=bx&&sx<=bx+btnW&&sy>=by&&sy<=by+btnH){
+            startGame();
+        }
+        return;
+    }
+    if(G.state==='over'){
+        const btnW=180,btnH=45;
+        const bx=W/2-btnW/2,by=H*0.7;
+        if(sx>=bx&&sx<=bx+btnW&&sy>=by&&sy<=by+btnH){
+            startGame();
+        }
+        if(sx>=bx&&sx<=bx+btnW&&sy>=by+60&&sy<=by+60+btnH){
+            G.state='menu';
+        }
+        return;
+    }
+    if(showAchievements){
+        showAchievements=false;
+        return;
+    }
+    if(G.paused){
+        G.paused=false;
+        return;
+    }
+    // Toolbar click
+    const toolH=70;
+    const toolY=H-toolH;
+    if(sy>=toolY){
+        // Speed button
+        if(sx>=W-60&&sx<=W-10&&sy>=toolY+5&&sy<=toolY+30){
+            G.gameSpeed=G.gameSpeed>=3?1:G.gameSpeed+1;
+            sfxClick();
+            return;
+        }
+        // Achievements button
+        if(sx>=W-120&&sx<=W-70&&sy>=toolY+5&&sy<=toolY+30){
+            showAchievements=!showAchievements;
+            sfxClick();
+            return;
+        }
+        const btnW=Math.min(60,W/BUILDING_TYPES.length-4);
+        const startX=(W-btnW*BUILDING_TYPES.length-4*(BUILDING_TYPES.length-1))/2;
+        for(let i=0;i<BUILDING_TYPES.length;i++){
+            const bx=startX+i*(btnW+4);
+            if(sx>=bx&&sx<=bx+btnW&&sy>=toolY+5&&sy<=toolY+toolH-5){
+                G.selectedBuilding=i;
+                sfxClick();
+                return;
+            }
+        }
+        return;
+    }
+    // HUD area
+    if(sy<50)return;
+    // Grid click
+    const{gx,gy}=screenToGrid(sx,sy);
+    if(gx<0||gx>=GRID_W||gy<0||gy>=GRID_H)return;
+    if(G.grid[gy][gx]){
+        upgradeBuilding(gx,gy);
+    }else{
+        placeBuilding(gx,gy);
+    }
+}
+
+function handleRightClick(sx,sy){
+    if(G.state!=='play'||G.paused)return;
+    const{gx,gy}=screenToGrid(sx,sy);
+    if(gx>=0&&gx<GRID_W&&gy>=0&&gy<GRID_H){
+        if(G.grid[gy][gx]){
+            upgradeBuilding(gx,gy);
+        }
+    }
+}
+
+function handleDblClick(sx,sy){
+    if(G.state!=='play'||G.paused)return;
+    const{gx,gy}=screenToGrid(sx,sy);
+    if(gx>=0&&gx<GRID_W&&gy>=0&&gy<GRID_H){
+        if(G.grid[gy][gx]){
+            demolishBuilding(gx,gy);
+        }
+    }
+}
+
+// Mouse events
+cv.addEventListener('mousedown',e=>{
+    e.preventDefault();
+    if(e.button===2){handleRightClick(e.clientX,e.clientY);return}
+    if(e.button===0){
+        rmbDown=true;
+        G.dragStartX=e.clientX;G.dragStartY=e.clientY;
+        G.camStartX=G.cameraX;G.camStartY=G.cameraY;
+    }
+});
+cv.addEventListener('mousemove',e=>{
+    mouseX=e.clientX;mouseY=e.clientY;
+    const{gx,gy}=screenToGrid(mouseX,mouseY);
+    hoverGX=gx;hoverGY=gy;
+    if(rmbDown){
+        const dx=e.clientX-G.dragStartX;
+        const dy=e.clientY-G.dragStartY;
+        if(Math.abs(dx)>5||Math.abs(dy)>5){
+            G.isDragging=true;
+            G.cameraX=G.camStartX+dx;
+            G.cameraY=G.camStartY+dy;
+        }
+    }
+});
+cv.addEventListener('mouseup',e=>{
+    if(e.button===0){
+        if(!G.isDragging)handleClick(e.clientX,e.clientY);
+        rmbDown=false;G.isDragging=false;
+    }
+});
+cv.addEventListener('dblclick',e=>{handleDblClick(e.clientX,e.clientY)});
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('wheel',e=>{
+    G.cameraY-=e.deltaY*0.5;
+    // Clamp
+    G.cameraY=Math.min(100,Math.max(-(GRID_H*TILE-H+100),G.cameraY));
+});
+
+// Touch events
+let lastTapTime=0;
+cv.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    const t=e.touches[0];
+    G.touchStartX=t.clientX;G.touchStartY=t.clientY;
+    G.touchMoved=false;
+    G.dragStartX=t.clientX;G.dragStartY=t.clientY;
+    G.camStartX=G.cameraX;G.camStartY=G.cameraY;
+},{passive:false});
+cv.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    const t=e.touches[0];
+    const dx=t.clientX-G.dragStartX;
+    const dy=t.clientY-G.dragStartY;
+    if(Math.abs(dx)>8||Math.abs(dy)>8)G.touchMoved=true;
+    if(G.touchMoved){
+        G.cameraX=G.camStartX+dx;
+        G.cameraY=G.camStartY+dy;
+    }
+},{passive:false});
+cv.addEventListener('touchend',e=>{
+    e.preventDefault();
+    if(!G.touchMoved){
+        const now=Date.now();
+        if(now-lastTapTime<300){
+            handleDblClick(G.touchStartX,G.touchStartY);
+        }else{
+            handleClick(G.touchStartX,G.touchStartY);
+        }
+        lastTapTime=now;
+    }
+},{passive:false});
+
+// Keyboard
+addEventListener('keydown',e=>{
+    if(G.state==='play'){
+        if(e.key==='p'||e.key==='P'){
+            G.paused=!G.paused;
+            return;
+        }
+        if(e.key==='Delete'||e.key==='Backspace'){
+            if(hoverGX>=0&&hoverGY>=0&&G.grid[hoverGY]&&G.grid[hoverGY][hoverGX]){
+                demolishBuilding(hoverGX,hoverGY);
+            }
+            return;
+        }
+        // Number keys for building selection
+        const num=parseInt(e.key);
+        if(num>=1&&num<=9){
+            G.selectedBuilding=num-1;
+            sfxClick();
+        }
+        if(e.key==='0'){
+            G.selectedBuilding=9;
+            sfxClick();
+        }
+        if(e.key==='a'||e.key==='A'){
+            showAchievements=!showAchievements;
+            sfxClick();
+        }
+    }
+    if(G.state==='menu'&&e.key==='Enter'){
+        startGame();
+    }
+});
+
+// ========== END GAME ==========
+function endGame(){
+    saveStats();
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        localStorage.setItem('cityBuilder_highScore',G.highScore);
+    }
+}
+
+// ========== ACHIEVEMENTS ==========
+const ACHIEVEMENTS=[
+    {id:'first_build',name:'初来乍到',desc:'建造第一栋建筑',check:()=>G.totalBuildings>=1,reward:50},
+    {id:'pop_50',name:'繁荣小镇',desc:'人口达到50',check:()=>G.population>=50,reward:100},
+    {id:'pop_100',name:'小型城市',desc:'人口达到100',check:()=>G.population>=100,reward:200},
+    {id:'money_5000',name:'金库满满',desc:'金币达到5000',check:()=>G.money>=5000,reward:100},
+    {id:'day_30',name:'月度市长',desc:'存活30天',check:()=>G.day>=30,reward:150},
+    {id:'day_100',name:'百年基业',desc:'存活100天',check:()=>G.day>=100,reward:500},
+    {id:'buildings_20',name:'建筑狂人',desc:'同时拥有20栋建筑',check:()=>G.totalBuildings>=20,reward:200},
+    {id:'happy_90',name:'幸福之城',desc:'幸福度达到90%',check:()=>G.happiness>=90,reward:300},
+    {id:'score_10000',name:'传奇城市',desc:'得分达到10000',check:()=>G.score>=10000,reward:500},
+];
+let achievementsUnlocked=JSON.parse(localStorage.getItem('cityBuilder_achievements')||'[]');
+
+function checkAchievements(){
+    for(const a of ACHIEVEMENTS){
+        if(!achievementsUnlocked.includes(a.id)&&a.check()){
+            achievementsUnlocked.push(a.id);
+            G.money+=a.reward;
+            G.score+=a.reward;
+            sfxLevel();
+            addNotification('成就解锁: '+a.name+' +'+a.reward+'金币',1);
+            localStorage.setItem('cityBuilder_achievements',JSON.stringify(achievementsUnlocked));
+        }
+    }
+}
+
+// ========== STATISTICS ==========
+let stats=JSON.parse(localStorage.getItem('cityBuilder_stats')||'{"gamesPlayed":0,"totalDays":0,"totalBuildings":0,"bestScore":0}');
+
+function saveStats(){
+    stats.gamesPlayed++;
+    stats.totalDays+=G.day;
+    stats.totalBuildings+=G.totalBuildings;
+    if(G.score>stats.bestScore)stats.bestScore=G.score;
+    localStorage.setItem('cityBuilder_stats',JSON.stringify(stats));
+}
+
+// ========== MINIMAP ==========
+function drawMinimap(){
+    if(G.state!=='play')return;
+    const mmW=120,mmH=90;
+    const mmX=W-mmW-10,mmY=60;
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    ctx.fillRect(mmX,mmY,mmW,mmH);
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.strokeRect(mmX,mmY,mmW,mmH);
+    const scaleX=mmW/GRID_W,scaleY=mmH/GRID_H;
+    for(let y=0;y<GRID_H;y++){
+        for(let x=0;x<GRID_W;x++){
+            if(G.grid[y][x]){
+                ctx.fillStyle=BUILDING_TYPES[G.grid[y][x].type].color;
+                ctx.fillRect(mmX+x*scaleX,mmY+y*scaleY,scaleX-1,scaleY-1);
+            }
+        }
+    }
+    // Camera viewport indicator
+    const vx=(-G.cameraX/TILE)*scaleX;
+    const vy=(-G.cameraY/TILE)*scaleY;
+    const vw=(W/TILE)*scaleX;
+    const vh=(H/TILE)*scaleY;
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=1;
+    ctx.strokeRect(mmX+vx,mmY+vy,vw,vh);
+}
+
+// ========== TOOLTIP ==========
+function drawTooltip(){
+    if(G.state!=='play'||G.paused)return;
+    if(hoverGX<0||hoverGY<0||hoverGX>=GRID_W||hoverGY>=GRID_H)return;
+    const cell=G.grid[hoverGY][hoverGX];
+    if(!cell)return;
+    const bt=BUILDING_TYPES[cell.type];
+    const tipW=160,tipH=60;
+    let tx=mouseX+15,ty=mouseY+15;
+    if(tx+tipW>W)tx=mouseX-tipW-10;
+    if(ty+tipH>H)ty=mouseY-tipH-10;
+    ctx.fillStyle='rgba(0,0,0,0.85)';
+    ctx.fillRect(tx,ty,tipW,tipH);
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.strokeRect(tx,ty,tipW,tipH);
+    ctx.font='bold 13px sans-serif';
+    ctx.fillStyle='#fff';
+    ctx.textAlign='left';
+    ctx.textBaseline='top';
+    ctx.fillText(bt.icon+' '+bt.name+' Lv'+cell.level,tx+8,ty+8);
+    ctx.font='11px sans-serif';
+    ctx.fillStyle='#aaa';
+    ctx.fillText(bt.desc,tx+8,ty+28);
+    ctx.fillStyle='#4CAF50';
+    const upgCost=Math.floor(bt.cost*UPGRADE_COST_MULT*cell.level);
+    if(cell.level<3)ctx.fillText('升级费用: $'+upgCost,tx+8,ty+44);
+    else ctx.fillStyle='#FFD700',ctx.fillText('已满级',tx+8,ty+44);
+}
+
+// ========== GAME CONTROL ==========
+function startGame(){
+    ensureAudio();
+    G.state='play';
+    G.money=500;
+    G.population=0;
+    G.maxPop=0;
+    G.food=0;
+    G.happiness=50;
+    G.energy=0;
+    G.income=0;
+    G.day=1;
+    G.dayTimer=0;
+    G.score=0;
+    G.selectedBuilding=0;
+    G.cameraX=(W-GRID_W*TILE)/2;
+    G.cameraY=(H-GRID_H*TILE)/2;
+    G.notifications=[];
+    G.totalBuildings=0;
+    G.paused=false;
+    G.gameSpeed=1;
+    achievementsUnlocked=JSON.parse(localStorage.getItem('cityBuilder_achievements')||'[]');
+    initGrid();
+    sfxLevel();
+    addNotification('欢迎来到新城市！建造住宅吸引居民吧！',1);
+}
+
+// ========== MAIN LOOP ==========
+let lastTime=0;
+function gameLoop(ts){
+    const dt=ts-lastTime;
+    lastTime=ts;
+    // Speed control
+    const loops=G.state==='play'&&!G.paused?G.gameSpeed:1;
+    for(let i=0;i<loops;i++)updateGame();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// Initialize
+G.state='menu';
+G.cameraX=(W-GRID_W*TILE)/2;
+G.cameraY=(H-GRID_H*TILE)/2;
+initGrid();
+requestAnimationFrame(gameLoop);
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

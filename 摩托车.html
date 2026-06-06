@@ -1,0 +1,1408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>摩托车</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    background: #1a0a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+#gameCanvas {
+    background: #2a1a4e;
+    border: 2px solid #3a2a6a;
+    border-radius: 10px;
+    image-rendering: pixelated;
+}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ============ 画布尺寸 ============
+const BASE_WIDTH = 480;
+const BASE_HEIGHT = 700;
+canvas.width = BASE_WIDTH;
+canvas.height = BASE_HEIGHT;
+
+// ============ 游戏状态 ============
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, LEVEL_COMPLETE: 3, GAME_OVER: 4 };
+
+// ============ 配置常量 ============
+const BIKE_WIDTH = 50;
+const BIKE_HEIGHT = 30;
+const WHEEL_RADIUS = 12;
+const GRAVITY = 0.4;
+const MAX_SPEED = 8;
+const ACCELERATION = 0.15;
+const BRAKE_FORCE = 0.3;
+const TILT_SPEED = 0.05;
+const MAX_TILT = Math.PI / 4;
+const GROUND_Y = BASE_HEIGHT - 120;
+const COLORS = {
+    bike: '#ff6b6b',
+    bikeDark: '#cc4444',
+    wheel: '#333',
+    wheelHub: '#666',
+    sky: ['#1a0a3e', '#2a1a5e', '#3a2a7e'],
+    ground: '#4a3a2a',
+    grass: '#2a5a2a',
+    mountain: '#3a3a5a',
+    star: '#ffe066',
+    starGlow: 'rgba(255,224,102,0.5)',
+    coin: '#ffd700',
+    ui: '#e0e0ff',
+    accent: '#80ffdb',
+    dark: '#1a0a2e',
+    panel: 'rgba(26,10,46,0.9)',
+    road: '#3a3a3a',
+    roadLine: '#6a6a6a',
+    obstacle: '#8b4513',
+    ramp: '#daa520'
+};
+
+// ============ 关卡数据 ============
+const LEVELS = [
+    {
+        name: "新手训练",
+        desc: "熟悉操控，收集星星",
+        length: 3000,
+        obstacles: [
+            {type:'rock', x:800, y:GROUND_Y-20, w:40, h:20},
+            {type:'rock', x:1500, y:GROUND_Y-25, w:50, h:25},
+            {type:'ramp', x:1200, y:GROUND_Y-15, w:60, h:15}
+        ],
+        stars: [
+            {x:400, y:GROUND_Y-80},
+            {x:900, y:GROUND_Y-100},
+            {x:1400, y:GROUND_Y-60},
+            {x:2000, y:GROUND_Y-90},
+            {x:2500, y:GROUND_Y-70}
+        ],
+        targetTime: 30,
+        starTimes: [25, 30, 35]
+    },
+    {
+        name: "山地挑战",
+        desc: "翻越山丘，保持平衡",
+        length: 4000,
+        obstacles: [
+            {type:'rock', x:600, y:GROUND_Y-30, w:50, h:30},
+            {type:'ramp', x:1000, y:GROUND_Y-20, w:70, h:20},
+            {type:'rock', x:1400, y:GROUND_Y-35, w:60, h:35},
+            {type:'ramp', x:1800, y:GROUND_Y-25, w:80, h:25},
+            {type:'rock', x:2200, y:GROUND_Y-40, w:70, h:40},
+            {type:'ramp', x:2600, y:GROUND_Y-20, w:60, h:20},
+            {type:'rock', x:3000, y:GROUND_Y-30, w:50, h:30}
+        ],
+        stars: [
+            {x:500, y:GROUND_Y-100},
+            {x:1100, y:GROUND_Y-120},
+            {x:1600, y:GROUND_Y-80},
+            {x:2100, y:GROUND_Y-110},
+            {x:2700, y:GROUND_Y-90},
+            {x:3300, y:GROUND_Y-70},
+            {x:3700, y:GROUND_Y-100}
+        ],
+        targetTime: 40,
+        starTimes: [35, 40, 45]
+    },
+    {
+        name: "极限特技",
+        desc: "飞跃断崖，完成特技",
+        length: 5000,
+        obstacles: [
+            {type:'ramp', x:500, y:GROUND_Y-30, w:80, h:30},
+            {type:'gap', x:700, w:150},
+            {type:'rock', x:1000, y:GROUND_Y-25, w:50, h:25},
+            {type:'ramp', x:1300, y:GROUND_Y-35, w:90, h:35},
+            {type:'gap', x:1600, w:200},
+            {type:'rock', x:2000, y:GROUND_Y-30, w:60, h:30},
+            {type:'ramp', x:2400, y:GROUND_Y-40, w:100, h:40},
+            {type:'gap', x:2800, w:180},
+            {type:'rock', x:3200, y:GROUND_Y-35, w:70, h:35},
+            {type:'ramp', x:3600, y:GROUND_Y-25, w:70, h:25},
+            {type:'gap', x:4000, w:220}
+        ],
+        stars: [
+            {x:400, y:GROUND_Y-130},
+            {x:800, y:GROUND_Y-160},
+            {x:1200, y:GROUND_Y-100},
+            {x:1700, y:GROUND_Y-180},
+            {x:2200, y:GROUND_Y-120},
+            {x:2900, y:GROUND_Y-200},
+            {x:3400, y:GROUND_Y-140},
+            {x:4100, y:GROUND_Y-170},
+            {x:4600, y:GROUND_Y-110}
+        ],
+        targetTime: 50,
+        starTimes: [45, 50, 55]
+    },
+    {
+        name: "夜间狂飙",
+        desc: "在夜幕中疾驰",
+        length: 6000,
+        obstacles: [
+            {type:'rock', x:400, y:GROUND_Y-20, w:40, h:20},
+            {type:'ramp', x:800, y:GROUND_Y-25, w:70, h:25},
+            {type:'gap', x:1100, w:180},
+            {type:'rock', x:1500, y:GROUND_Y-30, w:55, h:30},
+            {type:'ramp', x:1900, y:GROUND_Y-35, w:85, h:35},
+            {type:'gap', x:2300, w:200},
+            {type:'rock', x:2700, y:GROUND_Y-25, w:50, h:25},
+            {type:'ramp', x:3100, y:GROUND_Y-40, w:95, h:40},
+            {type:'gap', x:3500, w:220},
+            {type:'rock', x:4000, y:GROUND_Y-35, w:65, h:35},
+            {type:'ramp', x:4500, y:GROUND_Y-30, w:75, h:30},
+            {type:'gap', x:5000, w:250},
+            {type:'rock', x:5500, y:GROUND_Y-20, w:45, h:20}
+        ],
+        stars: [
+            {x:300, y:GROUND_Y-110},
+            {x:900, y:GROUND_Y-140},
+            {x:1300, y:GROUND_Y-170},
+            {x:1800, y:GROUND_Y-100},
+            {x:2400, y:GROUND_Y-190},
+            {x:2900, y:GROUND_Y-130},
+            {x:3400, y:GROUND_Y-160},
+            {x:4200, y:GROUND_Y-120},
+            {x:4800, y:GROUND_Y-180},
+            {x:5300, y:GROUND_Y-150},
+            {x:5800, y:GROUND_Y-100}
+        ],
+        targetTime: 60,
+        starTimes: [55, 60, 65]
+    },
+    {
+        name: "终极赛道",
+        desc: "所有挑战的综合考验",
+        length: 8000,
+        obstacles: [
+            {type:'ramp', x:400, y:GROUND_Y-30, w:80, h:30},
+            {type:'gap', x:600, w:200},
+            {type:'rock', x:1000, y:GROUND_Y-35, w:60, h:35},
+            {type:'ramp', x:1400, y:GROUND_Y-40, w:90, h:40},
+            {type:'gap', x:1700, w:250},
+            {type:'rock', x:2200, y:GROUND_Y-30, w:55, h:30},
+            {type:'ramp', x:2600, y:GROUND_Y-45, w:100, h:45},
+            {type:'gap', x:3000, w:280},
+            {type:'rock', x:3500, y:GROUND_Y-40, w:70, h:40},
+            {type:'ramp', x:4000, y:GROUND_Y-35, w:85, h:35},
+            {type:'gap', x:4400, w:300},
+            {type:'rock', x:5000, y:GROUND_Y-45, w:80, h:45},
+            {type:'ramp', x:5500, y:GROUND_Y-50, w:110, h:50},
+            {type:'gap', x:6000, w:320},
+            {type:'rock', x:6800, y:GROUND_Y-35, w:65, h:35},
+            {type:'ramp', x:7200, y:GROUND_Y-30, w:75, h:30},
+            {type:'gap', x:7500, w:250}
+        ],
+        stars: [
+            {x:300, y:GROUND_Y-120},
+            {x:800, y:GROUND_Y-160},
+            {x:1300, y:GROUND_Y-130},
+            {x:1900, y:GROUND_Y-190},
+            {x:2400, y:GROUND_Y-110},
+            {x:3100, y:GROUND_Y-200},
+            {x:3700, y:GROUND_Y-140},
+            {x:4300, y:GROUND_Y-180},
+            {x:5200, y:GROUND_Y-150},
+            {x:5800, y:GROUND_Y-170},
+            {x:6500, y:GROUND_Y-130},
+            {x:7100, y:GROUND_Y-160},
+            {x:7700, y:GROUND_Y-120}
+        ],
+        targetTime: 80,
+        starTimes: [70, 80, 90]
+    }
+];
+
+// ============ 游戏变量 ============
+let gameState = STATE.MENU;
+let currentLevel = 0;
+let bike = {
+    x: 100, y: GROUND_Y - BIKE_HEIGHT,
+    vx: 0, vy: 0,
+    angle: 0,
+    wheelAngle: 0,
+    onGround: true,
+    alive: true
+};
+let camera = {x: 0, y: 0};
+let obstacles = [];
+let stars = [];
+let collectedStars = 0;
+let totalStars = 0;
+let distance = 0;
+let levelLength = 0;
+let timer = 0;
+let score = 0;
+let totalScore = 0;
+let highScore = parseInt(localStorage.getItem('moto_highScore')) || 0;
+let particles = [];
+let animTimer = 0;
+let menuAnim = 0;
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let keys = {};
+let terrain = [];
+let clouds = [];
+let mountains = [];
+
+// ============ 音效系统 ============
+let audioCtx = null;
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+}
+
+function playTone(freq, duration, type, volume) {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(volume || 0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+}
+
+function playEngine() { playTone(80 + Math.abs(bike.vx) * 10, 0.1, 'sawtooth', 0.05); }
+function playStar() { playTone(880, 0.2, 'sine', 0.2); setTimeout(() => playTone(1100, 0.15, 'sine', 0.15), 100); }
+function playCrash() { playTone(150, 0.3, 'sawtooth', 0.2); setTimeout(() => playTone(100, 0.4, 'sawtooth', 0.15), 200); }
+function playComplete() { playTone(523, 0.2, 'sine', 0.2); setTimeout(() => playTone(659, 0.2, 'sine', 0.2), 150); setTimeout(() => playTone(784, 0.3, 'sine', 0.25), 300); }
+function playClick() { playTone(500, 0.08, 'square', 0.08); }
+function playJump() { playTone(400, 0.15, 'sine', 0.15); setTimeout(() => playTone(600, 0.1, 'sine', 0.1), 80); }
+
+// ============ 粒子系统 ============
+function addParticles(x, y, color, count, speedMult) {
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = (1 + Math.random() * 3) * (speedMult || 1);
+        particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 1,
+            life: 1,
+            decay: 0.02 + Math.random() * 0.03,
+            size: 2 + Math.random() * 4,
+            color: color
+        });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= p.decay;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x - camera.x, p.y - camera.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ============ 地形生成 ============
+function generateTerrain() {
+    terrain = [];
+    for (let x = 0; x < levelLength + 500; x += 10) {
+        let y = GROUND_Y;
+        // 添加小起伏
+        y += Math.sin(x * 0.01) * 10;
+        y += Math.sin(x * 0.005) * 5;
+        terrain.push({x: x, y: y});
+    }
+}
+
+function generateDecorations() {
+    clouds = [];
+    mountains = [];
+
+    // 云朵
+    for (let i = 0; i < 20; i++) {
+        clouds.push({
+            x: Math.random() * (levelLength + 1000),
+            y: 50 + Math.random() * 150,
+            w: 60 + Math.random() * 80,
+            h: 20 + Math.random() * 30,
+            speed: 0.2 + Math.random() * 0.3
+        });
+    }
+
+    // 山脉
+    for (let i = 0; i < 15; i++) {
+        mountains.push({
+            x: i * 300 + Math.random() * 200,
+            h: 100 + Math.random() * 150,
+            w: 200 + Math.random() * 150
+        });
+    }
+}
+
+// ============ 关卡初始化 ============
+function initLevel(idx) {
+    const level = LEVELS[idx];
+    levelLength = level.length;
+
+    bike = {
+        x: 100, y: GROUND_Y - BIKE_HEIGHT,
+        vx: 0, vy: 0,
+        angle: 0,
+        wheelAngle: 0,
+        onGround: true,
+        alive: true
+    };
+
+    camera = {x: 0, y: 0};
+    obstacles = level.obstacles.map(o => ({...o}));
+    stars = level.stars.map(s => ({...s, collected: false}));
+    collectedStars = 0;
+    totalStars = stars.length;
+    distance = 0;
+    timer = 0;
+    score = 0;
+    particles = [];
+
+    generateTerrain();
+    generateDecorations();
+}
+
+function getTerrainY(x) {
+    const idx = Math.floor(x / 10);
+    if (idx < 0 || idx >= terrain.length - 1) return GROUND_Y;
+    const t1 = terrain[idx];
+    const t2 = terrain[idx + 1];
+    const blend = (x - t1.x) / 10;
+    return t1.y + (t2.y - t1.y) * blend;
+}
+
+// ============ 碰撞检测 ============
+function checkCollisions() {
+    // 地面碰撞
+    const terrainY = getTerrainY(bike.x + BIKE_WIDTH / 2);
+    if (bike.y + BIKE_HEIGHT >= terrainY) {
+        bike.y = terrainY - BIKE_HEIGHT;
+        bike.vy = 0;
+        bike.onGround = true;
+
+        // 检查倾斜角度
+        if (Math.abs(bike.angle) > MAX_TILT * 1.5) {
+            bike.alive = false;
+            playCrash();
+            addParticles(bike.x + BIKE_WIDTH / 2, bike.y + BIKE_HEIGHT, COLORS.bike, 20, 2);
+            shakeTimer = 15;
+            shakeIntensity = 8;
+        }
+    } else {
+        bike.onGround = false;
+    }
+
+    // 障碍物碰撞
+    obstacles.forEach(o => {
+        if (o.type === 'gap') return;
+
+        const ox = o.x;
+        const oy = o.y;
+        const ow = o.w;
+        const oh = o.h;
+
+        // 简化碰撞检测
+        if (bike.x + BIKE_WIDTH > ox && bike.x < ox + ow &&
+            bike.y + BIKE_HEIGHT > oy && bike.y < oy + oh) {
+            if (o.type === 'ramp') {
+                // 斜坡：给予向上推力
+                if (bike.vx > 2) {
+                    bike.vy = -bike.vx * 0.8;
+                    playJump();
+                    addParticles(bike.x + BIKE_WIDTH / 2, bike.y + BIKE_HEIGHT, COLORS.ramp, 8);
+                }
+            } else {
+                // 碰撞
+                bike.alive = false;
+                playCrash();
+                addParticles(bike.x + BIKE_WIDTH / 2, bike.y + BIKE_HEIGHT / 2, COLORS.bike, 25, 2);
+                shakeTimer = 15;
+                shakeIntensity = 10;
+            }
+        }
+    });
+
+    // 断崖检测
+    obstacles.forEach(o => {
+        if (o.type === 'gap') {
+            if (bike.x + BIKE_WIDTH > o.x && bike.x < o.x + o.w) {
+                const gapTerrainY = GROUND_Y + 200; // 断崖深度
+                if (bike.y + BIKE_HEIGHT > gapTerrainY) {
+                    bike.alive = false;
+                    playCrash();
+                }
+            }
+        }
+    });
+
+    // 星星收集
+    stars.forEach(s => {
+        if (!s.collected) {
+            const dist = Math.hypot(bike.x + BIKE_WIDTH / 2 - s.x, bike.y + BIKE_HEIGHT / 2 - s.y);
+            if (dist < 30) {
+                s.collected = true;
+                collectedStars++;
+                score += 100;
+                playStar();
+                addParticles(s.x, s.y, COLORS.star, 12);
+            }
+        }
+    });
+
+    // 终点检测
+    if (distance >= levelLength) {
+        const timeBonus = Math.max(0, (LEVELS[currentLevel].targetTime - timer) * 10);
+        const starsBonus = collectedStars * 50;
+        score += timeBonus + starsBonus + 500;
+        totalScore += score;
+        gameState = STATE.LEVEL_COMPLETE;
+        playComplete();
+    }
+}
+
+// ============ 更新逻辑 ============
+function update(dt) {
+    if (!bike.alive) return;
+
+    timer += dt;
+
+    // 加速/刹车
+    if (keys['ArrowUp'] || keys['w'] || keys['W'] || keys[' ']) {
+        bike.vx = Math.min(bike.vx + ACCELERATION, MAX_SPEED);
+        playEngine();
+    } else if (keys['ArrowDown'] || keys['s'] || keys['S']) {
+        bike.vx = Math.max(bike.vx - BRAKE_FORCE, 0);
+    } else {
+        // 自然减速
+        bike.vx = Math.max(bike.vx - 0.05, 0);
+    }
+
+    // 倾斜控制
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+        bike.angle = Math.max(bike.angle - TILT_SPEED, -MAX_TILT);
+    } else if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+        bike.angle = Math.min(bike.angle + TILT_SPEED, MAX_TILT);
+    } else {
+        // 自动回正
+        if (bike.angle > 0) bike.angle = Math.max(bike.angle - TILT_SPEED * 0.5, 0);
+        else bike.angle = Math.min(bike.angle + TILT_SPEED * 0.5, 0);
+    }
+
+    // 重力
+    if (!bike.onGround) {
+        bike.vy += GRAVITY;
+    }
+
+    // 移动
+    bike.x += bike.vx;
+    bike.y += bike.vy;
+
+    // 车轮旋转
+    bike.wheelAngle += bike.vx * 0.2;
+
+    // 更新距离
+    distance = bike.x - 100;
+
+    // 更新相机
+    camera.x = bike.x - BASE_WIDTH / 3;
+    camera.y = Math.min(0, bike.y - BASE_HEIGHT / 2);
+
+    // 边界检测
+    if (bike.x < 0) bike.x = 0;
+
+    // 检查碰撞
+    checkCollisions();
+
+    // 尘土粒子
+    if (bike.onGround && bike.vx > 1) {
+        if (Math.random() > 0.7) {
+            addParticles(bike.x + BIKE_WIDTH / 2, bike.y + BIKE_HEIGHT, '#8a7a6a', 2, 0.5);
+        }
+    }
+}
+
+// ============ 绘制函数 ============
+function drawSky() {
+    const gradient = ctx.createLinearGradient(0, 0, 0, BASE_HEIGHT);
+    gradient.addColorStop(0, COLORS.sky[0]);
+    gradient.addColorStop(0.5, COLORS.sky[1]);
+    gradient.addColorStop(1, COLORS.sky[2]);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    // 星星（夜间效果）
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    for (let i = 0; i < 50; i++) {
+        const x = (i * 137 + 50) % BASE_WIDTH;
+        const y = (i * 89 + 30) % (BASE_HEIGHT / 2);
+        ctx.beginPath();
+        ctx.arc(x, y, 1, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function drawMountains() {
+    mountains.forEach(m => {
+        const screenX = m.x - camera.x * 0.3;
+        if (screenX > -m.w && screenX < BASE_WIDTH + m.w) {
+            ctx.fillStyle = COLORS.mountain;
+            ctx.beginPath();
+            ctx.moveTo(screenX - m.w / 2, GROUND_Y - camera.y);
+            ctx.lineTo(screenX, GROUND_Y - m.h - camera.y);
+            ctx.lineTo(screenX + m.w / 2, GROUND_Y - camera.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // 山顶雪
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(screenX - m.w / 6, GROUND_Y - m.h * 0.7 - camera.y);
+            ctx.lineTo(screenX, GROUND_Y - m.h - camera.y);
+            ctx.lineTo(screenX + m.w / 6, GROUND_Y - m.h * 0.7 - camera.y);
+            ctx.closePath();
+            ctx.fill();
+        }
+    });
+}
+
+function drawClouds() {
+    clouds.forEach(c => {
+        const screenX = c.x - camera.x * 0.2;
+        if (screenX > -c.w && screenX < BASE_WIDTH + c.w) {
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.beginPath();
+            ctx.ellipse(screenX, c.y, c.w / 2, c.h / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+}
+
+function drawTerrain() {
+    // 道路
+    ctx.fillStyle = COLORS.road;
+    ctx.beginPath();
+    ctx.moveTo(0 - camera.x, GROUND_Y + 100 - camera.y);
+
+    for (let x = Math.max(0, camera.x - 50); x < Math.min(levelLength + 200, camera.x + BASE_WIDTH + 50); x += 20) {
+        const ty = getTerrainY(x);
+        ctx.lineTo(x - camera.x, ty - camera.y);
+    }
+
+    ctx.lineTo(BASE_WIDTH + 50, BASE_HEIGHT + 50);
+    ctx.lineTo(-50, BASE_HEIGHT + 50);
+    ctx.closePath();
+    ctx.fillStyle = COLORS.ground;
+    ctx.fill();
+
+    // 草地
+    ctx.fillStyle = COLORS.grass;
+    ctx.beginPath();
+    ctx.moveTo(0 - camera.x, GROUND_Y + 5 - camera.y);
+
+    for (let x = Math.max(0, camera.x - 50); x < Math.min(levelLength + 200, camera.x + BASE_WIDTH + 50); x += 20) {
+        const ty = getTerrainY(x);
+        ctx.lineTo(x - camera.x, ty - 5 - camera.y);
+    }
+
+    ctx.lineTo(BASE_WIDTH + 50, GROUND_Y + 10 - camera.y);
+    ctx.lineTo(-50, GROUND_Y + 10 - camera.y);
+    ctx.closePath();
+    ctx.fill();
+
+    // 路面标线
+    ctx.strokeStyle = COLORS.roadLine;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([20, 20]);
+    ctx.beginPath();
+    for (let x = Math.max(0, camera.x - 50); x < Math.min(levelLength + 200, camera.x + BASE_WIDTH + 50); x += 20) {
+        const ty = getTerrainY(x) - 5;
+        if (x === Math.max(0, camera.x - 50)) ctx.moveTo(x - camera.x, ty - camera.y);
+        else ctx.lineTo(x - camera.x, ty - camera.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+function drawObstacles() {
+    obstacles.forEach(o => {
+        const screenX = o.x - camera.x;
+        const screenY = (o.y || GROUND_Y) - camera.y;
+
+        if (screenX < -100 || screenX > BASE_WIDTH + 100) return;
+
+        if (o.type === 'rock') {
+            ctx.fillStyle = COLORS.obstacle;
+            ctx.beginPath();
+            ctx.moveTo(screenX, screenY + o.h);
+            ctx.lineTo(screenX + o.w * 0.3, screenY);
+            ctx.lineTo(screenX + o.w * 0.7, screenY);
+            ctx.lineTo(screenX + o.w, screenY + o.h);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.beginPath();
+            ctx.moveTo(screenX + o.w * 0.3, screenY + 5);
+            ctx.lineTo(screenX + o.w * 0.5, screenY);
+            ctx.lineTo(screenX + o.w * 0.6, screenY + o.h * 0.5);
+            ctx.closePath();
+            ctx.fill();
+        } else if (o.type === 'ramp') {
+            ctx.fillStyle = COLORS.ramp;
+            ctx.beginPath();
+            ctx.moveTo(screenX, screenY + o.h);
+            ctx.lineTo(screenX + o.w, screenY);
+            ctx.lineTo(screenX + o.w, screenY + o.h);
+            ctx.closePath();
+            ctx.fill();
+
+            // 斜坡条纹
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < o.w; i += 15) {
+                ctx.beginPath();
+                ctx.moveTo(screenX + i, screenY + o.h);
+                ctx.lineTo(screenX + i + o.h, screenY);
+                ctx.stroke();
+            }
+        } else if (o.type === 'gap') {
+            // 断崖
+            ctx.fillStyle = '#1a0a0a';
+            ctx.fillRect(screenX, GROUND_Y - camera.y, o.w, 300);
+
+            // 断崖边缘
+            ctx.fillStyle = COLORS.ground;
+            ctx.fillRect(screenX - 5, GROUND_Y - camera.y - 10, 10, 20);
+            ctx.fillRect(screenX + o.w - 5, GROUND_Y - camera.y - 10, 10, 20);
+        }
+    });
+}
+
+function drawStars() {
+    stars.forEach(s => {
+        if (s.collected) return;
+
+        const screenX = s.x - camera.x;
+        const screenY = s.y - camera.y;
+
+        if (screenX < -30 || screenX > BASE_WIDTH + 30) return;
+
+        const pulse = Math.sin(animTimer * 0.08) * 0.3 + 0.7;
+
+        // 光晕
+        const gradient = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, 20);
+        gradient.addColorStop(0, COLORS.starGlow);
+        gradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, 20 * pulse, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 星星
+        ctx.fillStyle = COLORS.star;
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+            const angle = (i * 4 * Math.PI / 5) - Math.PI / 2;
+            const x = screenX + Math.cos(angle) * 10;
+            const y = screenY + Math.sin(angle) * 10;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+    });
+}
+
+function drawBike() {
+    if (!bike.alive) return;
+
+    const screenX = bike.x - camera.x;
+    const screenY = bike.y - camera.y;
+
+    ctx.save();
+    ctx.translate(screenX + BIKE_WIDTH / 2, screenY + BIKE_HEIGHT);
+    ctx.rotate(bike.angle);
+
+    // 车身
+    ctx.fillStyle = COLORS.bike;
+    ctx.fillRect(-BIKE_WIDTH / 2, -BIKE_HEIGHT, BIKE_WIDTH, BIKE_HEIGHT);
+
+    // 车身装饰
+    ctx.fillStyle = COLORS.bikeDark;
+    ctx.fillRect(-BIKE_WIDTH / 2 + 5, -BIKE_HEIGHT + 5, BIKE_WIDTH - 10, 5);
+
+    // 骑手
+    ctx.fillStyle = '#4a4a4a';
+    ctx.fillRect(-5, -BIKE_HEIGHT - 20, 10, 15);
+    ctx.fillStyle = '#6a6a6a';
+    ctx.beginPath();
+    ctx.arc(0, -BIKE_HEIGHT - 25, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 后轮
+    ctx.save();
+    ctx.translate(-BIKE_WIDTH / 2 + 10, 0);
+    ctx.rotate(bike.wheelAngle);
+    ctx.fillStyle = COLORS.wheel;
+    ctx.beginPath();
+    ctx.arc(0, 0, WHEEL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLORS.wheelHub;
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    // 轮辐
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+        const a = i * Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * WHEEL_RADIUS, Math.sin(a) * WHEEL_RADIUS);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // 前轮
+    ctx.save();
+    ctx.translate(BIKE_WIDTH / 2 - 10, 0);
+    ctx.rotate(bike.wheelAngle);
+    ctx.fillStyle = COLORS.wheel;
+    ctx.beginPath();
+    ctx.arc(0, 0, WHEEL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLORS.wheelHub;
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#555';
+    for (let i = 0; i < 4; i++) {
+        const a = i * Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * WHEEL_RADIUS, Math.sin(a) * WHEEL_RADIUS);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.restore();
+}
+
+function drawUI() {
+    // 顶部信息栏
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(0, 0, BASE_WIDTH, 55);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('关卡 ' + (currentLevel + 1) + ': ' + LEVELS[currentLevel].name, 10, 20);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillText(Math.floor(distance) + '/' + levelLength + 'm', BASE_WIDTH / 2, 20);
+
+    ctx.fillStyle = COLORS.star;
+    ctx.fillText('★ ' + collectedStars + '/' + totalStars, BASE_WIDTH / 2, 40);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = COLORS.ui;
+    ctx.fillText('时间: ' + timer.toFixed(1) + 's', BASE_WIDTH - 10, 20);
+    ctx.fillText('得分: ' + score, BASE_WIDTH - 10, 40);
+
+    // 速度表
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(10, 60, 100, 25);
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(12, 62, (bike.vx / MAX_SPEED) * 96, 21);
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('速度: ' + bike.vx.toFixed(1), 60, 77);
+
+    // 底部操作栏
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(0, BASE_HEIGHT - 70, BASE_WIDTH, 70);
+
+    // 刹车按钮
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillRect(10, BASE_HEIGHT - 55, 70, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('刹车', 45, BASE_HEIGHT - 30);
+
+    // 油门按钮
+    ctx.fillStyle = '#66ff66';
+    ctx.fillRect(BASE_WIDTH - 80, BASE_HEIGHT - 55, 70, 40);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('油门', BASE_WIDTH - 45, BASE_HEIGHT - 30);
+
+    // 左右倾斜
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(100, BASE_HEIGHT - 55, 60, 40);
+    ctx.fillStyle = COLORS.dark;
+    ctx.fillText('← 倾', 130, BASE_HEIGHT - 30);
+
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH - 160, BASE_HEIGHT - 55, 60, 40);
+    ctx.fillStyle = COLORS.dark;
+    ctx.fillText('倾 →', BASE_WIDTH - 130, BASE_HEIGHT - 30);
+
+    // 暂停按钮
+    ctx.fillStyle = COLORS.wall;
+    ctx.fillRect(BASE_WIDTH / 2 - 25, BASE_HEIGHT - 55, 50, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Arial';
+    ctx.fillText('暂停', BASE_WIDTH / 2, BASE_HEIGHT - 30);
+}
+
+function drawMenu() {
+    menuAnim += 0.02;
+
+    drawSky();
+    drawMountains();
+
+    // 标题
+    ctx.fillStyle = COLORS.bike;
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('摩托车', BASE_WIDTH / 2, 180 + Math.sin(menuAnim) * 10);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '16px Arial';
+    ctx.fillText('竞速特技 · 收集星星', BASE_WIDTH / 2, 220);
+    ctx.fillText('翻越障碍，到达终点', BASE_WIDTH / 2, 245);
+
+    // 操作说明
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '13px Arial';
+    ctx.fillText('↑ 或 空格 加速 · ↓ 刹车', BASE_WIDTH / 2, 290);
+    ctx.fillText('← → 或 A D 倾斜车身', BASE_WIDTH / 2, 315);
+
+    // 开始按钮
+    const btnY = 380;
+    const pulse = Math.sin(menuAnim * 3) * 5;
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH / 2 - 80, btnY - 20 + pulse, 160, 45);
+    ctx.fillStyle = COLORS.dark;
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText('开始游戏', BASE_WIDTH / 2, btnY + 8 + pulse);
+
+    // 最高分
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '14px Arial';
+    ctx.fillText('最高分: ' + highScore, BASE_WIDTH / 2, 460);
+
+    // 关卡选择
+    ctx.fillStyle = COLORS.ramp;
+    ctx.font = '14px Arial';
+    ctx.fillText('选择关卡', BASE_WIDTH / 2, 500);
+
+    for (let i = 0; i < LEVELS.length; i++) {
+        const x = BASE_WIDTH / 2 - 150 + (i % 3) * 100;
+        const y = 530 + Math.floor(i / 3) * 50;
+        ctx.fillStyle = COLORS.wall;
+        ctx.fillRect(x - 40, y - 15, 80, 30);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(LEVELS[i].name, x, y + 5);
+    }
+}
+
+function drawLevelComplete() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(BASE_WIDTH / 2 - 160, 180, 320, 320);
+
+    ctx.fillStyle = COLORS.accent;
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('关卡完成!', BASE_WIDTH / 2, 240);
+
+    // 星级
+    const stars = calculateStars();
+    ctx.font = '40px Arial';
+    let starText = '';
+    for (let i = 0; i < 3; i++) {
+        starText += i < stars ? '★' : '☆';
+    }
+    ctx.fillStyle = COLORS.star;
+    ctx.fillText(starText, BASE_WIDTH / 2, 300);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '16px Arial';
+    ctx.fillText('用时: ' + timer.toFixed(1) + 's', BASE_WIDTH / 2, 340);
+    ctx.fillText('收集星星: ' + collectedStars + '/' + totalStars, BASE_WIDTH / 2, 370);
+    ctx.fillText('得分: ' + score, BASE_WIDTH / 2, 400);
+
+    // 继续按钮
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH / 2 - 60, 420, 120, 40);
+    ctx.fillStyle = COLORS.dark;
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText('继续', BASE_WIDTH / 2, 445);
+}
+
+function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(BASE_WIDTH / 2 - 160, 220, 320, 240);
+
+    ctx.fillStyle = COLORS.bike;
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('坠毁了!', BASE_WIDTH / 2, 280);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '16px Arial';
+    ctx.fillText('距离: ' + Math.floor(distance) + 'm', BASE_WIDTH / 2, 330);
+    ctx.fillText('得分: ' + score, BASE_WIDTH / 2, 360);
+
+    // 重试按钮
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH / 2 - 60, 390, 120, 40);
+    ctx.fillStyle = COLORS.dark;
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText('重试', BASE_WIDTH / 2, 415);
+}
+
+function drawPaused() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(BASE_WIDTH / 2 - 120, 250, 240, 160);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('暂停', BASE_WIDTH / 2, 310);
+
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH / 2 - 50, 340, 100, 35);
+    ctx.fillStyle = COLORS.dark;
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText('继续', BASE_WIDTH / 2, 362);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '12px Arial';
+    ctx.fillText('按 P 或 ESC 继续', BASE_WIDTH / 2, 400);
+}
+
+function calculateStars() {
+    const level = LEVELS[currentLevel];
+    if (timer <= level.starTimes[0]) return 3;
+    if (timer <= level.starTimes[1]) return 2;
+    if (timer <= level.starTimes[2]) return 1;
+    return 0;
+}
+
+// ============ 交互处理 ============
+function handleTap(x, y) {
+    initAudio();
+    playClick();
+
+    if (gameState === STATE.MENU) {
+        if (x > BASE_WIDTH / 2 - 80 && x < BASE_WIDTH / 2 + 80 && y > 360 && y < 425) {
+            gameState = STATE.PLAYING;
+            currentLevel = 0;
+            totalScore = 0;
+            initLevel(0);
+            return;
+        }
+
+        for (let i = 0; i < LEVELS.length; i++) {
+            const lx = BASE_WIDTH / 2 - 150 + (i % 3) * 100;
+            const ly = 530 + Math.floor(i / 3) * 50;
+            if (x > lx - 40 && x < lx + 40 && y > ly - 15 && y < ly + 15) {
+                gameState = STATE.PLAYING;
+                currentLevel = i;
+                totalScore = 0;
+                initLevel(i);
+                return;
+            }
+        }
+        return;
+    }
+
+    if (gameState === STATE.PAUSED) {
+        if (x > BASE_WIDTH / 2 - 50 && x < BASE_WIDTH / 2 + 50 && y > 340 && y < 375) {
+            gameState = STATE.PLAYING;
+        }
+        return;
+    }
+
+    if (gameState === STATE.LEVEL_COMPLETE) {
+        if (x > BASE_WIDTH / 2 - 60 && x < BASE_WIDTH / 2 + 60 && y > 420 && y < 460) {
+            if (currentLevel < LEVELS.length - 1) {
+                currentLevel++;
+                initLevel(currentLevel);
+                gameState = STATE.PLAYING;
+            } else {
+                gameState = STATE.MENU;
+                if (totalScore > highScore) {
+                    highScore = totalScore;
+                    localStorage.setItem('moto_highScore', highScore);
+                }
+            }
+        }
+        return;
+    }
+
+    if (gameState === STATE.GAME_OVER) {
+        if (x > BASE_WIDTH / 2 - 60 && x < BASE_WIDTH / 2 + 60 && y > 390 && y < 430) {
+            initLevel(currentLevel);
+            gameState = STATE.PLAYING;
+        }
+        return;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+
+    // 底部按钮检测
+    if (y > BASE_HEIGHT - 55) {
+        // 刹车
+        if (x > 10 && x < 80) {
+            keys['ArrowDown'] = true;
+            return;
+        }
+        // 油门
+        if (x > BASE_WIDTH - 80 && x < BASE_WIDTH - 10) {
+            keys['ArrowUp'] = true;
+            return;
+        }
+        // 左倾
+        if (x > 100 && x < 160) {
+            keys['ArrowLeft'] = true;
+            return;
+        }
+        // 右倾
+        if (x > BASE_WIDTH - 160 && x < BASE_WIDTH - 100) {
+            keys['ArrowRight'] = true;
+            return;
+        }
+        // 暂停
+        if (x > BASE_WIDTH / 2 - 25 && x < BASE_WIDTH / 2 + 25) {
+            gameState = STATE.PAUSED;
+            return;
+        }
+    }
+}
+
+function handleRelease() {
+    keys['ArrowUp'] = false;
+    keys['ArrowDown'] = false;
+    keys['ArrowLeft'] = false;
+    keys['ArrowRight'] = false;
+}
+
+// ============ 事件监听 ============
+canvas.addEventListener('mousedown', e => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = BASE_WIDTH / rect.width;
+    const scaleY = BASE_HEIGHT / rect.height;
+    handleTap((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
+});
+
+canvas.addEventListener('mouseup', handleRelease);
+
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = BASE_WIDTH / rect.width;
+    const scaleY = BASE_HEIGHT / rect.height;
+    handleTap((touch.clientX - rect.left) * scaleX, (touch.clientY - rect.top) * scaleY);
+});
+
+canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    handleRelease();
+});
+
+document.addEventListener('keydown', e => {
+    keys[e.key] = true;
+
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        if (gameState === STATE.PLAYING) {
+            gameState = STATE.PAUSED;
+        } else if (gameState === STATE.PAUSED) {
+            gameState = STATE.PLAYING;
+        }
+    }
+
+    if (e.key === 'r' || e.key === 'R') {
+        if (gameState === STATE.PLAYING) {
+            initLevel(currentLevel);
+        }
+    }
+});
+
+document.addEventListener('keyup', e => {
+    keys[e.key] = false;
+});
+
+// ============ 响应式 ============
+function resize() {
+    const maxW = window.innerWidth;
+    const maxH = window.innerHeight;
+    const scale = Math.min(maxW / BASE_WIDTH, maxH / BASE_HEIGHT, 1);
+    canvas.style.width = (BASE_WIDTH * scale) + 'px';
+    canvas.style.height = (BASE_HEIGHT * scale) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============ 游戏循环 ============
+let lastTime = 0;
+function gameLoop(timestamp) {
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+    lastTime = timestamp;
+    animTimer++;
+
+    if (shakeTimer > 0) {
+        shakeTimer--;
+        ctx.save();
+        ctx.translate(
+            (Math.random() - 0.5) * shakeIntensity,
+            (Math.random() - 0.5) * shakeIntensity
+        );
+    }
+
+    ctx.fillStyle = COLORS.dark;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    if (gameState === STATE.MENU) {
+        drawMenu();
+    } else {
+        drawSky();
+        drawClouds();
+        drawMountains();
+        drawTerrain();
+        drawObstacles();
+        drawStars();
+        drawBike();
+        drawParticles();
+        updateParticles();
+
+        if (gameState === STATE.PLAYING) {
+            update(dt);
+            drawUI();
+
+            if (!bike.alive) {
+                gameState = STATE.GAME_OVER;
+                if (score > highScore) {
+                    highScore = score;
+                    localStorage.setItem('moto_highScore', highScore);
+                }
+            }
+        } else if (gameState === STATE.PAUSED) {
+            drawUI();
+            drawPaused();
+        } else if (gameState === STATE.LEVEL_COMPLETE) {
+            drawUI();
+            drawLevelComplete();
+        } else if (gameState === STATE.GAME_OVER) {
+            drawUI();
+            drawGameOver();
+        }
+    }
+
+    if (shakeTimer > 0) {
+        ctx.restore();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ============ 启动 ============
+requestAnimationFrame(gameLoop);
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

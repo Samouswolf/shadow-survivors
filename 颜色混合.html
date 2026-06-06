@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>颜色混合</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Segoe UI',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<script>
+"use strict";
+/* ===== 颜色混合 - 益智游戏 ===== */
+/* 混合颜色达到目标色，有限步骤 */
+
+const canvas = document.getElementById('C');
+const ctx = canvas.getContext('2d');
+
+/* ---------- 音效系统 ---------- */
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function ensureAudio(){if(!audioCtx)audioCtx=new AudioCtx()}
+function playTone(f,d,v){
+    ensureAudio();
+    const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type='sine';o.frequency.value=f;g.gain.value=v||0.15;
+    o.connect(g);g.connect(audioCtx.destination);
+    o.start();g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+    o.stop(audioCtx.currentTime+d+0.01);
+}
+function sfxMix(){playTone(520,0.12,0.18);setTimeout(()=>playTone(660,0.1,0.14),80)}
+function sfxPlace(){playTone(400,0.08,0.12)}
+function sfxWin(){playTone(523,0.15,0.2);setTimeout(()=>playTone(659,0.15,0.2),150);setTimeout(()=>playTone(784,0.25,0.2),300)}
+function sfxLose(){playTone(300,0.2,0.15);setTimeout(()=>playTone(250,0.3,0.12),200)}
+function sfxClick(){playTone(600,0.06,0.1)}
+function sfxHint(){playTone(880,0.08,0.1);setTimeout(()=>playTone(1046,0.1,0.1),60)}
+
+/* ---------- 颜色工具 ---------- */
+function rgbToHsl(r,g,b){
+    r/=255;g/=255;b/=255;
+    const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;
+    if(mx===mn)return[0,0,l];
+    const d=mx-mn,s=l>0.5?d/(2-mx-mn):d/(mx+mn);
+    let h;
+    if(mx===r)h=((g-b)/d+(g<b?6:0))/6;
+    else if(mx===g)h=((b-r)/d+2)/6;
+    else h=((r-g)/d+4)/6;
+    return[h*360,s,l];
+}
+function hslToRgb(h,s,l){
+    h/=360;
+    if(s===0){const v=Math.round(l*255);return[v,v,v]}
+    const q=l<0.5?l*(1+s):l+s-l*s,p=2*l-q;
+    function hue2rgb(p,q,t){if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p}
+    return[Math.round(hue2rgb(p,q,h+1/3)*255),Math.round(hue2rgb(p,q,h)*255),Math.round(hue2rgb(p,q,h-1/3)*255)];
+}
+function mixColors(c1,c2,ratio){
+    // 颜色混合在HSL空间
+    const h1=rgbToHsl(c1[0],c1[1],c1[2]),h2=rgbToHsl(c2[0],c2[1],c2[2]);
+    // 角度插值
+    let dh=h2[0]-h1[0];
+    if(dh>180)dh-=360;if(dh<-180)dh+=360;
+    const h=(h1[0]+dh*ratio+360)%360;
+    const s=h1[1]+(h2[1]-h1[1])*ratio;
+    const l=h1[2]+(h2[2]-h1[2])*ratio;
+    return hslToRgb(h,s,l);
+}
+function colorDist(c1,c2){
+    const h1=rgbToHsl(c1[0],c1[1],c1[2]),h2=rgbToHsl(c2[0],c2[1],c2[2]);
+    let dh=Math.abs(h1[0]-h2[0]);if(dh>180)dh=360-dh;
+    return Math.sqrt(dh*dh+Math.pow((h1[1]-h2[1])*100,2)+Math.pow((h1[2]-h2[2])*100,2));
+}
+function colorPercent(c1,c2){
+    const d=colorDist(c1,c2);
+    if(d<5)return 100;
+    return Math.max(0,Math.round(100-d*0.5));
+}
+function rgbStr(c){return'rgb('+c[0]+','+c[1]+','+c[2]+')'}
+function rgbaStr(c,a){return'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')'}
+
+/* ---------- 关卡数据 ---------- */
+const BASE_COLORS=[
+    [255,60,60],   // 红
+    [60,180,255],  // 蓝
+    [255,220,40],  // 黄
+    [60,220,80],   // 绿
+    [255,140,20],  // 橙
+    [180,60,255],  // 紫
+    [255,120,180], // 粉
+    [40,220,220],  // 青
+];
+
+function genTarget(d){
+    // d=difficulty 1-10, 生成目标色和可用颜色
+    const n=Math.min(3+Math.floor(d/2),6);
+    // 随机选基色
+    const avail=[];
+    const pool=[...BASE_COLORS];
+    for(let i=0;i<n;i++){
+        const idx=Math.floor(Math.random()*pool.length);
+        avail.push(pool.splice(idx,1)[0]);
+    }
+    // 生成目标色
+    const nMix=2+Math.floor(Math.random()*Math.min(3,n-1));
+    const parts=[];
+    const used=new Set();
+    for(let i=0;i<nMix;i++){
+        let idx;
+        do{idx=Math.floor(Math.random()*n)}while(used.has(idx)&&used.size<n);
+        used.add(idx);
+        parts.push({idx,r:0.2+Math.random()*0.6});
+    }
+    let target=[0,0,0];
+    const totalR=parts.reduce((s,p)=>s+p.r,0);
+    for(const p of parts){
+        const c=avail[p.idx];
+        const w=p.r/totalR;
+        target[0]+=c[0]*w;target[1]+=c[1]*w;target[2]+=c[2]*w;
+    }
+    target=[Math.round(target[0]),Math.round(target[1]),Math.round(target[2])];
+    const maxSteps=5+Math.floor(d*0.8);
+    return{colors:avail,target,steps:maxSteps,difficulty:d};
+}
+
+/* ---------- 游戏状态 ---------- */
+const G={
+    state:'menu', // menu|play|pause|win|lose
+    level:1,
+    levelData:null,
+    currentColor:[128,128,128],
+    mixSlots:[], // [{color,ratio}]
+    steps:0,
+    maxSteps:0,
+    score:0,
+    totalScore:0,
+    highScore:parseInt(localStorage.getItem('colorMixHigh'))||0,
+    selectedColor:-1,
+    hoverBtn:-1,
+    dragColor:-1,
+    dragX:0,dragY:0,
+    particles:[],
+    animMix:0,
+    animResult:0,
+    combo:0,
+    bestPercent:0,
+    shakeTimer:0,
+    tutorialDone:localStorage.getItem('colorMixTut')==='1',
+};
+
+/* ---------- 按钮定义 ---------- */
+const BTN={
+    start:{x:0,y:0,w:200,h:50},
+    next:{x:0,y:0,w:200,h:50},
+    retry:{x:0,y:0,w:160,h:45},
+    menu:{x:0,y:0,w:160,h:45},
+    pause:{x:0,y:0,w:50,h:50},
+    resume:{x:0,y:0,w:200,h:50},
+    hint:{x:0,y:0,w:120,h:40},
+    undo:{x:0,y:0,w:120,h:40},
+};
+
+function layoutBtns(){
+    const cw=canvas.width,ch=canvas.height;
+    BTN.start.x=cw/2-100;BTN.start.y=ch*0.62;
+    BTN.next.x=cw/2-100;BTN.next.y=ch*0.65;
+    BTN.retry.x=cw/2-180;BTN.retry.y=ch*0.7;
+    BTN.menu.x=cw/2+20;BTN.menu.y=ch*0.7;
+    BTN.pause.x=cw-55;BTN.pause.y=10;
+    BTN.resume.x=cw/2-100;BTN.resume.y=ch/2+20;
+    BTN.hint.x=cw/2-130;BTN.hint.y=ch*0.9;
+    BTN.undo.x=cw/2+10;BTN.undo.y=ch*0.9;
+}
+
+/* ---------- 画布调整 ---------- */
+function resize(){
+    const W=window.innerWidth,H=window.innerHeight;
+    const S=Math.min(W/420,H/700);
+    canvas.width=Math.floor(420*S);
+    canvas.height=Math.floor(700*S);
+    ctx.setTransform(S,0,0,S,0,0);
+    layoutBtns();
+}
+window.addEventListener('resize',resize);
+resize();
+
+/* ---------- 输入处理 ---------- */
+function ptInBtn(px,py,b){
+    return px>=b.x&&px<=b.x+b.w&&py>=b.y&&py<=b.y+b.h;
+}
+function getPos(e){
+    const t=e.touches?e.touches[0]:e;
+    const r=canvas.getBoundingClientRect();
+    const S=Math.min(r.width/420,r.height/700);
+    return{x:(t.clientX-r.left)/S,y:(t.clientY-r.top)/S};
+}
+function getColorSlot(idx,cw,ch){
+    const n=G.levelData.colors.length;
+    const totalW=n*70+(n-1)*15;
+    const sx=cw/2-totalW/2;
+    return{x:sx+idx*85,y:ch*0.75,w:65,h:65};
+}
+function getMixSlot(idx,cw,ch){
+    const x=cw/2-140+idx*95;
+    return{x:x,y:ch*0.42,w:75,h:75};
+}
+
+function handleDown(e){
+    e.preventDefault();
+    ensureAudio();
+    const p=getPos(e);
+    const cw=420,ch=700;
+
+    if(G.state==='menu'){
+        if(ptInBtn(p.x,p.y,BTN.start)){
+            sfxClick();startGame();return;
+        }
+        return;
+    }
+    if(G.state==='play'){
+        if(ptInBtn(p.x,p.y,BTN.pause)){
+            sfxClick();G.state='pause';return;
+        }
+        if(ptInBtn(p.x,p.y,BTN.hint)){
+            sfxHint();showHint();return;
+        }
+        if(ptInBtn(p.x,p.y,BTN.undo)){
+            sfxClick();undoMix();return;
+        }
+        // 检查颜色选择
+        for(let i=0;i<G.levelData.colors.length;i++){
+            const s=getColorSlot(i,cw,ch);
+            if(ptInBtn(p.x,p.y,s)){
+                sfxPlace();
+                G.selectedColor=i;
+                G.dragColor=i;
+                G.dragX=p.x;G.dragY=p.y;
+                return;
+            }
+        }
+        // 检查混合槽点击
+        if(G.mixSlots.length>0){
+            const s=getMixSlot(G.mixSlots.length-1,cw,ch);
+            if(ptInBtn(p.x,p.y,s)){
+                // 点击混合槽 - 混合
+                if(G.mixSlots.length>=2){
+                    sfxMix();
+                    doMix();
+                }
+                return;
+            }
+        }
+        // 检查混合按钮
+        const mixBtnX=cw/2-60,mixBtnY=ch*0.56;
+        if(p.x>=mixBtnX&&p.x<=mixBtnX+120&&p.y>=mixBtnY&&p.y<=mixBtnY+40){
+            if(G.mixSlots.length>=2){
+                sfxMix();
+                doMix();
+            }
+            return;
+        }
+        // 检查清除按钮
+        const clrBtnX=cw/2-60,clrBtnY=ch*0.62;
+        if(p.x>=clrBtnX&&p.x<=clrBtnX+120&&p.y>=clrBtnY&&p.y<=clrBtnY+40){
+            sfxClick();
+            G.mixSlots=[];
+            G.currentColor=[128,128,128];
+            return;
+        }
+        return;
+    }
+    if(G.state==='pause'){
+        if(ptInBtn(p.x,p.y,BTN.resume)){
+            sfxClick();G.state='play';return;
+        }
+        return;
+    }
+    if(G.state==='win'){
+        if(ptInBtn(p.x,p.y,BTN.next)){
+            sfxClick();nextLevel();return;
+        }
+        if(ptInBtn(p.x,p.y,BTN.menu)){
+            sfxClick();G.state='menu';return;
+        }
+        return;
+    }
+    if(G.state==='lose'){
+        if(ptInBtn(p.x,p.y,BTN.retry)){
+            sfxClick();startGame();return;
+        }
+        if(ptInBtn(p.x,p.y,BTN.menu)){
+            sfxClick();G.state='menu';return;
+        }
+        return;
+    }
+}
+function handleMove(e){
+    e.preventDefault();
+    if(G.dragColor>=0){
+        const p=getPos(e);
+        G.dragX=p.x;G.dragY=p.y;
+    }
+}
+function handleUp(e){
+    e.preventDefault();
+    if(G.dragColor>=0){
+        // 拖放到混合区域
+        const p=getPos(e);
+        const cw=420,ch=700;
+        // 检查是否在混合槽区域
+        if(p.y>ch*0.35&&p.y<ch*0.55){
+            addToMix(G.dragColor);
+        }
+        G.dragColor=-1;
+    }
+}
+
+canvas.addEventListener('mousedown',handleDown);
+canvas.addEventListener('mousemove',handleMove);
+canvas.addEventListener('mouseup',handleUp);
+canvas.addEventListener('touchstart',handleDown,{passive:false});
+canvas.addEventListener('touchmove',handleMove,{passive:false});
+canvas.addEventListener('touchend',handleUp,{passive:false});
+
+// 键盘
+document.addEventListener('keydown',e=>{
+    if(G.state==='menu'&&e.key==='Enter'){sfxClick();startGame()}
+    if(G.state==='play'){
+        if(e.key==='Escape'||e.key==='p'){sfxClick();G.state='pause'}
+        if(e.key>='1'&&e.key<='9'){
+            const idx=parseInt(e.key)-1;
+            if(idx<G.levelData.colors.length){sfxPlace();addToMix(idx)}
+        }
+        if(e.key==='Enter'||e.key===' '){
+            if(G.mixSlots.length>=2){sfxMix();doMix()}
+        }
+        if(e.key==='z'){sfxClick();undoMix()}
+        if(e.key==='h'){sfxHint();showHint()}
+        if(e.key==='c'){sfxClick();G.mixSlots=[];G.currentColor=[128,128,128]}
+    }
+    if(G.state==='pause'&&(e.key==='Escape'||e.key==='p')){sfxClick();G.state='play'}
+    if(G.state==='win'&&e.key==='Enter'){sfxClick();nextLevel()}
+    if(G.state==='lose'&&e.key==='Enter'){sfxClick();startGame()}
+});
+
+/* ---------- 游戏逻辑 ---------- */
+function startGame(){
+    G.levelData=genTarget(G.level);
+    G.currentColor=[128,128,128];
+    G.mixSlots=[];
+    G.steps=0;
+    G.maxSteps=G.levelData.steps;
+    G.selectedColor=-1;
+    G.particles=[];
+    G.animMix=0;
+    G.combo=0;
+    G.bestPercent=0;
+    G.state='play';
+    if(!G.tutorialDone){
+        G.tutorialDone=true;
+        localStorage.setItem('colorMixTut','1');
+    }
+}
+
+function addToMix(idx){
+    if(G.state!=='play')return;
+    if(G.mixSlots.length>=5)return; // 最多5个槽
+    const c=G.levelData.colors[idx];
+    G.mixSlots.push({color:[...c],idx:idx});
+    G.selectedColor=idx;
+    spawnParticles(210,350,10,c);
+    updateCurrentColor();
+}
+
+function updateCurrentColor(){
+    if(G.mixSlots.length===0){G.currentColor=[128,128,128];return}
+    if(G.mixSlots.length===1){G.currentColor=[...G.mixSlots[0].color];return}
+    // 渐进混合
+    let c=[...G.mixSlots[0].color];
+    for(let i=1;i<G.mixSlots.length;i++){
+        c=mixColors(c,G.mixSlots[i].color,0.5);
+    }
+    G.currentColor=c;
+}
+
+function doMix(){
+    if(G.mixSlots.length<2)return;
+    G.steps++;
+    // 计算最终颜色
+    let c=[...G.mixSlots[0].color];
+    for(let i=1;i<G.mixSlots.length;i++){
+        c=mixColors(c,G.mixSlots[i].color,1/(i+1));
+    }
+    G.currentColor=c;
+    G.animResult=1;
+    // 计算匹配度
+    const pct=colorPercent(G.currentColor,G.levelData.target);
+    if(pct>G.bestPercent)G.bestPercent=pct;
+    // 生成粒子
+    spawnParticles(210,350,20,c);
+    // 检查胜利
+    if(pct>=85){
+        // 胜利
+        G.combo++;
+        const baseScore=pct*10;
+        const comboBonus=G.combo*50;
+        const stepBonus=Math.max(0,(G.maxSteps-G.steps)*20);
+        G.score=baseScore+comboBonus+stepBonus;
+        G.totalScore+=G.score;
+        if(G.totalScore>G.highScore){
+            G.highScore=G.totalScore;
+            localStorage.setItem('colorMixHigh',G.highScore);
+        }
+        setTimeout(()=>{G.state='win';sfxWin()},500);
+    }else if(G.steps>=G.maxSteps){
+        // 失败
+        G.combo=0;
+        G.score=0;
+        setTimeout(()=>{G.state='lose';sfxLose()},500);
+    }
+    // 清空混合槽
+    G.mixSlots=[];
+}
+
+function undoMix(){
+    if(G.mixSlots.length>0){
+        G.mixSlots.pop();
+        updateCurrentColor();
+    }
+}
+
+function showHint(){
+    // 提示最佳混合方案
+    const tgt=G.levelData.target;
+    const colors=G.levelData.colors;
+    let bestI=0,bestJ=1,bestD=Infinity;
+    for(let i=0;i<colors.length;i++){
+        for(let j=i+1;j<colors.length;j++){
+            for(let r=0.2;r<=0.8;r+=0.1){
+                const m=mixColors(colors[i],colors[j],r);
+                const d=colorDist(m,tgt);
+                if(d<bestD){bestD=d;bestI=i;bestJ=j}
+            }
+        }
+    }
+    // 高亮提示
+    G.selectedColor=bestI;
+    spawnParticles(210,350,5,colors[bestI]);
+}
+
+function nextLevel(){
+    G.level++;
+    G.levelData=genTarget(G.level);
+    G.currentColor=[128,128,128];
+    G.mixSlots=[];
+    G.steps=0;
+    G.maxSteps=G.levelData.steps;
+    G.selectedColor=-1;
+    G.particles=[];
+    G.animResult=0;
+    G.state='play';
+}
+
+/* ---------- 粒子系统 ---------- */
+function spawnParticles(x,y,n,color){
+    for(let i=0;i<n;i++){
+        const angle=Math.random()*Math.PI*2;
+        const spd=1+Math.random()*3;
+        G.particles.push({
+            x:x,y:y,
+            vx:Math.cos(angle)*spd,
+            vy:Math.sin(angle)*spd-1,
+            life:1,
+            color:color,
+            size:3+Math.random()*4
+        });
+    }
+}
+function updateParticles(dt){
+    for(let i=G.particles.length-1;i>=0;i--){
+        const p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.vy+=0.05;
+        p.life-=dt*2;
+        if(p.life<=0)G.particles.splice(i,1);
+    }
+}
+
+/* ---------- 渲染 ---------- */
+function drawRoundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.arcTo(x+w,y,x+w,y+r,r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+    ctx.lineTo(x+r,y+h);
+    ctx.arcTo(x,y+h,x,y+h-r,r);
+    ctx.lineTo(x,y+r);
+    ctx.arcTo(x,y,x+r,y,r);
+    ctx.closePath();
+}
+
+function drawBtn(b,text,col,hover){
+    const c=col||[70,130,200];
+    const hc=hover?[c[0]+30,c[1]+30,c[2]+30]:c;
+    drawRoundRect(b.x,b.y,b.w,b.h,12);
+    ctx.fillStyle=rgbStr(hc);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.lineWidth=2;
+    ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 18px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,b.x+b.w/2,b.y+b.h/2);
+}
+
+function render(){
+    const cw=420,ch=700;
+    // 清屏
+    ctx.fillStyle='#1a1a2e';
+    ctx.fillRect(0,0,cw,ch);
+
+    if(G.state==='menu'){
+        drawMenu(cw,ch);
+    }else if(G.state==='play'){
+        drawGame(cw,ch);
+    }else if(G.state==='pause'){
+        drawGame(cw,ch);
+        drawPause(cw,ch);
+    }else if(G.state==='win'){
+        drawGame(cw,ch);
+        drawWin(cw,ch);
+    }else if(G.state==='lose'){
+        drawGame(cw,ch);
+        drawLose(cw,ch);
+    }
+
+    // 粒子
+    for(const p of G.particles){
+        ctx.globalAlpha=p.life;
+        ctx.fillStyle=rgbaStr(p.color,1);
+        ctx.beginPath();
+        ctx.arc(p.x,p.y*p.life*0.3+p.y*0.7,p.size*p.life,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawMenu(cw,ch){
+    // 标题
+    ctx.fillStyle='#fff';
+    ctx.font='bold 42px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('颜色混合',cw/2,ch*0.2);
+
+    // 副标题
+    ctx.font='18px sans-serif';
+    ctx.fillStyle='#aaa';
+    ctx.fillText('混合颜色达到目标色',cw/2,ch*0.28);
+    ctx.fillText('有限步骤，挑战你的色彩感',cw/2,ch*0.33);
+
+    // 示例颜色轮
+    const cx=cw/2,cy=ch*0.48,r=60;
+    for(let i=0;i<8;i++){
+        const a=Math.PI*2*i/8-Math.PI/2;
+        ctx.beginPath();
+        ctx.moveTo(cx,cy);
+        ctx.arc(cx,cy,r,a,a+Math.PI*2/8+0.02);
+        ctx.closePath();
+        ctx.fillStyle=rgbStr(BASE_COLORS[i]);
+        ctx.fill();
+    }
+    ctx.beginPath();ctx.arc(cx,cy,r*0.35,0,Math.PI*2);
+    ctx.fillStyle='#1a1a2e';ctx.fill();
+
+    // 最高分
+    ctx.font='16px sans-serif';
+    ctx.fillStyle='#ffcc00';
+    ctx.fillText('最高分: '+G.highScore,cw/2,ch*0.58);
+
+    // 开始按钮
+    drawBtn(BTN.start,'开始游戏',[60,180,120]);
+
+    // 提示
+    ctx.font='14px sans-serif';
+    ctx.fillStyle='#666';
+    ctx.fillText('键盘: 1-9选色 | Enter混合 | C清除 | Z撤销 | H提示',cw/2,ch*0.78);
+    ctx.fillText('触屏: 点击选色 → 点击混合区域',cw/2,ch*0.83);
+}
+
+function drawGame(cw,ch){
+    const ld=G.levelData;
+
+    // 顶部信息
+    ctx.fillStyle='#fff';
+    ctx.font='bold 20px sans-serif';
+    ctx.textAlign='left';ctx.textBaseline='top';
+    ctx.fillText('关卡 '+G.level,15,15);
+    ctx.textAlign='right';
+    ctx.fillText('分数 '+G.totalScore,cw-60,15);
+
+    // 步骤
+    ctx.textAlign='center';
+    ctx.font='16px sans-serif';
+    ctx.fillStyle=G.steps>=G.maxSteps-1?'#ff6666':'#aaa';
+    ctx.fillText('步骤 '+G.steps+'/'+G.maxSteps,cw/2,18);
+
+    // 暂停按钮
+    drawBtn(BTN.pause,'||',[80,80,100]);
+
+    // 目标色区域
+    ctx.font='bold 16px sans-serif';
+    ctx.fillStyle='#fff';ctx.textAlign='center';
+    ctx.fillText('目标色',cw/2,60);
+
+    // 目标色块
+    drawRoundRect(cw/2-50,75,100,80,10);
+    ctx.fillStyle=rgbStr(ld.target);
+    ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+
+    // 匹配度
+    const pct=colorPercent(G.currentColor,ld.target);
+    const pctColor=pct>=85?'#00ff88':pct>=60?'#ffcc00':'#ff6666';
+    ctx.font='bold 28px sans-serif';
+    ctx.fillStyle=pctColor;
+    ctx.fillText(pct+'%',cw/2,180);
+
+    // 当前混合色
+    ctx.font='bold 16px sans-serif';
+    ctx.fillStyle='#fff';
+    ctx.fillText('当前色',cw/2,215);
+
+    drawRoundRect(cw/2-50,230,100,80,10);
+    ctx.fillStyle=rgbStr(G.currentColor);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=2;ctx.stroke();
+
+    // 混合槽
+    ctx.font='14px sans-serif';
+    ctx.fillStyle='#aaa';
+    ctx.fillText('混合槽 (最多5个)',cw/2,340);
+
+    for(let i=0;i<5;i++){
+        const s=getMixSlot(i,cw,ch);
+        drawRoundRect(s.x,s.y,s.w,s.h,10);
+        if(i<G.mixSlots.length){
+            ctx.fillStyle=rgbStr(G.mixSlots[i].color);
+            ctx.fill();
+            ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+            // 序号
+            ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.textAlign='center';
+            ctx.fillText(i+1,s.x+s.w/2,s.y+s.h-10);
+        }else{
+            ctx.fillStyle='rgba(255,255,255,0.08)';
+            ctx.fill();
+            ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.stroke();
+        }
+    }
+
+    // 混合/清除按钮
+    const mixEnabled=G.mixSlots.length>=2;
+    drawBtn({x:cw/2-60,y:ch*0.56,w:120,h:40},mixEnabled?'混合':'添加2+色',[mixEnabled?60:100,mixEnabled?180:100,mixEnabled?120:100]);
+    drawBtn({x:cw/2-60,y:ch*0.62,w:120,h:40},'清除',[150,60,60]);
+
+    // 底部颜色选择
+    ctx.font='14px sans-serif';
+    ctx.fillStyle='#aaa';ctx.textAlign='center';
+    ctx.fillText('选择颜色 ↓',cw/2,ch*0.71);
+
+    for(let i=0;i<ld.colors.length;i++){
+        const s=getColorSlot(i,cw,ch);
+        const sel=G.selectedColor===i;
+        drawRoundRect(s.x,s.y,s.w,s.h,10);
+        ctx.fillStyle=rgbStr(ld.colors[i]);
+        ctx.fill();
+        if(sel){
+            ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();
+            // 选中标记
+            ctx.fillStyle='#fff';ctx.font='bold 16px sans-serif';ctx.textAlign='center';
+            ctx.fillText('✓',s.x+s.w/2,s.y-8);
+        }else{
+            ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1;ctx.stroke();
+        }
+        // 键盘提示
+        ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='12px sans-serif';
+        ctx.fillText(i+1,s.x+s.w/2,s.y+s.h+12);
+    }
+
+    // 底部工具按钮
+    drawBtn(BTN.hint,'提示 H',[180,140,40]);
+    drawBtn(BTN.undo,'撤销 Z',[100,100,120]);
+
+    // 拖拽颜色
+    if(G.dragColor>=0){
+        ctx.globalAlpha=0.7;
+        ctx.fillStyle=rgbStr(ld.colors[G.dragColor]);
+        ctx.beginPath();
+        ctx.arc(G.dragX,G.dragY,25,0,Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha=1;
+    }
+}
+
+function drawPause(cw,ch){
+    ctx.fillStyle='rgba(0,0,0,0.7)';
+    ctx.fillRect(0,0,cw,ch);
+    ctx.fillStyle='#fff';ctx.font='bold 36px sans-serif';ctx.textAlign='center';
+    ctx.fillText('暂停',cw/2,ch/2-30);
+    drawBtn(BTN.resume,'继续游戏',[60,180,120]);
+}
+
+function drawWin(cw,ch){
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    ctx.fillRect(0,0,cw,ch);
+
+    ctx.fillStyle='#00ff88';ctx.font='bold 36px sans-serif';ctx.textAlign='center';
+    ctx.fillText('匹配成功!',cw/2,ch*0.35);
+
+    ctx.fillStyle='#fff';ctx.font='24px sans-serif';
+    ctx.fillText('匹配度: '+G.bestPercent+'%',cw/2,ch*0.43);
+
+    ctx.font='20px sans-serif';
+    ctx.fillStyle='#ffcc00';
+    ctx.fillText('+'+G.score+' 分',cw/2,ch*0.5);
+
+    if(G.combo>1){
+        ctx.fillStyle='#ff66aa';
+        ctx.fillText('连击 x'+G.combo,cw/2,ch*0.56);
+    }
+
+    drawBtn(BTN.next,'下一关',[60,180,120]);
+    drawBtn(BTN.menu,'返回',[100,100,120]);
+}
+
+function drawLose(cw,ch){
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    ctx.fillRect(0,0,cw,ch);
+
+    ctx.fillStyle='#ff6666';ctx.font='bold 36px sans-serif';ctx.textAlign='center';
+    ctx.fillText('步骤用尽',cw/2,ch*0.35);
+
+    ctx.fillStyle='#fff';ctx.font='20px sans-serif';
+    ctx.fillText('最佳匹配: '+G.bestPercent+'%',cw/2,ch*0.43);
+    ctx.fillText('目标色:',cw/2-40,ch*0.5);
+    drawRoundRect(cw/2+10,ch*0.47,40,30,6);
+    ctx.fillStyle=rgbStr(G.levelData.target);ctx.fill();
+
+    drawBtn(BTN.retry,'重试',[200,120,60]);
+    drawBtn(BTN.menu,'返回',[100,100,120]);
+}
+
+/* ---------- 游戏循环 ---------- */
+let lastTime=0;
+function gameLoop(ts){
+    const dt=Math.min((ts-lastTime)/1000,0.05);
+    lastTime=ts;
+
+    updateParticles(dt);
+
+    if(G.animMix>0)G.animMix=Math.max(0,G.animMix-dt*3);
+    if(G.animResult>0)G.animResult=Math.max(0,G.animResult-dt*2);
+    if(G.shakeTimer>0)G.shakeTimer=Math.max(0,G.shakeTimer-dt*5);
+
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+/* ---------- 启动 ---------- */
+requestAnimationFrame(gameLoop);
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

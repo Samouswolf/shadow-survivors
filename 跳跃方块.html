@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>跳跃方块</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a1a;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:'Microsoft YaHei',Arial,sans-serif;touch-action:none;user-select:none}
+canvas{display:block;max-width:100vw;max-height:100vh;cursor:default}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+(function(){
+'use strict';
+
+// Canvas setup
+const c=document.getElementById('gc'),ctx=c.getContext('2d');
+const W=400,H=600;
+c.width=W;c.height=H;
+
+function resize(){
+  const r=W/H;let w=window.innerWidth,h=window.innerHeight;
+  if(w/h>r)c.style.width=(h*r)+'px',c.style.height=h+'px';
+  else c.style.width=w+'px',c.style.height=(w/r)+'px';
+}
+window.addEventListener('resize',resize);resize();
+
+// Audio system
+let audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playSound(freq,dur,type,vol){
+  if(!audioCtx)return;
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.type=type||'square';o.frequency.value=freq;
+  g.gain.setValueAtTime(vol||0.1,audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start();o.stop(audioCtx.currentTime+dur);
+}
+function sfxJump(){playSound(400,0.15,'square',0.08);setTimeout(()=>playSound(600,0.1,'square',0.06),50);}
+function sfxStar(){playSound(800,0.1,'sine',0.1);setTimeout(()=>playSound(1000,0.15,'sine',0.08),80);}
+function sfxDie(){playSound(200,0.3,'sawtooth',0.1);setTimeout(()=>playSound(150,0.4,'sawtooth',0.08),100);}
+function sfxBounce(){playSound(500,0.12,'triangle',0.1);}
+function sfxHighscore(){playSound(600,0.15,'sine',0.1);setTimeout(()=>playSound(800,0.15,'sine',0.08),150);setTimeout(()=>playSound(1000,0.2,'sine',0.1),300);}
+
+// Input
+const keys={};
+let mouseX=W/2,touchX=W/2,isTouching=false;
+let inputX=W/2;
+
+window.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Space')e.preventDefault();});
+window.addEventListener('keyup',e=>{keys[e.code]=false;});
+
+c.addEventListener('touchstart',e=>{
+  e.preventDefault();initAudio();
+  const t=e.touches[0],rect=c.getBoundingClientRect();
+  touchX=(t.clientX-rect.left)/rect.width*W;isTouching=true;
+},{passive:false});
+c.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  const t=e.touches[0],rect=c.getBoundingClientRect();
+  touchX=(t.clientX-rect.left)/rect.width*W;
+},{passive:false});
+c.addEventListener('touchend',e=>{e.preventDefault();isTouching=false;},{passive:false});
+
+c.addEventListener('mousemove',e=>{
+  const rect=c.getBoundingClientRect();
+  mouseX=(e.clientX-rect.left)/rect.width*W;
+});
+c.addEventListener('click',e=>{initAudio();handleClick();});
+
+// Game constants
+const PLAT_W=70,PLAT_H=12,GRAVITY=0.35,JUMP_VEL=-10,PLAYER_SIZE=24;
+const STAR_SIZE=16;
+
+// Platform types
+const PLAT_NORMAL=0,PLAT_MOVING=1,PLAT_FRAGILE=2,PLAT_SPRING=3;
+
+// Game state
+let G={
+  state:'title', // title,playing,paused,gameover
+  score:0,
+  highscore:parseInt(localStorage.getItem('jumpBlockHigh'))||0,
+  player:null,
+  platforms:[],
+  stars:[],
+  particles:[],
+  cameraY:0,
+  maxHeight:0,
+  difficulty:1,
+  frameCount:0,
+  paused:false
+};
+
+// Platform class
+function createPlatform(x,y,type){
+  return{x,y,w:PLAT_W,h:PLAT_H,type:type||PLAT_NORMAL,
+    moveDir:1,moveSpeed:1+Math.random(),broken:false,breakTimer:0,
+    springAnim:0};
+}
+
+// Star class
+function createStar(x,y){
+  return{x:x+PLAT_W/2,y:y-20,size:STAR_SIZE,collected:false,anim:Math.random()*Math.PI*2};
+}
+
+// Particle class
+function createParticle(x,y,color){
+  return{x,y,vx:(Math.random()-0.5)*6,vy:-Math.random()*4-2,
+    life:1,color:color||'#fff',size:3+Math.random()*3};
+}
+
+// Generate platforms
+function generatePlatforms(){
+  const platforms=[];
+  // Ground platform
+  platforms.push(createPlatform(W/2-PLAT_W/2,H-50,PLAT_NORMAL));
+
+  let y=H-50;
+  for(let i=0;i<20;i++){
+    y-=50+Math.random()*30;
+    const x=Math.random()*(W-PLAT_W);
+    let type=PLAT_NORMAL;
+    const r=Math.random();
+    if(r<0.15)type=PLAT_MOVING;
+    else if(r<0.25)type=PLAT_FRAGILE;
+    else if(r<0.3)type=PLAT_SPRING;
+    platforms.push(createPlatform(x,y,type));
+  }
+  return platforms;
+}
+
+// Generate stars for platforms
+function generateStars(platforms){
+  const stars=[];
+  for(let i=3;i<platforms.length;i++){
+    if(Math.random()<0.4){
+      stars.push(createStar(platforms[i].x,platforms[i].y));
+    }
+  }
+  return stars;
+}
+
+// Initialize game
+function initGame(){
+  G.state='playing';
+  G.score=0;
+  G.cameraY=0;
+  G.maxHeight=0;
+  G.difficulty=1;
+  G.frameCount=0;
+  G.particles=[];
+
+  G.platforms=generatePlatforms();
+  G.stars=generateStars(G.platforms);
+
+  G.player={
+    x:W/2-PLAYER_SIZE/2,
+    y:H-100,
+    w:PLAYER_SIZE,
+    h:PLAYER_SIZE,
+    vx:0,
+    vy:0,
+    onPlatform:false,
+    alive:true,
+    anim:0,
+    trail:[]
+  };
+}
+
+// Update platforms
+function updatePlatforms(){
+  for(const p of G.platforms){
+    // Moving platforms
+    if(p.type===PLAT_MOVING){
+      p.x+=p.moveSpeed*p.moveDir;
+      if(p.x<=0||p.x>=W-PLAT_W)p.moveDir*=-1;
+    }
+    // Fragile platforms
+    if(p.type===PLAT_FRAGILE&&p.broken){
+      p.breakTimer++;
+      if(p.breakTimer>30)p.y=H+100; // Remove
+    }
+    // Spring animation
+    if(p.springAnim>0)p.springAnim-=0.1;
+  }
+}
+
+// Update player
+function updatePlayer(){
+  const p=G.player;
+  if(!p.alive)return;
+
+  // Input
+  if(keys['ArrowLeft']||keys['KeyA'])p.vx=-5;
+  else if(keys['ArrowRight']||keys['KeyD'])p.vx=5;
+  else if(isTouching)p.vx=(touchX-p.x-PLAYER_SIZE/2)*0.15;
+  else p.vx*=0.8;
+
+  // Gravity
+  p.vy+=GRAVITY;
+  p.y+=p.vy;
+  p.x+=p.vx;
+
+  // Wrap around screen
+  if(p.x<-PLAYER_SIZE)p.x=W;
+  if(p.x>W)p.x=-PLAYER_SIZE;
+
+  // Update trail
+  p.trail.push({x:p.x+PLAYER_SIZE/2,y:p.y+PLAYER_SIZE/2,life:10});
+  if(p.trail.length>10)p.trail.shift();
+  for(const t of p.trail)t.life--;
+  p.trail=p.trail.filter(t=>t.life>0);
+
+  // Animation
+  p.anim+=0.1;
+
+  // Platform collision (only when falling)
+  if(p.vy>=0){
+    for(const plat of G.platforms){
+      if(plat.y>H)continue;
+      if(p.x+p.w>plat.x&&p.x<plat.x+plat.w&&
+         p.y+p.h>=plat.y&&p.y+p.h<=plat.y+plat.h+p.vy+2){
+
+        // Fragile platform
+        if(plat.type===PLAT_FRAGILE){
+          if(!plat.broken){
+            plat.broken=true;
+            plat.breakTimer=0;
+            sfxBounce();
+            // Small bounce
+            p.vy=JUMP_VEL*0.5;
+          }
+          continue;
+        }
+
+        // Spring platform
+        if(plat.type===PLAT_SPRING){
+          p.vy=JUMP_VEL*1.6;
+          plat.springAnim=1;
+          sfxJump();
+          // Extra particles
+          for(let i=0;i<8;i++){
+            G.particles.push(createParticle(p.x+PLAYER_SIZE/2,plat.y,'#ff0'));
+          }
+        }else{
+          p.vy=JUMP_VEL;
+          sfxBounce();
+        }
+
+        p.y=plat.y-PLAYER_SIZE;
+        p.onPlatform=true;
+
+        // Particles
+        for(let i=0;i<3;i++){
+          G.particles.push(createParticle(p.x+PLAYER_SIZE/2,plat.y,'#8ff'));
+        }
+      }
+    }
+  }
+
+  // Star collection
+  for(const star of G.stars){
+    if(star.collected)continue;
+    const dx=p.x+PLAYER_SIZE/2-star.x;
+    const dy=p.y+PLAYER_SIZE/2-star.y;
+    if(Math.sqrt(dx*dx+dy.dy)<PLAYER_SIZE/2+star.size/2){
+      star.collected=true;
+      G.score+=10;
+      sfxStar();
+      // Star particles
+      for(let i=0;i<6;i++){
+        G.particles.push(createParticle(star.x,star.y,'#fd0'));
+      }
+    }
+  }
+
+  // Camera follow
+  const targetY=p.y-H*0.4;
+  if(targetY<G.cameraY){
+    G.cameraY+=(targetY-G.cameraY)*0.1;
+  }
+
+  // Track max height
+  const height=Math.floor((H-p.y)/10);
+  if(height>G.maxHeight){
+    G.maxHeight=height;
+    G.score=Math.max(G.score,G.maxHeight);
+  }
+
+  // Difficulty scaling
+  G.difficulty=1+Math.floor(G.maxHeight/100)*0.1;
+
+  // Death
+  if(p.y>G.cameraY+H+50){
+    p.alive=false;
+    sfxDie();
+    // Death particles
+    for(let i=0;i<15;i++){
+      G.particles.push(createParticle(p.x+PLAYER_SIZE/2,p.y+PLAYER_SIZE/2,'#f44'));
+    }
+    setTimeout(()=>{
+      G.state='gameover';
+      if(G.score>G.highscore){
+        G.highscore=G.score;
+        localStorage.setItem('jumpBlockHigh',G.highscore);
+        sfxHighscore();
+      }
+    },1000);
+  }
+}
+
+// Update particles
+function updateParticles(){
+  for(let i=G.particles.length-1;i>=0;i--){
+    const p=G.particles[i];
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.vy+=0.2;
+    p.life--;
+    if(p.life<=0)G.particles.splice(i,1);
+  }
+}
+
+// Generate new platforms as we go up
+function generateMorePlatforms(){
+  const topY=G.platforms.reduce((min,p)=>Math.min(min,p.y),Infinity);
+  if(topY>G.cameraY-200){
+    const count=5+Math.floor(Math.random()*3);
+    for(let i=0;i<count;i++){
+      const y=topY-50-Math.random()*30;
+      const x=Math.random()*(W-PLAT_W);
+      let type=PLAT_NORMAL;
+      const r=Math.random();
+      const diff=G.difficulty;
+      if(r<0.1*diff)type=PLAT_MOVING;
+      else if(r<0.2*diff)type=PLAT_FRAGILE;
+      else if(r<0.25*diff)type=PLAT_SPRING;
+      G.platforms.push(createPlatform(x,y,type));
+
+      // Maybe add star
+      if(Math.random()<0.3){
+        G.stars.push(createStar(x,y));
+      }
+    }
+  }
+
+  // Cleanup off-screen platforms
+  G.platforms=G.platforms.filter(p=>p.y<G.cameraY+H+100);
+  G.stars=G.stars.filter(s=>s.y<G.cameraY+H+100&&!s.collected);
+}
+
+// Drawing functions
+function drawBackground(){
+  // Gradient background
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  const hue=200+Math.sin(G.frameCount*0.001)*20;
+  grad.addColorStop(0,`hsl(${hue},60%,15%)`);
+  grad.addColorStop(1,`hsl(${hue+30},50%,25%)`);
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,W,H);
+
+  // Stars background
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  for(let i=0;i<30;i++){
+    const x=(i*137+G.cameraY*0.05)%W;
+    const y=(i*89+G.cameraY*0.02)%H;
+    const s=1+Math.sin(i+G.frameCount*0.02)*0.5;
+    ctx.beginPath();ctx.arc(x,y,s,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function drawPlatform(plat){
+  if(plat.y<G.cameraY-20||plat.y>G.cameraY+H+20)return;
+  const x=plat.x,y=plat.y-G.cameraY;
+
+  ctx.save();
+
+  // Fragile platform - shaking
+  if(plat.type===PLAT_FRAGILE&&plat.broken){
+    ctx.translate(Math.random()*4-2,Math.random()*4-2);
+    ctx.globalAlpha=1-plat.breakTimer/30;
+  }
+
+  // Spring platform - bounce effect
+  let springOffset=0;
+  if(plat.type===PLAT_SPRING&&plat.springAnim>0){
+    springOffset=-Math.sin(plat.springAnim*Math.PI)*8;
+  }
+
+  // Draw platform
+  switch(plat.type){
+    case PLAT_NORMAL:
+      ctx.fillStyle='#4a9';
+      ctx.fillRect(x,y,plat.w,plat.h);
+      ctx.fillStyle='#5c3';
+      ctx.fillRect(x,y,plat.w,4);
+      break;
+    case PLAT_MOVING:
+      ctx.fillStyle='#48f';
+      ctx.fillRect(x,y,plat.w,plat.h);
+      ctx.fillStyle='#6af';
+      ctx.fillRect(x,y,plat.w,4);
+      // Arrow indicator
+      ctx.fillStyle='#fff';
+      ctx.beginPath();
+      const arrowX=x+plat.w/2+(plat.moveDir>0?8:-8);
+      ctx.moveTo(arrowX,y+6);
+      ctx.lineTo(arrowX-plat.moveDir*6,y+3);
+      ctx.lineTo(arrowX-plat.moveDir*6,y+9);
+      ctx.fill();
+      break;
+    case PLAT_FRAGILE:
+      ctx.fillStyle=plat.broken?'#a55':'#a86';
+      ctx.fillRect(x,y,plat.w,plat.h);
+      ctx.fillStyle=plat.broken?'#c66':'#ba7';
+      ctx.fillRect(x,y,plat.w,4);
+      // Crack lines
+      ctx.strokeStyle='rgba(0,0,0,0.3)';
+      ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.moveTo(x+plat.w*0.3,y);ctx.lineTo(x+plat.w*0.4,y+plat.h);
+      ctx.moveTo(x+plat.w*0.6,y);ctx.lineTo(x+plat.w*0.7,y+plat.h);
+      ctx.stroke();
+      break;
+    case PLAT_SPRING:
+      ctx.fillStyle='#d4d';
+      ctx.fillRect(x,y+springOffset,plat.w,plat.h);
+      ctx.fillStyle='#e6e';
+      ctx.fillRect(x,y+springOffset,plat.w,4);
+      // Spring coil
+      ctx.strokeStyle='#f8f';
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      for(let i=0;i<3;i++){
+        const sx=x+plat.w*0.3+i*plat.w*0.2;
+        ctx.moveTo(sx,y+springOffset+plat.h);
+        ctx.lineTo(sx,y+springOffset+plat.h+8);
+      }
+      ctx.stroke();
+      break;
+  }
+
+  ctx.restore();
+}
+
+function drawStar(star){
+  if(star.collected)return;
+  if(star.y<G.cameraY-20||star.y>G.cameraY+H+20)return;
+
+  const x=star.x,y=star.y-G.cameraY;
+  const pulse=Math.sin(G.frameCount*0.05+star.anim)*0.2+0.8;
+  const size=star.size*pulse;
+
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(G.frameCount*0.02+star.anim);
+
+  // Glow
+  ctx.fillStyle='rgba(255,220,0,0.3)';
+  ctx.beginPath();ctx.arc(0,0,size,0,Math.PI*2);ctx.fill();
+
+  // Star shape
+  ctx.fillStyle='#fd0';
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const angle=i*Math.PI*2/5-Math.PI/2;
+    const outerX=Math.cos(angle)*size;
+    const outerY=Math.sin(angle)*size;
+    const innerAngle=angle+Math.PI/5;
+    const innerX=Math.cos(innerAngle)*size*0.4;
+    const innerY=Math.sin(innerAngle)*size*0.4;
+    if(i===0)ctx.moveTo(outerX,outerY);
+    else ctx.lineTo(outerX,outerY);
+    ctx.lineTo(innerX,innerY);
+  }
+  ctx.closePath();ctx.fill();
+
+  // Shine
+  ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.beginPath();ctx.arc(-size*0.2,-size*0.2,size*0.3,0,Math.PI*2);ctx.fill();
+
+  ctx.restore();
+}
+
+function drawPlayer(){
+  const p=G.player;
+  if(!p||!p.alive)return;
+
+  const x=p.x,y=p.y-G.cameraY;
+
+  // Trail
+  ctx.save();
+  for(const t of p.trail){
+    ctx.fillStyle=`rgba(100,200,255,${t.life/10*0.3})`;
+    ctx.beginPath();
+    ctx.arc(t.x,t.y-G.cameraY,PLAYER_SIZE/3*(t.life/10),0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Squash and stretch
+  let scaleX=1,scaleY=1;
+  if(p.vy<-2){scaleX=0.85;scaleY=1.15;}
+  else if(p.vy>2){scaleX=1.15;scaleY=0.85;}
+
+  ctx.save();
+  ctx.translate(x+PLAYER_SIZE/2,y+PLAYER_SIZE/2);
+  ctx.scale(scaleX,scaleY);
+
+  // Body
+  ctx.fillStyle='#4af';
+  ctx.fillRect(-PLAYER_SIZE/2,-PLAYER_SIZE/2,PLAYER_SIZE,PLAYER_SIZE);
+
+  // Face
+  ctx.fillStyle='#fff';
+  // Eyes
+  const eyeY=-PLAYER_SIZE*0.15;
+  const blink=Math.sin(G.frameCount*0.1)>0.95?0.1:1;
+  ctx.fillRect(-PLAYER_SIZE*0.25,eyeY,6,6*blink);
+  ctx.fillRect(PLAYER_SIZE*0.1,eyeY,6,6*blink);
+
+  // Pupils (look in movement direction)
+  ctx.fillStyle='#234';
+  const pupilOff=p.vx>0?2:p.vx<0?-2:0;
+  ctx.fillRect(-PLAYER_SIZE*0.25+2+pupilOff,eyeY+2,3,3);
+  ctx.fillRect(PLAYER_SIZE*0.1+2+pupilOff,eyeY+2,3,3);
+
+  // Mouth
+  ctx.fillStyle='#fff';
+  ctx.fillRect(-4,PLAYER_SIZE*0.15,8,3);
+
+  ctx.restore();
+}
+
+function drawParticles(){
+  for(const p of G.particles){
+    ctx.fillStyle=p.color;
+    ctx.globalAlpha=p.life/10;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y-G.cameraY,p.size*(p.life/10),0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+function drawHUD(){
+  // Score
+  ctx.fillStyle='rgba(0,0,0,0.5)';
+  ctx.fillRect(0,0,W,40);
+
+  ctx.fillStyle='#fff';
+  ctx.font='bold 20px Arial';
+  ctx.textAlign='left';
+  ctx.textBaseline='middle';
+  ctx.fillText('Score: '+G.score,10,20);
+
+  ctx.textAlign='right';
+  ctx.fillText('Best: '+G.highscore,W-10,20);
+
+  // Height indicator
+  ctx.fillStyle='#aaa';
+  ctx.font='14px Arial';
+  ctx.textAlign='center';
+  ctx.fillText(G.maxHeight+'m',W/2,20);
+}
+
+function drawTitle(){
+  // Background
+  drawBackground();
+
+  // Title
+  ctx.fillStyle='#fff';
+  ctx.font='bold 48px Arial';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText('跳跃方块',W/2,120);
+
+  // Subtitle
+  ctx.font='18px "Microsoft YaHei",Arial';
+  ctx.fillStyle='#aaa';
+  ctx.fillText('向上跳跃 · 收集星星 · 挑战高分',W/2,180);
+
+  // Animated preview
+  const previewY=300+Math.sin(Date.now()/300)*20;
+  ctx.fillStyle='#4af';
+  ctx.fillRect(W/2-15,previewY,30,30);
+  ctx.fillStyle='#fff';
+  ctx.fillRect(W/2-10,previewY+8,4,4);
+  ctx.fillRect(W/2+6,previewY+8,4,4);
+  ctx.fillRect(W/2-4,previewY+18,8,3);
+
+  // Platforms preview
+  ctx.fillStyle='#4a9';
+  ctx.fillRect(W/2-40,previewY+50,80,10);
+  ctx.fillRect(W/2-60,previewY+100,70,10);
+  ctx.fillRect(W/2+10,previewY+140,60,10);
+
+  // Star preview
+  ctx.fillStyle='#fd0';
+  ctx.beginPath();
+  ctx.arc(W/2+50,previewY+30,8,0,Math.PI*2);
+  ctx.fill();
+
+  // High score
+  if(G.highscore>0){
+    ctx.fillStyle='#fd0';
+    ctx.font='bold 16px Arial';
+    ctx.fillText('最高分: '+G.highscore,W/2,480);
+  }
+
+  // Start instruction
+  ctx.fillStyle='#fff';
+  ctx.font='20px Arial';
+  const alpha=Math.sin(Date.now()/500)*0.3+0.7;
+  ctx.globalAlpha=alpha;
+  ctx.fillText('点击/按空格开始',W/2,530);
+  ctx.globalAlpha=1;
+
+  // Controls
+  ctx.fillStyle='#888';
+  ctx.font='14px Arial';
+  ctx.fillText('← → 或 A D 移动 · 触屏滑动',W/2,570);
+}
+
+function drawGameOver(){
+  drawBackground();
+
+  // Overlay
+  ctx.fillStyle='rgba(0,0,0,0.7)';
+  ctx.fillRect(0,0,W,H);
+
+  // Game over text
+  ctx.fillStyle='#f44';
+  ctx.font='bold 48px Arial';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText('游戏结束',W/2,180);
+
+  // Score
+  ctx.fillStyle='#fff';
+  ctx.font='24px Arial';
+  ctx.fillText('得分: '+G.score,W/2,260);
+  ctx.fillText('高度: '+G.maxHeight+'m',W/2,300);
+
+  // New high score
+  if(G.score>=G.highscore&&G.score>0){
+    ctx.fillStyle='#fd0';
+    ctx.font='bold 20px Arial';
+    ctx.fillText('新纪录!',W/2,350);
+  }
+
+  // Restart instruction
+  ctx.fillStyle='#aaa';
+  ctx.font='18px Arial';
+  ctx.fillText('点击/按空格重新开始',W/2,420);
+}
+
+// Click handler
+function handleClick(){
+  if(G.state==='title'){
+    initGame();
+  }else if(G.state==='gameover'){
+    G.state='title';
+  }
+}
+
+// Pause screen drawing
+function drawPause(){
+  // Dim background
+  ctx.fillStyle='rgba(0,0,0,0.6)';
+  ctx.fillRect(0,0,W,H);
+
+  // Pause text
+  ctx.fillStyle='#fff';
+  ctx.font='bold 48px Arial';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText('暂停',W/2,H/2-30);
+
+  // Instructions
+  ctx.fillStyle='#aaa';
+  ctx.font='18px Arial';
+  ctx.fillText('按 ESC 或 P 继续',W/2,H/2+30);
+}
+
+// Main loop
+function update(){
+  G.frameCount++;
+
+  if(G.state==='playing'){
+    updatePlatforms();
+    updatePlayer();
+    updateParticles();
+    generateMorePlatforms();
+  }
+}
+
+function draw(){
+  switch(G.state){
+    case 'title':drawTitle();break;
+    case 'playing':
+      drawBackground();
+      for(const p of G.platforms)drawPlatform(p);
+      for(const s of G.stars)drawStar(s);
+      drawParticles();
+      drawPlayer();
+      drawHUD();
+      break;
+    case 'paused':
+      drawBackground();
+      for(const p of G.platforms)drawPlatform(p);
+      for(const s of G.stars)drawStar(s);
+      drawParticles();
+      drawPlayer();
+      drawHUD();
+      drawPause();
+      break;
+    case 'gameover':drawGameOver();break;
+  }
+}
+
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// Keyboard start
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'||e.code==='Enter'){
+    if(G.state==='title')initAudio(),initGame();
+    else if(G.state==='gameover')G.state='title';
+  }
+  if(e.code==='Escape'||e.code==='KeyP'){
+    if(G.state==='playing'){
+      G.state='paused';
+      G.paused=true;
+    }else if(G.state==='paused'){
+      G.state='playing';
+      G.paused=false;
+    }
+  }
+});
+
+// Start
+loop();
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

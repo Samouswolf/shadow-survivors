@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>飞刀投掷</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a0a2e;font-family:'Segoe UI',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+// ===== 飞刀投掷 - Knife Throw =====
+"use strict";
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+// ===== 音效系统 =====
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function ensureAudio(){ if(!audioCtx) audioCtx = new AudioCtx(); }
+function playTone(freq, dur, type, vol){
+    ensureAudio();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type||'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol||0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime+dur);
+}
+function sfxThrow(){ playTone(800,0.08,'sawtooth',0.12); }
+function sfxHit(){ playTone(500,0.1,'square',0.15); playTone(700,0.05,'sine',0.1); }
+function sfxStick(){ playTone(1200,0.06,'sine',0.1); }
+function sfxBounce(){ playTone(300,0.15,'triangle',0.12); }
+function sfxPerfect(){ playTone(880,0.1,'sine',0.15); setTimeout(()=>playTone(1100,0.15,'sine',0.15),100); }
+function sfxGameOver(){ playTone(300,0.3,'sawtooth',0.15); setTimeout(()=>playTone(200,0.4,'sawtooth',0.12),200); }
+function sfxLevelUp(){ playTone(523,0.1,'sine',0.15); setTimeout(()=>playTone(659,0.1,'sine',0.15),100); setTimeout(()=>playTone(784,0.15,'sine',0.15),200); }
+function sfxCombo(){ playTone(660,0.06,'square',0.12); }
+
+// ===== 游戏常量 =====
+const TARGET_MIN_R = 45;
+const TARGET_MAX_R = 70;
+const KNIFE_LEN = 28;
+const KNIFE_W = 6;
+const BASE_SPEED = 1.2;
+const SPEED_INC = 0.15;
+const KNIFE_SPEED = 12;
+const PERFECT_THRESHOLD = 15;
+const COMBO_WINDOW = 500;
+
+// ===== 游戏状态 =====
+let W, H, cx, cy;
+let state = 'menu'; // menu | playing | paused | gameover
+let score = 0;
+let highScore = parseInt(localStorage.getItem('knife_throw_high')||'0');
+let level = 1;
+let knivesLeft = 0;
+let knivesThrown = 0;
+let combo = 0;
+let maxCombo = 0;
+let lastHitTime = 0;
+let perfectCount = 0;
+let targetAngle = 0;
+let targetSpeed = BASE_SPEED;
+let targetRadius = 60;
+let stuckKnives = [];
+let throwingKnife = null;
+let particles = [];
+let shakeTimer = 0;
+let shakeX = 0, shakeY = 0;
+let levelUpTimer = 0;
+let floatingTexts = [];
+let throwCooldown = 0;
+let totalKnivesThrown = 0;
+let gameStartTime = 0;
+
+// 每关飞刀数量
+function knivesForLevel(lv){ return Math.min(5 + lv * 2, 25); }
+
+// 目标半径随关卡变化
+function radiusForLevel(lv){ return TARGET_MIN_R + (TARGET_MAX_R - TARGET_MIN_R) * Math.max(0, 1 - (lv-1)/15); }
+
+// 目标速度
+function speedForLevel(lv){
+    let s = BASE_SPEED + (lv-1) * SPEED_INC;
+    if(lv > 8) s += Math.sin(lv * 0.5) * 0.3;
+    return s;
+}
+
+// ===== 初始化 =====
+function resize(){
+    W = cv.width = window.innerWidth;
+    H = cv.height = window.innerHeight;
+    cx = W / 2;
+    cy = H * 0.38;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ===== 粒子系统 =====
+function spawnParticles(x, y, color, count, spread){
+    for(let i = 0; i < count; i++){
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * spread;
+        particles.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay: 0.02 + Math.random() * 0.03,
+            size: 2 + Math.random() * 3,
+            color
+        });
+    }
+}
+
+function spawnSparks(x, y){
+    for(let i = 0; i < 8; i++){
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 2 + Math.random() * 4;
+        particles.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay: 0.04 + Math.random() * 0.04,
+            size: 1.5 + Math.random() * 2,
+            color: `hsl(${40+Math.random()*20},100%,${60+Math.random()*30}%)`
+        });
+    }
+}
+
+function addFloatingText(x, y, text, color, size){
+    floatingTexts.push({x, y, text, color, size: size||20, life:1, decay:0.02});
+}
+
+// ===== 游戏逻辑 =====
+function startGame(){
+    state = 'playing';
+    score = 0;
+    level = 1;
+    combo = 0;
+    maxCombo = 0;
+    perfectCount = 0;
+    totalKnivesThrown = 0;
+    gameStartTime = Date.now();
+    startLevel();
+}
+
+function startLevel(){
+    knivesLeft = knivesForLevel(level);
+    knivesThrown = 0;
+    targetRadius = radiusForLevel(level);
+    targetSpeed = speedForLevel(level);
+    stuckKnives = [];
+    throwingKnife = null;
+    targetAngle = 0;
+    throwCooldown = 0;
+    levelUpTimer = 0;
+}
+
+function throwKnife(){
+    if(state !== 'playing' || throwingKnife || knivesLeft <= 0 || throwCooldown > 0) return;
+    sfxThrow();
+    throwingKnife = {
+        x: cx,
+        y: H * 0.85,
+        vy: -KNIFE_SPEED,
+        stuck: false,
+        angle: 0
+    };
+    knivesLeft--;
+    totalKnivesThrown++;
+    throwCooldown = 8;
+}
+
+function checkKnifeCollision(){
+    if(!throwingKnife) return;
+    const k = throwingKnife;
+    const tipY = k.y - KNIFE_LEN/2;
+    const dist = Math.hypot(k.x - cx, tipY - cy);
+
+    // 检查是否到达目标区域
+    if(dist <= targetRadius + KNIFE_LEN/2){
+        // 检查与已有飞刀碰撞
+        const hitAngle = Math.atan2(k.x - cx, tipY - cy);
+        for(const sk of stuckKnives){
+            const angleDiff = Math.abs(normalizeAngle(sk.angle - hitAngle));
+            if(angleDiff < 0.25){ // 碰到已有飞刀
+                sfxBounce();
+                spawnSparks(k.x, tipY);
+                addFloatingText(k.x, tipY - 20, '弹开!', '#ff4444', 18);
+                combo = 0;
+                throwingKnife = null;
+                checkLevelEnd();
+                return;
+            }
+        }
+
+        // 成功插入
+        const now = Date.now();
+        const isPerfect = dist > targetRadius - PERFECT_THRESHOLD;
+        let points = 10;
+
+        if(isPerfect){
+            points = 25;
+            perfectCount++;
+            sfxPerfect();
+            addFloatingText(k.x, tipY - 30, '完美! +25', '#ffd700', 24);
+            spawnParticles(k.x, tipY, '#ffd700', 12, 3);
+        } else {
+            sfxStick();
+            spawnSparks(k.x, tipY);
+        }
+
+        // 连击判定
+        if(now - lastHitTime < COMBO_WINDOW){
+            combo++;
+            sfxCombo();
+            const comboBonus = combo * 5;
+            points += comboBonus;
+            if(combo >= 2) addFloatingText(k.x + 30, tipY - 10, `连击x${combo}`, '#ff8800', 16);
+        } else {
+            combo = 1;
+        }
+        lastHitTime = now;
+        if(combo > maxCombo) maxCombo = combo;
+
+        score += points;
+        stuckKnives.push({angle: hitAngle, perfect: isPerfect});
+        throwingKnife = null;
+        knivesThrown++;
+        checkLevelEnd();
+    }
+
+    // 飞出屏幕
+    if(k.y < -50){
+        throwingKnife = null;
+        combo = 0;
+        checkLevelEnd();
+    }
+}
+
+function checkLevelEnd(){
+    if(!throwingKnife && knivesLeft <= 0){
+        // 关卡完成
+        level++;
+        sfxLevelUp();
+        levelUpTimer = 120;
+        addFloatingText(cx, cy, `第${level}关!`, '#00ff88', 36);
+        spawnParticles(cx, cy, '#00ff88', 20, 5);
+        setTimeout(() => {
+            if(state === 'playing') startLevel();
+        }, 1500);
+    }
+}
+
+function normalizeAngle(a){
+    while(a > Math.PI) a -= Math.PI * 2;
+    while(a < -Math.PI) a += Math.PI * 2;
+    return a;
+}
+
+function gameOver(){
+    state = 'gameover';
+    sfxGameOver();
+    if(score > highScore){
+        highScore = score;
+        localStorage.setItem('knife_throw_high', String(highScore));
+    }
+}
+
+// ===== 渲染 =====
+function drawTarget(){
+    // 木桩背景
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // 外圈光晕
+    const glow = ctx.createRadialGradient(0, 0, targetRadius * 0.5, 0, 0, targetRadius * 1.3);
+    glow.addColorStop(0, 'rgba(139,90,43,0.3)');
+    glow.addColorStop(1, 'rgba(139,90,43,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, targetRadius * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 旋转木桩
+    ctx.rotate(targetAngle);
+
+    // 木纹底色
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, targetRadius);
+    grad.addColorStop(0, '#c8944a');
+    grad.addColorStop(0.7, '#a06830');
+    grad.addColorStop(1, '#8b5a2b');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, targetRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 木纹线条
+    ctx.strokeStyle = 'rgba(90,50,20,0.3)';
+    ctx.lineWidth = 1;
+    for(let i = 0; i < 8; i++){
+        const a = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * targetRadius, Math.sin(a) * targetRadius);
+        ctx.stroke();
+    }
+
+    // 靶心环
+    const rings = [0.85, 0.6, 0.35];
+    const ringColors = ['rgba(180,120,60,0.4)', 'rgba(200,140,70,0.4)', 'rgba(220,160,80,0.5)'];
+    for(let i = 0; i < rings.length; i++){
+        ctx.fillStyle = ringColors[i];
+        ctx.beginPath();
+        ctx.arc(0, 0, targetRadius * rings[i], 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(80,40,15,0.3)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+
+    // 中心点
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 边框
+    ctx.strokeStyle = '#6b3a1f';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, targetRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+function drawKnife(x, y, angle, isStuck, isPerfect){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+
+    // 刀刃
+    ctx.fillStyle = isPerfect ? '#ffd700' : '#d0d0d0';
+    ctx.beginPath();
+    ctx.moveTo(0, -KNIFE_LEN/2);
+    ctx.lineTo(-KNIFE_W/2, 0);
+    ctx.lineTo(0, KNIFE_LEN * 0.15);
+    ctx.lineTo(KNIFE_W/2, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    // 刀柄
+    ctx.fillStyle = '#8b4513';
+    ctx.fillRect(-KNIFE_W/2 - 1, 0, KNIFE_W + 2, KNIFE_LEN * 0.35);
+    ctx.strokeStyle = '#5a2d0c';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-KNIFE_W/2 - 1, 0, KNIFE_W + 2, KNIFE_LEN * 0.35);
+
+    // 刀柄纹路
+    ctx.strokeStyle = '#6b3410';
+    ctx.lineWidth = 0.8;
+    for(let i = 0; i < 3; i++){
+        const yy = KNIFE_LEN * 0.05 + i * KNIFE_LEN * 0.1;
+        ctx.beginPath();
+        ctx.moveTo(-KNIFE_W/2, yy);
+        ctx.lineTo(KNIFE_W/2, yy);
+        ctx.stroke();
+    }
+
+    // 刀刃高光
+    if(!isStuck){
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.moveTo(0, -KNIFE_LEN/2);
+        ctx.lineTo(-1, -KNIFE_LEN * 0.1);
+        ctx.lineTo(2, 0);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    ctx.restore();
+}
+
+function drawStuckKnives(){
+    for(const sk of stuckKnives){
+        const kx = cx + Math.sin(sk.angle) * (targetRadius - 5);
+        const ky = cy + Math.cos(sk.angle) * (targetRadius - 5);
+        drawKnife(kx, ky, sk.angle + Math.PI, true, sk.perfect);
+    }
+}
+
+function drawThrowingKnife(){
+    if(!throwingKnife) return;
+    const k = throwingKnife;
+    drawKnife(k.x, k.y, 0, false, false);
+
+    // 拖尾效果
+    ctx.strokeStyle = 'rgba(200,200,200,0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(k.x, k.y + KNIFE_LEN/2);
+    ctx.lineTo(k.x, k.y + KNIFE_LEN/2 + 15);
+    ctx.stroke();
+}
+
+function drawParticles(){
+    for(let i = particles.length - 1; i >= 0; i--){
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= p.decay;
+        if(p.life <= 0){ particles.splice(i, 1); continue; }
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawFloatingTexts(){
+    for(let i = floatingTexts.length - 1; i >= 0; i--){
+        const ft = floatingTexts[i];
+        ft.y -= 1;
+        ft.life -= ft.decay;
+        if(ft.life <= 0){ floatingTexts.splice(i, 1); continue; }
+        ctx.globalAlpha = ft.life;
+        ctx.fillStyle = ft.color;
+        ctx.font = `bold ${ft.size}px 'Segoe UI',sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(ft.text, ft.x, ft.y);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawKnifeQueue(){
+    // 显示剩余飞刀
+    const startX = cx - (Math.min(knivesLeft, 8) * 20) / 2;
+    const y = H * 0.88;
+    for(let i = 0; i < Math.min(knivesLeft, 8); i++){
+        ctx.globalAlpha = 0.7;
+        drawKnife(startX + i * 20, y, 0, false, false);
+    }
+    if(knivesLeft > 8){
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#aaa';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`+${knivesLeft - 8}`, startX + 8 * 20 + 5, y + 5);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawHUD(){
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px "Segoe UI",sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`分数: ${score}`, 20, 35);
+    ctx.textAlign = 'right';
+    ctx.fillText(`最高: ${highScore}`, W - 20, 35);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px "Segoe UI",sans-serif';
+    ctx.fillText(`第 ${level} 关`, cx, 35);
+
+    if(combo >= 2){
+        ctx.fillStyle = '#ff8800';
+        ctx.font = 'bold 18px "Segoe UI",sans-serif';
+        ctx.fillText(`连击 x${combo}`, cx, 60);
+    }
+
+    ctx.fillStyle = '#888';
+    ctx.font = '14px "Segoe UI",sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`剩余: ${knivesLeft}`, 20, 60);
+}
+
+function drawPauseOverlay(){
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px "Segoe UI",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('暂停', cx, cy - 20);
+    ctx.font = '20px "Segoe UI",sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('点击或按空格继续', cx, cy + 30);
+}
+
+// ===== 菜单界面 =====
+let menuKnifeAngle = 0;
+function drawMenu(){
+    // 背景
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#1a0a2e');
+    bgGrad.addColorStop(1, '#0d1b2a');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // 装饰星星
+    const t = Date.now() * 0.001;
+    for(let i = 0; i < 30; i++){
+        const sx = (Math.sin(i * 7.3 + t * 0.2) * 0.5 + 0.5) * W;
+        const sy = (Math.cos(i * 11.1 + t * 0.15) * 0.5 + 0.5) * H;
+        const alpha = 0.3 + Math.sin(t * 2 + i) * 0.2;
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 旋转的靶子
+    menuKnifeAngle += 0.015;
+    ctx.save();
+    ctx.translate(cx, cy * 0.75);
+    ctx.rotate(menuKnifeAngle);
+
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 55);
+    grad.addColorStop(0, '#c8944a');
+    grad.addColorStop(0.7, '#a06830');
+    grad.addColorStop(1, '#8b5a2b');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#6b3a1f';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // 靶心
+    ctx.fillStyle = 'rgba(180,120,60,0.4)';
+    ctx.beginPath(); ctx.arc(0, 0, 40, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(200,140,70,0.4)';
+    ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI*2); ctx.fill();
+
+    ctx.restore();
+
+    // 装饰飞刀
+    for(let i = 0; i < 5; i++){
+        const a = menuKnifeAngle + (i / 5) * Math.PI * 2;
+        const kx = cx + Math.sin(a) * 50;
+        const ky = cy * 0.75 + Math.cos(a) * 50;
+        drawKnife(kx, ky, a + Math.PI, true, false);
+    }
+
+    // 标题
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 52px "Segoe UI",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('飞刀投掷', cx, cy * 1.35);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px "Segoe UI",sans-serif';
+    ctx.fillText('Knife Throw', cx, cy * 1.35 + 35);
+
+    // 最高分
+    if(highScore > 0){
+        ctx.fillStyle = '#888';
+        ctx.font = '16px "Segoe UI",sans-serif';
+        ctx.fillText(`最高分: ${highScore}`, cx, cy * 1.35 + 65);
+    }
+
+    // 开始按钮
+    const btnY = H * 0.68;
+    const btnW = 200, btnH = 50;
+    const pulse = 1 + Math.sin(Date.now() * 0.003) * 0.03;
+
+    ctx.save();
+    ctx.translate(cx, btnY);
+    ctx.scale(pulse, pulse);
+
+    const btnGrad = ctx.createLinearGradient(-btnW/2, -btnH/2, -btnW/2, btnH/2);
+    btnGrad.addColorStop(0, '#e8a020');
+    btnGrad.addColorStop(1, '#c08010');
+    ctx.fillStyle = btnGrad;
+    roundRect(-btnW/2, -btnH/2, btnW, btnH, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 2;
+    roundRect(-btnW/2, -btnH/2, btnW, btnH, 12);
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px "Segoe UI",sans-serif';
+    ctx.fillText('开始游戏', 0, 8);
+    ctx.restore();
+
+    // 操作说明
+    ctx.fillStyle = '#666';
+    ctx.font = '14px "Segoe UI",sans-serif';
+    ctx.fillText('点击/空格/↑ 投掷飞刀', cx, H * 0.82);
+    ctx.fillText('P / Esc 暂停', cx, H * 0.82 + 22);
+}
+
+// ===== 结束界面 =====
+function drawGameOver(){
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, W, H);
+
+    // 面板
+    const panelW = Math.min(360, W * 0.85);
+    const panelH = 380;
+    const px = cx - panelW/2;
+    const py = cy - panelH/2 + 20;
+
+    ctx.fillStyle = 'rgba(30,15,50,0.95)';
+    roundRect(px, py, panelW, panelH, 16);
+    ctx.fill();
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 2;
+    roundRect(px, py, panelW, panelH, 16);
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+
+    // 游戏结束
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 36px "Segoe UI",sans-serif';
+    ctx.fillText('游戏结束', cx, py + 55);
+
+    // 分数
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 48px "Segoe UI",sans-serif';
+    ctx.fillText(score, cx, py + 120);
+
+    // 新纪录
+    if(score >= highScore && score > 0){
+        ctx.fillStyle = '#ff8800';
+        ctx.font = 'bold 18px "Segoe UI",sans-serif';
+        ctx.fillText('新纪录!', cx, py + 150);
+    }
+
+    // 统计
+    ctx.fillStyle = '#aaa';
+    ctx.font = '15px "Segoe UI",sans-serif';
+    const stats = [
+        `到达: 第 ${level} 关`,
+        `最高连击: ${maxCombo}`,
+        `完美命中: ${perfectCount}`,
+        `投掷总数: ${totalKnivesThrown}`
+    ];
+    stats.forEach((s, i) => {
+        ctx.fillText(s, cx, py + 185 + i * 25);
+    });
+
+    // 重新开始按钮
+    const btnY = py + panelH - 65;
+    const btnW = 180, btnH = 44;
+    const btnGrad = ctx.createLinearGradient(cx-btnW/2, btnY-btnH/2, cx-btnW/2, btnY+btnH/2);
+    btnGrad.addColorStop(0, '#e8a020');
+    btnGrad.addColorStop(1, '#c08010');
+    ctx.fillStyle = btnGrad;
+    roundRect(cx-btnW/2, btnY-btnH/2, btnW, btnH, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px "Segoe UI",sans-serif';
+    ctx.fillText('再来一局', cx, btnY + 7);
+}
+
+function roundRect(x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.lineTo(x+w-r, y);
+    ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+    ctx.lineTo(x+w, y+h-r);
+    ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    ctx.lineTo(x+r, y+h);
+    ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+    ctx.lineTo(x, y+r);
+    ctx.quadraticCurveTo(x, y, x+r, y);
+    ctx.closePath();
+}
+
+// ===== 升级提示 =====
+function drawLevelUp(){
+    if(levelUpTimer <= 0) return;
+    levelUpTimer--;
+    const alpha = Math.min(1, levelUpTimer / 30);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#00ff88';
+    ctx.font = `bold ${32 + (120 - levelUpTimer) * 0.3}px "Segoe UI",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`第 ${level} 关`, cx, cy - targetRadius - 30);
+    ctx.font = '18px "Segoe UI",sans-serif';
+    ctx.fillStyle = '#aaffcc';
+    ctx.fillText(`${knivesForLevel(level)} 把飞刀`, cx, cy - targetRadius);
+    ctx.globalAlpha = 1;
+}
+
+// ===== 主循环 =====
+let lastTime = 0;
+function gameLoop(timestamp){
+    const dt = Math.min(timestamp - lastTime, 32);
+    lastTime = timestamp;
+
+    // 更新
+    if(state === 'playing'){
+        // 目标旋转
+        targetAngle += targetSpeed * 0.02;
+
+        // 投掷冷却
+        if(throwCooldown > 0) throwCooldown--;
+
+        // 飞刀运动
+        if(throwingKnife){
+            throwingKnife.y += throwingKnife.vy;
+            checkKnifeCollision();
+        }
+
+        // 屏幕震动
+        if(shakeTimer > 0){
+            shakeTimer--;
+            shakeX = (Math.random() - 0.5) * shakeTimer * 0.5;
+            shakeY = (Math.random() - 0.5) * shakeTimer * 0.5;
+        } else {
+            shakeX = 0; shakeY = 0;
+        }
+    }
+
+    // 渲染
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    // 清屏
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#1a0a2e');
+    bgGrad.addColorStop(1, '#0d1b2a');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(-10, -10, W+20, H+20);
+
+    if(state === 'menu'){
+        drawMenu();
+    } else if(state === 'playing' || state === 'paused'){
+        drawTarget();
+        drawStuckKnives();
+        drawThrowingKnife();
+        drawParticles();
+        drawFloatingTexts();
+        drawKnifeQueue();
+        drawHUD();
+        drawLevelUp();
+        if(state === 'paused') drawPauseOverlay();
+    } else if(state === 'gameover'){
+        drawTarget();
+        drawStuckKnives();
+        drawParticles();
+        drawFloatingTexts();
+        drawGameOver();
+    }
+
+    ctx.restore();
+    requestAnimationFrame(gameLoop);
+}
+
+// ===== 输入处理 =====
+function handleAction(){
+    ensureAudio();
+    if(state === 'menu'){
+        startGame();
+    } else if(state === 'playing'){
+        throwKnife();
+    } else if(state === 'paused'){
+        state = 'playing';
+    } else if(state === 'gameover'){
+        state = 'menu';
+    }
+}
+
+function handlePause(){
+    if(state === 'playing'){
+        state = 'paused';
+    } else if(state === 'paused'){
+        state = 'playing';
+    }
+}
+
+// 鼠标
+cv.addEventListener('click', (e) => {
+    e.preventDefault();
+    if(state === 'gameover'){
+        // 检查是否点在按钮上
+        const panelW = Math.min(360, W * 0.85);
+        const panelH = 380;
+        const px = cx - panelW/2;
+        const py = cy - panelH/2 + 20;
+        const btnY = py + panelH - 65;
+        const btnW = 180, btnH = 44;
+        if(e.clientX >= cx-btnW/2 && e.clientX <= cx+btnW/2 && e.clientY >= btnY-btnH/2 && e.clientY <= btnY+btnH/2){
+            state = 'menu';
+            return;
+        }
+    }
+    handleAction();
+});
+
+// 触屏
+cv.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    handleAction();
+}, {passive: false});
+
+// 键盘
+document.addEventListener('keydown', (e) => {
+    if(e.repeat) return;
+    switch(e.key){
+        case ' ':
+        case 'ArrowUp':
+        case 'w':
+        case 'W':
+            e.preventDefault();
+            handleAction();
+            break;
+        case 'p':
+        case 'P':
+        case 'Escape':
+            e.preventDefault();
+            handlePause();
+            break;
+    }
+});
+
+// ===== 启动 =====
+requestAnimationFrame(gameLoop);
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

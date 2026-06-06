@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>射击气球</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a2e;font-family:'Segoe UI',sans-serif}
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+"use strict";
+(function(){
+// ========== CONSTANTS ==========
+var CVS=document.getElementById("gc"),CTX=CVS.getContext("2d");
+var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+var SCORE_KEY="shooting_balloons_hi";
+var GAME_TIME=60; // seconds
+var SPAWN_INTERVAL_BASE=50; // frames
+var SPAWN_INTERVAL_MIN=15;
+var MAX_BALLOONS=25;
+var CROSSHAIR_SIZE=20;
+
+// Balloon types: color, outline, points, radius, speed multiplier
+var BTYPES=[
+    {fill:"#ff4444",stroke:"#cc0000",pts:10,r:28,spd:1.0},
+    {fill:"#44aaff",stroke:"#0066cc",pts:20,r:24,spd:1.2},
+    {fill:"#44dd44",stroke:"#228822",pts:30,r:22,spd:1.4},
+    {fill:"#ffaa00",stroke:"#cc7700",pts:50,r:20,spd:1.6},
+    {fill:"#ff44ff",stroke:"#cc00cc",pts:80,r:18,spd:1.8},
+    {fill:"#ffff44",stroke:"#cccc00",pts:100,r:16,spd:2.0}
+];
+var SPECIAL_GOLDEN={fill:"#ffd700",stroke:"#b8860b",pts:200,r:22,spd:2.5,golden:true};
+var SPECIAL_BOMB={fill:"#333",stroke:"#111",pts:-50,r:24,spd:1.0,bomb:true};
+
+// Powerup types
+var POWERUP_TYPES=[
+    {type:"time",fill:"#00ffcc",stroke:"#00aa88",symbol:"+5s",duration:0},
+    {type:"slow",fill:"#8888ff",stroke:"#4444cc",symbol:"SLOW",duration:300},
+    {type:"double",fill:"#ff88ff",stroke:"#cc44cc",symbol:"x2",duration:480}
+];
+
+// ========== AUDIO ==========
+var audioCtx=null;
+function initAudio(){
+    if(audioCtx)return;
+    try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+    catch(e){}
+}
+function playTone(freq,dur,vol,type){
+    if(!audioCtx)return;
+    try{
+        var o=audioCtx.createOscillator();
+        var g=audioCtx.createGain();
+        o.type=type||"square";
+        o.frequency.value=freq;
+        g.gain.setValueAtTime(vol||0.1,audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxPop(){playTone(600+Math.random()*400,0.1,0.12,"sine")}
+function sfxBomb(){playTone(100,0.3,0.15,"sawtooth")}
+function sfxPowerup(){playTone(880,0.08,0.1,"sine");setTimeout(function(){playTone(1100,0.1,0.1,"sine")},80)}
+function sfxMiss(){playTone(200,0.15,0.08,"triangle")}
+function sfxCombo(){playTone(660,0.05,0.1,"sine");setTimeout(function(){playTone(880,0.05,0.1,"sine")},50);setTimeout(function(){playTone(1100,0.08,0.1,"sine")},100)}
+
+// ========== GAME STATE ==========
+var STATE_MENU=0,STATE_PLAY=1,STATE_PAUSE=2,STATE_OVER=3;
+var G={
+    state:STATE_MENU,
+    score:0,
+    hiScore:parseInt(localStorage.getItem(SCORE_KEY))||0,
+    time:0,
+    timeLeft:0,
+    combo:0,
+    maxCombo:0,
+    balloons:[],
+    particles:[],
+    popTexts:[],
+    powerups:[],
+    bullets:[],
+    spawnTimer:0,
+    spawnInterval:SPAWN_INTERVAL_BASE,
+    slowTimer:0,
+    doubleTimer:0,
+    totalShots:0,
+    totalHits:0,
+    frame:0,
+    shakeX:0,shakeY:0,shakeDur:0,
+    difficulty:1
+};
+
+// ========== RESIZE ==========
+function resize(){
+    W=window.innerWidth;H=window.innerHeight;
+    CVS.width=W*DPR;CVS.height=H*DPR;
+    CVS.style.width=W+"px";CVS.style.height=H+"px";
+    CTX.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener("resize",resize);
+resize();
+
+// ========== INPUT ==========
+var mouseX=-100,mouseY=-100,clicked=false;
+CVS.addEventListener("mousemove",function(e){mouseX=e.clientX;mouseY=e.clientY});
+CVS.addEventListener("mousedown",function(e){e.preventDefault();handleClick(e.clientX,e.clientY)});
+CVS.addEventListener("touchstart",function(e){
+    e.preventDefault();initAudio();
+    var t=e.touches[0];mouseX=t.clientX;mouseY=t.clientY;
+    handleClick(t.clientX,t.clientY);
+},{passive:false});
+CVS.addEventListener("touchmove",function(e){
+    e.preventDefault();
+    var t=e.touches[0];mouseX=t.clientX;mouseY=t.clientY;
+},{passive:false});
+
+document.addEventListener("keydown",function(e){
+    if(e.key==="p"||e.key==="P"||e.key==="Escape"){
+        if(G.state===STATE_PLAY)pauseGame();
+        else if(G.state===STATE_PAUSE)resumeGame();
+    }
+    if(e.key===" "||e.key==="Enter"){
+        if(G.state===STATE_MENU)startGame();
+        else if(G.state===STATE_OVER)startGame();
+    }
+});
+
+function handleClick(x,y){
+    initAudio();
+    if(G.state===STATE_MENU){startGame();return}
+    if(G.state===STATE_OVER){startGame();return}
+    if(G.state===STATE_PAUSE){resumeGame();return}
+    if(G.state!==STATE_PLAY)return;
+    shoot(x,y);
+}
+
+// ========== BALLOON ==========
+function spawnBalloon(){
+    if(G.balloons.length>=MAX_BALLOONS)return;
+    var r=Math.random();
+    var btype;
+    if(r<0.02){
+        btype=Object.assign({},SPECIAL_BOMB);
+    }else if(r<0.05){
+        btype=Object.assign({},SPECIAL_GOLDEN);
+    }else{
+        // weighted by difficulty
+        var idx=Math.floor(Math.random()*Math.min(BTYPES.length,2+Math.floor(G.difficulty)));
+        btype=Object.assign({},BTYPES[idx]);
+    }
+    var rad=btype.r*(0.8+Math.random()*0.4);
+    var x=rad+Math.random()*(W-rad*2);
+    G.balloons.push({
+        x:x,
+        y:H+rad+Math.random()*100,
+        r:rad,
+        fill:btype.fill,
+        stroke:btype.stroke,
+        pts:btype.pts,
+        spd:btype.spd,
+        golden:btype.golden||false,
+        bomb:btype.bomb||false,
+        wobble:Math.random()*Math.PI*2,
+        wobbleAmp:0.5+Math.random()*1.5,
+        wobbleSpd:0.02+Math.random()*0.03,
+        hp:btype.bomb?2:1
+    });
+}
+
+function spawnPowerup(){
+    var ptype=POWERUP_TYPES[Math.floor(Math.random()*POWERUP_TYPES.length)];
+    var x=30+Math.random()*(W-60);
+    G.powerups.push({
+        x:x,y:H+20,r:18,
+        fill:ptype.fill,stroke:ptype.stroke,
+        symbol:ptype.symbol,type:ptype.type,
+        duration:ptype.duration,
+        wobble:Math.random()*Math.PI*2
+    });
+}
+
+// ========== PARTICLES ==========
+function spawnParticles(x,y,color,count,speed){
+    for(var i=0;i<count;i++){
+        var angle=Math.random()*Math.PI*2;
+        var spd=speed*(0.5+Math.random());
+        G.particles.push({
+            x:x,y:y,
+            vx:Math.cos(angle)*spd,
+            vy:Math.sin(angle)*spd,
+            life:30+Math.random()*20,
+            maxLife:50,
+            r:2+Math.random()*4,
+            color:color,
+            gravity:0.05
+        });
+    }
+}
+
+function spawnPopText(x,y,text,color){
+    G.popTexts.push({x:x,y:y,text:text,color:color,life:60,maxLife:60,vy:-2});
+}
+
+// ========== SHOOT ==========
+function shoot(x,y){
+    G.totalShots++;
+    G.bullets.push({x:x,y:y,r:3,life:8});
+
+    var hit=false;
+    // Check powerups first
+    for(var i=G.powerups.length-1;i>=0;i--){
+        var p=G.powerups[i];
+        var dx=x-p.x,dy=y-p.y;
+        if(dx*dx+dy*dy<(p.r+15)*(p.r+15)){
+            activatePowerup(p);
+            G.powerups.splice(i,1);
+            hit=true;
+            break;
+        }
+    }
+    if(hit)return;
+
+    // Check balloons
+    for(var i=G.balloons.length-1;i>=0;i--){
+        var b=G.balloons[i];
+        var dx=x-b.x,dy=y-b.y;
+        var hitR=b.r+10;
+        if(dx*dx+dy*dy<hitR*hitR){
+            hitBalloon(i,x,y);
+            hit=true;
+            break;
+        }
+    }
+    if(!hit){
+        G.combo=0;
+        sfxMiss();
+    }
+}
+
+function hitBalloon(idx,hx,hy){
+    var b=G.balloons[idx];
+    G.totalHits++;
+    b.hp--;
+    if(b.hp>0){
+        spawnParticles(hx,hy,b.fill,5,2);
+        return;
+    }
+    G.balloons.splice(idx,1);
+
+    var pts=b.pts;
+    var isDouble=G.doubleTimer>0;
+    if(isDouble)pts*=2;
+
+    if(b.bomb){
+        G.score+=pts;
+        G.combo=0;
+        sfxBomb();
+        spawnParticles(b.x,b.y,"#ff4444",20,4);
+        spawnParticles(b.x,b.y,"#ffaa00",15,3);
+        spawnPopText(b.x,b.y,pts+"","#ff4444");
+        G.shakeDur=10;
+    }else{
+        G.combo++;
+        if(G.combo>G.maxCombo)G.maxCombo=G.combo;
+        var comboBonus=Math.floor(G.combo/5)*pts*0.5;
+        pts+=Math.floor(comboBonus);
+        G.score+=pts;
+        if(G.score<0)G.score=0;
+        sfxPop();
+        if(G.combo>0&&G.combo%5===0)sfxCombo();
+        spawnParticles(b.x,b.y,b.fill,10,3);
+        var txt=pts+"";
+        if(isDouble)txt+=" x2!";
+        if(G.combo>=5)txt+=" COMBO "+G.combo;
+        spawnPopText(b.x,b.y,txt,b.fill);
+    }
+}
+
+function activatePowerup(p){
+    sfxPowerup();
+    spawnParticles(p.x,p.y,p.fill,15,3);
+    spawnPopText(p.x,p.y,p.symbol,p.fill);
+    switch(p.type){
+        case"time":
+            G.timeLeft+=5;
+            break;
+        case"slow":
+            G.slowTimer=p.duration;
+            break;
+        case"double":
+            G.doubleTimer=p.duration;
+            break;
+    }
+}
+
+// ========== GAME FLOW ==========
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAY;
+    G.score=0;
+    G.time=0;
+    G.timeLeft=GAME_TIME;
+    G.combo=0;
+    G.maxCombo=0;
+    G.balloons=[];
+    G.particles=[];
+    G.popTexts=[];
+    G.powerups=[];
+    G.bullets=[];
+    G.spawnTimer=0;
+    G.spawnInterval=SPAWN_INTERVAL_BASE;
+    G.slowTimer=0;
+    G.doubleTimer=0;
+    G.totalShots=0;
+    G.totalHits=0;
+    G.frame=0;
+    G.shakeDur=0;
+    G.difficulty=1;
+}
+
+function pauseGame(){
+    if(G.state===STATE_PLAY)G.state=STATE_PAUSE;
+}
+
+function resumeGame(){
+    if(G.state===STATE_PAUSE)G.state=STATE_PLAY;
+}
+
+function gameOver(){
+    G.state=STATE_OVER;
+    if(G.score>G.hiScore){
+        G.hiScore=G.score;
+        localStorage.setItem(SCORE_KEY,G.hiScore);
+    }
+}
+
+// ========== UPDATE ==========
+function update(){
+    if(G.state!==STATE_PLAY)return;
+    G.frame++;
+
+    // Timer
+    G.time+=1/60;
+    G.timeLeft-=1/60;
+    if(G.timeLeft<=0){G.timeLeft=0;gameOver();return}
+
+    // Difficulty
+    G.difficulty=1+G.time/15;
+
+    // Spawn interval decreases over time
+    G.spawnInterval=Math.max(SPAWN_INTERVAL_MIN,SPAWN_INTERVAL_BASE-G.time*0.5);
+
+    // Powerup timers
+    if(G.slowTimer>0)G.slowTimer--;
+    if(G.doubleTimer>0)G.doubleTimer--;
+
+    // Shake
+    if(G.shakeDur>0){
+        G.shakeDur--;
+        G.shakeX=(Math.random()-0.5)*6;
+        G.shakeY=(Math.random()-0.5)*6;
+    }else{
+        G.shakeX=0;G.shakeY=0;
+    }
+
+    // Spawn balloons
+    G.spawnTimer++;
+    if(G.spawnTimer>=G.spawnInterval){
+        G.spawnTimer=0;
+        spawnBalloon();
+        // Chance for extra balloon at higher difficulty
+        if(G.difficulty>2&&Math.random()<0.3)spawnBalloon();
+    }
+
+    // Random powerup
+    if(G.frame%600===0&&Math.random()<0.5)spawnPowerup();
+
+    // Update balloons
+    var slowMult=G.slowTimer>0?0.4:1;
+    for(var i=G.balloons.length-1;i>=0;i--){
+        var b=G.balloons[i];
+        b.wobble+=b.wobbleSpd;
+        b.x+=Math.sin(b.wobble)*b.wobbleAmp;
+        b.y-=b.spd*slowMult*(0.6+G.difficulty*0.15);
+        if(b.y<-b.r*2)G.balloons.splice(i,1);
+    }
+
+    // Update powerups
+    for(var i=G.powerups.length-1;i>=0;i--){
+        var p=G.powerups[i];
+        p.wobble+=0.04;
+        p.x+=Math.sin(p.wobble)*1;
+        p.y-=1.5*slowMult;
+        if(p.y<-p.r*2)G.powerups.splice(i,1);
+    }
+
+    // Update particles
+    for(var i=G.particles.length-1;i>=0;i--){
+        var p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.vy+=p.gravity;
+        p.life--;
+        if(p.life<=0)G.particles.splice(i,1);
+    }
+
+    // Update pop texts
+    for(var i=G.popTexts.length-1;i>=0;i--){
+        var t=G.popTexts[i];
+        t.y+=t.vy;t.vy*=0.98;
+        t.life--;
+        if(t.life<=0)G.popTexts.splice(i,1);
+    }
+
+    // Update bullets
+    for(var i=G.bullets.length-1;i>=0;i--){
+        G.bullets[i].life--;
+        if(G.bullets[i].life<=0)G.bullets.splice(i,1);
+    }
+}
+
+// ========== RENDER ==========
+function drawBalloon(b){
+    var x=b.x,y=b.y,r=b.r;
+    CTX.save();
+    // Body
+    CTX.beginPath();
+    CTX.ellipse(x,y,r,r*1.15,0,0,Math.PI*2);
+    CTX.fillStyle=b.fill;CTX.fill();
+    CTX.strokeStyle=b.stroke;CTX.lineWidth=2;CTX.stroke();
+    // Shine
+    CTX.beginPath();
+    CTX.ellipse(x-r*0.3,y-r*0.3,r*0.2,r*0.25,-0.3,0,Math.PI*2);
+    CTX.fillStyle="rgba(255,255,255,0.4)";CTX.fill();
+    // Knot
+    CTX.beginPath();
+    CTX.moveTo(x-3,y+r*1.15);
+    CTX.lineTo(x,y+r*1.15+6);
+    CTX.lineTo(x+3,y+r*1.15);
+    CTX.closePath();
+    CTX.fillStyle=b.stroke;CTX.fill();
+    // String
+    CTX.beginPath();
+    CTX.moveTo(x,y+r*1.15+6);
+    var wave=Math.sin(G.frame*0.05+b.wobble)*5;
+    CTX.quadraticCurveTo(x+wave,y+r*1.15+25,x-wave*0.5,y+r*1.15+40);
+    CTX.strokeStyle="rgba(255,255,255,0.3)";CTX.lineWidth=1;CTX.stroke();
+    // Golden glow
+    if(b.golden){
+        CTX.shadowColor="#ffd700";CTX.shadowBlur=15;
+        CTX.beginPath();
+        CTX.ellipse(x,y,r+2,r*1.15+2,0,0,Math.PI*2);
+        CTX.strokeStyle="rgba(255,215,0,0.5)";CTX.lineWidth=3;CTX.stroke();
+        CTX.shadowBlur=0;
+    }
+    // Bomb X mark
+    if(b.bomb){
+        CTX.strokeStyle="#ff0000";CTX.lineWidth=3;
+        CTX.beginPath();CTX.moveTo(x-r*0.4,y-r*0.4);CTX.lineTo(x+r*0.4,y+r*0.4);CTX.stroke();
+        CTX.beginPath();CTX.moveTo(x+r*0.4,y-r*0.4);CTX.lineTo(x-r*0.4,y+r*0.4);CTX.stroke();
+    }
+    CTX.restore();
+}
+
+function drawPowerup(p){
+    CTX.save();
+    var pulse=1+Math.sin(G.frame*0.08)*0.1;
+    var r=p.r*pulse;
+    // Glow
+    CTX.shadowColor=p.fill;CTX.shadowBlur=12;
+    CTX.beginPath();
+    // Diamond shape
+    CTX.moveTo(p.x,p.y-r);
+    CTX.lineTo(p.x+r,p.y);
+    CTX.lineTo(p.x,p.y+r);
+    CTX.lineTo(p.x-r,p.y);
+    CTX.closePath();
+    CTX.fillStyle=p.fill;CTX.fill();
+    CTX.strokeStyle=p.stroke;CTX.lineWidth=2;CTX.stroke();
+    CTX.shadowBlur=0;
+    // Symbol
+    CTX.fillStyle="#fff";
+    CTX.font="bold 11px sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText(p.symbol,p.x,p.y);
+    CTX.restore();
+}
+
+function drawCrosshair(){
+    if(G.state!==STATE_PLAY)return;
+    var x=mouseX,y=mouseY;
+    CTX.save();
+    CTX.strokeStyle="rgba(255,255,255,0.8)";
+    CTX.lineWidth=2;
+    // Outer circle
+    CTX.beginPath();
+    CTX.arc(x,y,CROSSHAIR_SIZE,0,Math.PI*2);
+    CTX.stroke();
+    // Inner dot
+    CTX.beginPath();
+    CTX.arc(x,y,2,0,Math.PI*2);
+    CTX.fillStyle="#fff";CTX.fill();
+    // Cross lines
+    CTX.beginPath();
+    CTX.moveTo(x-CROSSHAIR_SIZE-5,y);CTX.lineTo(x-5,y);
+    CTX.moveTo(x+5,y);CTX.lineTo(x+CROSSHAIR_SIZE+5,y);
+    CTX.moveTo(x,y-CROSSHAIR_SIZE-5);CTX.lineTo(x,y-5);
+    CTX.moveTo(x,y+5);CTX.lineTo(x,y+CROSSHAIR_SIZE+5);
+    CTX.stroke();
+    CTX.restore();
+}
+
+function drawHUD(){
+    CTX.save();
+    var pad=15;
+    // Background bar
+    CTX.fillStyle="rgba(0,0,0,0.5)";
+    CTX.fillRect(0,0,W,50);
+
+    CTX.font="bold 16px sans-serif";
+    CTX.textBaseline="middle";
+
+    // Score
+    CTX.fillStyle="#fff";
+    CTX.textAlign="left";
+    CTX.fillText("分数: "+G.score,pad,25);
+
+    // Time
+    var timeColor=G.timeLeft<=10?"#ff4444":"#fff";
+    CTX.fillStyle=timeColor;
+    CTX.textAlign="center";
+    CTX.fillText("时间: "+Math.ceil(G.timeLeft)+"s",W/2,25);
+
+    // Combo
+    if(G.combo>=3){
+        CTX.fillStyle="#ffaa00";
+        CTX.fillText("连击 x"+G.combo,W/2,45);
+    }
+
+    // Accuracy
+    CTX.fillStyle="#aaa";
+    CTX.textAlign="right";
+    var acc=G.totalShots>0?Math.round(G.totalHits/G.totalShots*100):0;
+    CTX.fillText("命中: "+acc+"%",W-pad,25);
+
+    // Active powerups
+    var px=pad;
+    if(G.slowTimer>0){
+        CTX.fillStyle="#8888ff";
+        CTX.textAlign="left";
+        CTX.fillText("SLOW "+Math.ceil(G.slowTimer/60)+"s",px,45);
+        px+=80;
+    }
+    if(G.doubleTimer>0){
+        CTX.fillStyle="#ff88ff";
+        CTX.textAlign="left";
+        CTX.fillText("x2 "+Math.ceil(G.doubleTimer/60)+"s",px,45);
+    }
+
+    // Time bar
+    var barW=W-2*pad,barH=4;
+    var barY=50-barH;
+    CTX.fillStyle="rgba(255,255,255,0.2)";
+    CTX.fillRect(pad,barY,barW,barH);
+    var pct=G.timeLeft/GAME_TIME;
+    CTX.fillStyle=pct>0.3?"#44dd44":(pct>0.15?"#ffaa00":"#ff4444");
+    CTX.fillRect(pad,barY,barW*pct,barH);
+
+    CTX.restore();
+}
+
+function renderMenu(){
+    // Sky gradient
+    var grad=CTX.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,"#0a0a3e");
+    grad.addColorStop(1,"#1a1a5e");
+    CTX.fillStyle=grad;CTX.fillRect(0,0,W,H);
+
+    // Floating decorative balloons
+    var t=Date.now()/1000;
+    for(var i=0;i<8;i++){
+        var bx=W*0.1+i*W*0.11;
+        var by=H*0.7-Math.sin(t+i)*50-i*30;
+        var br=18+i*2;
+        CTX.globalAlpha=0.3;
+        CTX.beginPath();
+        CTX.ellipse(bx,by,br,br*1.15,0,0,Math.PI*2);
+        CTX.fillStyle=BTYPES[i%BTYPES.length].fill;CTX.fill();
+        CTX.globalAlpha=1;
+    }
+
+    // Title
+    CTX.save();
+    CTX.textAlign="center";
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(48,W*0.08)+"px sans-serif";
+    CTX.fillText("射击气球",W/2,H*0.25);
+
+    CTX.font=Math.min(18,W*0.035)+"px sans-serif";
+    CTX.fillStyle="#aaa";
+    CTX.fillText("限时 "+GAME_TIME+" 秒 | 射击气球得分",W/2,H*0.33);
+
+    // Balloon legend
+    var startY=H*0.42;
+    var gap=Math.min(50,W*0.1);
+    var totalW=(BTYPES.length-1)*gap;
+    var sx=W/2-totalW/2;
+    CTX.font="bold 13px sans-serif";
+    for(var i=0;i<BTYPES.length;i++){
+        var lx=sx+i*gap;
+        CTX.beginPath();
+        CTX.ellipse(lx,startY,12,14,0,0,Math.PI*2);
+        CTX.fillStyle=BTYPES[i].fill;CTX.fill();
+        CTX.fillStyle="#fff";
+        CTX.fillText(BTYPES[i].pts+"",lx,startY+28);
+    }
+    // Golden & bomb
+    CTX.beginPath();CTX.ellipse(W/2-40,startY+55,12,14,0,0,Math.PI*2);
+    CTX.fillStyle=SPECIAL_GOLDEN.fill;CTX.fill();
+    CTX.fillStyle="#ffd700";CTX.fillText("200",W/2-40,startY+83);
+
+    CTX.beginPath();CTX.ellipse(W/2+40,startY+55,12,14,0,0,Math.PI*2);
+    CTX.fillStyle=SPECIAL_BOMB.fill;CTX.fill();
+    CTX.fillStyle="#ff4444";CTX.fillText("-50",W/2+40,startY+83);
+
+    // Start button
+    var btnW=200,btnH=50;
+    var bx=W/2-btnW/2,by=H*0.72;
+    var hover=mouseX>bx&&mouseX<bx+btnW&&mouseY>by&&mouseY<by+btnH;
+    CTX.fillStyle=hover?"#ff6644":"#ff4422";
+    roundRect(bx,by,btnW,btnH,12);
+    CTX.fill();
+    CTX.fillStyle="#fff";
+    CTX.font="bold 22px sans-serif";
+    CTX.fillText("开始游戏",W/2,by+btnH/2);
+
+    // Hi score
+    if(G.hiScore>0){
+        CTX.fillStyle="#ffd700";
+        CTX.font="16px sans-serif";
+        CTX.fillText("最高分: "+G.hiScore,W/2,H*0.85);
+    }
+
+    // Controls hint
+    CTX.fillStyle="#666";
+    CTX.font="13px sans-serif";
+    CTX.fillText("点击/触屏射击 | P/ESC暂停 | 空格开始",W/2,H*0.92);
+    CTX.restore();
+}
+
+function renderPlay(){
+    // Sky gradient with time
+    var grad=CTX.createLinearGradient(0,0,0,H);
+    var timePct=1-G.timeLeft/GAME_TIME;
+    var r1=Math.round(10+timePct*20);
+    var g1=Math.round(10+timePct*5);
+    var b1=Math.round(62-timePct*20);
+    grad.addColorStop(0,"rgb("+r1+","+g1+","+b1+")");
+    grad.addColorStop(1,"#1a1a5e");
+    CTX.fillStyle=grad;CTX.fillRect(0,0,W,H);
+
+    // Stars
+    CTX.fillStyle="rgba(255,255,255,0.3)";
+    for(var i=0;i<30;i++){
+        var sx=((i*137+G.frame*0.1)%W);
+        var sy=((i*97)%H);
+        CTX.fillRect(sx,sy,1.5,1.5);
+    }
+
+    CTX.save();
+    CTX.translate(G.shakeX,G.shakeY);
+
+    // Powerups (behind balloons)
+    for(var i=0;i<G.powerups.length;i++)drawPowerup(G.powerups[i]);
+
+    // Balloons
+    for(var i=0;i<G.balloons.length;i++)drawBalloon(G.balloons[i]);
+
+    // Particles
+    for(var i=0;i<G.particles.length;i++){
+        var p=G.particles[i];
+        CTX.globalAlpha=p.life/p.maxLife;
+        CTX.beginPath();
+        CTX.arc(p.x,p.y,p.r*(p.life/p.maxLife),0,Math.PI*2);
+        CTX.fillStyle=p.color;CTX.fill();
+    }
+    CTX.globalAlpha=1;
+
+    // Pop texts
+    for(var i=0;i<G.popTexts.length;i++){
+        var t=G.popTexts[i];
+        CTX.globalAlpha=t.life/t.maxLife;
+        CTX.fillStyle=t.color;
+        CTX.font="bold "+(14+Math.round((1-t.life/t.maxLife)*10))+"px sans-serif";
+        CTX.textAlign="center";
+        CTX.fillText(t.text,t.x,t.y);
+    }
+    CTX.globalAlpha=1;
+
+    // Bullets
+    for(var i=0;i<G.bullets.length;i++){
+        var b=G.bullets[i];
+        CTX.globalAlpha=b.life/8;
+        CTX.beginPath();
+        CTX.arc(b.x,b.y,3+8*(1-b.life/8),0,Math.PI*2);
+        CTX.strokeStyle="rgba(255,255,200,0.6)";
+        CTX.lineWidth=2;CTX.stroke();
+    }
+    CTX.globalAlpha=1;
+
+    CTX.restore();
+
+    // Crosshair
+    drawCrosshair();
+
+    // HUD
+    drawHUD();
+
+    // Pause hint
+    if(G.frame%180<120){
+        CTX.fillStyle="rgba(255,255,255,0.3)";
+        CTX.font="12px sans-serif";
+        CTX.textAlign="right";
+        CTX.fillText("P 暂停",W-15,H-15);
+    }
+}
+
+function renderPause(){
+    // Darken
+    CTX.fillStyle="rgba(0,0,0,0.6)";
+    CTX.fillRect(0,0,W,H);
+
+    CTX.save();
+    CTX.textAlign="center";
+    CTX.fillStyle="#fff";
+    CTX.font="bold 36px sans-serif";
+    CTX.fillText("暂停",W/2,H*0.4);
+
+    CTX.font="18px sans-serif";
+    CTX.fillStyle="#aaa";
+    CTX.fillText("点击继续 | P/ESC恢复",W/2,H*0.5);
+
+    CTX.fillStyle="#888";
+    CTX.font="14px sans-serif";
+    CTX.fillText("当前分数: "+G.score,W/2,H*0.6);
+    CTX.fillText("连击: "+G.combo+" | 命中率: "+(G.totalShots>0?Math.round(G.totalHits/G.totalShots*100):0)+"%",W/2,H*0.65);
+    CTX.restore();
+}
+
+function renderOver(){
+    // Darken
+    CTX.fillStyle="rgba(0,0,0,0.7)";
+    CTX.fillRect(0,0,W,H);
+
+    CTX.save();
+    CTX.textAlign="center";
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(40,W*0.07)+"px sans-serif";
+    CTX.fillText("游戏结束",W/2,H*0.22);
+
+    var isNew=G.score>=G.hiScore&&G.score>0;
+    if(isNew){
+        CTX.fillStyle="#ffd700";
+        CTX.font="bold 20px sans-serif";
+        CTX.fillText("新纪录!",W/2,H*0.30);
+    }
+
+    CTX.fillStyle="#fff";
+    CTX.font="bold 28px sans-serif";
+    CTX.fillText(G.score+" 分",W/2,H*0.39);
+
+    // Stats
+    CTX.font="16px sans-serif";
+    CTX.fillStyle="#aaa";
+    var statsY=H*0.48;
+    var acc=G.totalShots>0?Math.round(G.totalHits/G.totalShots*100):0;
+    CTX.fillText("命中率: "+acc+"% ("+G.totalHits+"/"+G.totalShots+")",W/2,statsY);
+    CTX.fillText("最大连击: "+G.maxCombo,W/2,statsY+28);
+    CTX.fillText("最高分: "+G.hiScore,W/2,statsY+56);
+
+    // Restart button
+    var btnW=200,btnH=50;
+    var bx=W/2-btnW/2,by=H*0.72;
+    var hover=mouseX>bx&&mouseX<bx+btnW&&mouseY>by&&mouseY<by+btnH;
+    CTX.fillStyle=hover?"#44aa66":"#338855";
+    roundRect(bx,by,btnW,btnH,12);
+    CTX.fill();
+    CTX.fillStyle="#fff";
+    CTX.font="bold 22px sans-serif";
+    CTX.fillText("再来一局",W/2,by+btnH/2);
+
+    CTX.fillStyle="#666";
+    CTX.font="13px sans-serif";
+    CTX.fillText("点击/空格键重新开始",W/2,H*0.87);
+    CTX.restore();
+}
+
+function render(){
+    CTX.clearRect(0,0,W,H);
+    switch(G.state){
+        case STATE_MENU:renderMenu();break;
+        case STATE_PLAY:renderPlay();break;
+        case STATE_PAUSE:renderPause();break;
+        case STATE_OVER:renderOver();break;
+    }
+}
+
+// ========== UTILITY ==========
+function roundRect(x,y,w,h,r){
+    CTX.beginPath();
+    CTX.moveTo(x+r,y);
+    CTX.lineTo(x+w-r,y);
+    CTX.quadraticCurveTo(x+w,y,x+w,y+r);
+    CTX.lineTo(x+w,y+h-r);
+    CTX.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    CTX.lineTo(x+r,y+h);
+    CTX.quadraticCurveTo(x,y+h,x,y+h-r);
+    CTX.lineTo(x,y+r);
+    CTX.quadraticCurveTo(x,y,x+r,y);
+    CTX.closePath();
+}
+
+// ========== GAME LOOP ==========
+var lastTime=0;
+function loop(ts){
+    requestAnimationFrame(loop);
+    if(!lastTime)lastTime=ts;
+    var dt=ts-lastTime;
+    lastTime=ts;
+    // Cap delta to avoid spiral of death
+    if(dt>100)dt=16.67;
+    update();
+    render();
+}
+requestAnimationFrame(loop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

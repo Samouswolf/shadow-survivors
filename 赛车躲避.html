@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>赛车躲避</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a2e;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;font-family:'Segoe UI',sans-serif}
+canvas{display:block;touch-action:none}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<script>
+"use strict";
+var canvas=document.getElementById("C"),ctx=canvas.getContext("2d");
+var W,H,LANE_W,LANE_Y,CAR_W,CAR_H;
+function resize(){
+    W=canvas.width=Math.min(window.innerWidth,480);
+    H=canvas.height=Math.min(window.innerHeight,800);
+    LANE_W=W/3;
+    CAR_W=LANE_W*0.4;
+    CAR_H=CAR_W*1.6;
+}
+resize();
+window.addEventListener("resize",resize);
+
+// Audio
+var audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function playTone(f,d,t,v){
+    if(!audioCtx)return;
+    var o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type=t||"square";o.frequency.value=f;
+    g.gain.value=v||0.08;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+    o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
+}
+function sfxCoin(){playTone(880,0.1,"sine",0.12);playTone(1320,0.1,"sine",0.08)}
+function sfxCrash(){playTone(120,0.3,"sawtooth",0.15);playTone(80,0.4,"square",0.1)}
+function sfxBoost(){playTone(440,0.08,"sine",0.1);playTone(660,0.08,"sine",0.08);playTone(880,0.12,"sine",0.06)}
+function sfxClick(){playTone(600,0.05,"square",0.06)}
+
+// Game state
+var STATE={MENU:0,PLAY:1,PAUSE:2,OVER:3,SETTINGS:3,ACHIEVEMENTS:4};
+var G={
+    state:STATE.MENU,
+    score:0,hiScore:parseInt(localStorage.getItem("racingDodge_hi"))||0,
+    speed:3,baseSpeed:3,
+    lane:1,targetLane:1,
+    carX:0,carY:0,
+    obstacles:[],coins:[],
+    roadOffset:0,
+    boostTimer:0,boostSpeed:0,
+    shakeTimer:0,shakeX:0,shakeY:0,
+    particlePool:[],
+    difficulty:1,spawnTimer:0,coinTimer:0,
+    lives:3,
+    animFrame:0,
+    touchStartX:0,touchStartY:0,touchMoved:false,
+    totalCoins:parseInt(localStorage.getItem("racingDodge_coins"))||0,
+    totalGames:parseInt(localStorage.getItem("racingDodge_games"))||0,
+    settingsOpen:false,
+    achievementsOpen:false,
+    combo:0,maxCombo:0,
+    distance:0
+};
+
+// Colors
+var COL={
+    road:"#1a1a3e",line:"#3a3a6e",stripe:"#555588",
+    car:"#ff4466",carDark:"#cc2244",carLight:"#ff6688",
+    wheel:"#222",window_:"#4af",
+    obs1:"#ff3333",obs2:"#ff8800",obs3:"#ffcc00",
+    coin:"#ffd700",coinDark:"#cc9900",
+    bg1:"#0a0a2e",bg2:"#12123a",
+    btn:"#4466ff",btnHover:"#5577ff",
+    text:"#fff",textDim:"#8888aa",
+    life:"#ff4466",boost:"#00ffaa"
+};
+
+// Lane Y positions
+function laneY(i){return H*0.15+i*(H*0.22)}
+
+// Obstacle types
+var OBS_TYPES=[
+    {w:0.8,h:0.9,color:COL.obs1,name:"car"},
+    {w:0.6,h:0.7,color:COL.obs2,name:"truck"},
+    {w:0.5,h:0.5,color:COL.obs3,name:"barrel"},
+    {w:0.7,h:0.6,color:"#ff00ff",name:"cone"},
+    {w:0.4,h:0.4,color:"#00ffff",name:"box"}
+];
+
+// Achievement definitions
+var ACHIEVEMENTS=[
+    {id:"first_game",name:"初出茅庐",desc:"完成第一场游戏",check:function(){return G.totalGames>=1;}},
+    {id:"score_100",name:"小试牛刀",desc:"得分达到100",check:function(){return G.hiScore>=100;}},
+    {id:"score_500",name:"车神之路",desc:"得分达到500",check:function(){return G.hiScore>=500;}},
+    {id:"coins_50",name:"金币猎人",desc:"累计收集50个金币",check:function(){return G.totalCoins>=50;}},
+    {id:"combo_10",name:"连击大师",desc:"达到10连击",check:function(){return G.maxCombo>=10;}}
+];
+
+// Init
+function initGame(){
+    G.state=STATE.PLAY;G.score=0;G.speed=G.baseSpeed;G.lane=1;G.targetLane=1;
+    G.obstacles=[];G.coins=[];G.roadOffset=0;G.boostTimer=0;G.boostSpeed=0;
+    G.shakeTimer=0;G.particlePool=[];G.difficulty=1;G.spawnTimer=0;G.coinTimer=0;
+    G.lives=3;G.animFrame=0;G.combo=0;G.distance=0;
+    G.carX=LANE_W*G.lane+LANE_W/2;G.carY=H*0.78;
+    G.totalGames++;
+    localStorage.setItem("racingDodge_games",G.totalGames);
+}
+
+// Spawn obstacle
+function spawnObs(){
+    var lane=Math.floor(Math.random()*3);
+    var type=OBS_TYPES[Math.floor(Math.random()*OBS_TYPES.length)];
+    G.obstacles.push({lane:lane,x:LANE_W*lane+LANE_W/2,y:-60,type:type,passed:false});
+}
+
+// Spawn coin
+function spawnCoin(){
+    var lane=Math.floor(Math.random()*3);
+    // Avoid spawning on obstacle
+    var safe=true;
+    for(var i=0;i<G.obstacles.length;i++){
+        if(G.obstacles[i].lane===lane&&G.obstacles[i].y<100){safe=false;break;}
+    }
+    if(safe)G.coins.push({lane:lane,x:LANE_W*lane+LANE_W/2,y:-30,collected:false});
+}
+
+// Particles
+function addParticles(x,y,color,count){
+    for(var i=0;i<count;i++){
+        G.particlePool.push({
+            x:x,y:y,
+            vx:(Math.random()-0.5)*6,vy:(Math.random()-0.5)*6-2,
+            life:30+Math.random()*20,
+            color:color,size:2+Math.random()*3
+        });
+    }
+}
+
+// Update particles
+function updateParticles(){
+    for(var i=G.particlePool.length-1;i>=0;i--){
+        var p=G.particlePool[i];
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life--;
+        if(p.life<=0)G.particlePool.splice(i,1);
+    }
+}
+
+// Draw particles
+function drawParticles(){
+    for(var i=0;i<G.particlePool.length;i++){
+        var p=G.particlePool[i];
+        ctx.globalAlpha=p.life/50;
+        ctx.fillStyle=p.color;
+        ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+    }
+    ctx.globalAlpha=1;
+}
+
+// Input handling
+var keys={};
+window.addEventListener("keydown",function(e){
+    keys[e.key]=true;
+
+    // Menu state
+    if(G.state===STATE.MENU){
+        if(e.key==="Enter"||e.key===" "){initAudio();initGame();}
+        if(e.key==="a"||e.key==="A"){showAchievements();}
+    }
+
+    // Playing state
+    if(G.state===STATE.PLAY){
+        if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){G.targetLane=Math.max(0,G.lane-1);sfxClick();}
+        if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){G.targetLane=Math.min(2,G.lane+1);sfxClick();}
+        if(e.key==="p"||e.key==="P"||e.key==="Escape"){G.state=STATE.PAUSE;}
+    }
+
+    // Paused state
+    if(G.state===STATE.PAUSE){
+        if(e.key==="p"||e.key==="P"||e.key==="Escape"||e.key===" "){G.state=STATE.PLAY;}
+    }
+
+    // Game over state
+    if(G.state===STATE.OVER){
+        if(e.key==="Enter"||e.key===" "){initAudio();initGame();}
+        if(e.key==="Escape"){G.state=STATE.MENU;}
+    }
+
+    // Achievements state
+    if(G.state===STATE.ACHIEVEMENTS){
+        if(e.key==="Escape"||e.key==="a"||e.key==="A"){G.state=STATE.MENU;}
+    }
+
+    // Prevent scrolling
+    if(e.key==="ArrowUp"||e.key==="ArrowDown"||e.key===" ")e.preventDefault();
+});
+window.addEventListener("keyup",function(e){keys[e.key]=false;});
+
+// Touch
+canvas.addEventListener("touchstart",function(e){
+    e.preventDefault();initAudio();
+    var t=e.touches[0];G.touchStartX=t.clientX;G.touchStartY=t.clientY;G.touchMoved=false;
+
+    // Menu state
+    if(G.state===STATE.MENU){
+        var rect=canvas.getBoundingClientRect();
+        var tx=(t.clientX-rect.left)*(W/rect.width);
+        var ty=(t.clientY-rect.top)*(H/rect.height);
+
+        // Check start button
+        if(tx>=W/2-90&&tx<=W/2+90&&ty>=H*0.46&&ty<=H*0.46+55){
+            initGame();
+        }
+        // Check achievements button
+        else if(tx>=W/2-60&&tx<=W/2+60&&ty>=H*0.85&&ty<=H*0.85+35){
+            showAchievements();
+        }
+    }
+
+    // Game over state
+    if(G.state===STATE.OVER){
+        var rect=canvas.getBoundingClientRect();
+        var tx=(t.clientX-rect.left)*(W/rect.width);
+        var ty=(t.clientY-rect.top)*(H/rect.height);
+        var gy=H*0.15,gh=H*0.55;
+
+        // Retry button
+        if(tx>=W/2-80&&tx<=W/2+80&&ty>=gy+gh-80&&ty<=gy+gh-30){
+            initGame();
+        }
+        // Menu button
+        else if(tx>=W/2-60&&tx<=W/2+60&&ty>=gy+gh-25&&ty<=gy+gh+10){
+            G.state=STATE.MENU;
+        }
+    }
+
+    // Achievements state
+    if(G.state===STATE.ACHIEVEMENTS){
+        G.state=STATE.MENU;
+    }
+
+    if(G.state===STATE.PAUSE)G.state=STATE.PLAY;
+},{passive:false});
+
+canvas.addEventListener("touchmove",function(e){
+    e.preventDefault();
+    if(G.state!==STATE.PLAY)return;
+    var t=e.touches[0];
+    var dx=t.clientX-G.touchStartX;
+    if(Math.abs(dx)>30&&!G.touchMoved){
+        G.touchMoved=true;
+        if(dx<0){G.targetLane=Math.max(0,G.lane-1);sfxClick();}
+        else{G.targetLane=Math.min(2,G.lane+1);sfxClick();}
+    }
+},{passive:false});
+
+canvas.addEventListener("touchend",function(e){
+    e.preventDefault();
+    if(!G.touchMoved&&G.state===STATE.PLAY){
+        // Tap = change lane based on tap position
+        var t=e.changedTouches[0];
+        var rect=canvas.getBoundingClientRect();
+        var tx=(t.clientX-rect.left)*(W/rect.width);
+        var tapLane=Math.floor(tx/LANE_W);
+        if(tapLane!==G.lane&&tapLane>=0&&tapLane<=2){G.targetLane=tapLane;sfxClick();}
+    }
+},{passive:false});
+
+// Mouse
+canvas.addEventListener("mousedown",function(e){
+    initAudio();
+    var rect=canvas.getBoundingClientRect();
+    var mx=(e.clientX-rect.left)*(W/rect.width);
+    var my=(e.clientY-rect.top)*(H/rect.height);
+
+    // Menu state
+    if(G.state===STATE.MENU){
+        // Start button
+        if(mx>=W/2-90&&mx<=W/2+90&&my>=H*0.46&&my<=H*0.46+55){
+            initGame();
+            return;
+        }
+        // Achievements button
+        if(mx>=W/2-60&&mx<=W/2+60&&my>=H*0.85&&my<=H*0.85+35){
+            showAchievements();
+            return;
+        }
+    }
+
+    // Game over state
+    if(G.state===STATE.OVER){
+        var gy=H*0.15,gh=H*0.55;
+        // Retry button
+        if(mx>=W/2-80&&mx<=W/2+80&&my>=gy+gh-80&&my<=gy+gh-30){
+            initGame();
+            return;
+        }
+        // Menu button
+        if(mx>=W/2-60&&mx<=W/2+60&&my>=gy+gh-25&&my<=gy+gh+10){
+            G.state=STATE.MENU;
+            return;
+        }
+    }
+
+    // Achievements state
+    if(G.state===STATE.ACHIEVEMENTS){
+        G.state=STATE.MENU;
+        return;
+    }
+
+    if(G.state===STATE.PAUSE){G.state=STATE.PLAY;return;}
+
+    // Playing state - change lane
+    if(G.state===STATE.PLAY){
+        var clickLane=Math.floor(mx/LANE_W);
+        if(clickLane>=0&&clickLane<=2&&clickLane!==G.lane){G.targetLane=clickLane;sfxClick();}
+    }
+});
+
+// Draw car (player)
+function drawCar(x,y,w,h,boost){
+    // Shadow
+    ctx.fillStyle="rgba(0,0,0,0.3)";
+    ctx.beginPath();ctx.ellipse(x,y+h*0.52,w*0.45,h*0.12,0,0,Math.PI*2);ctx.fill();
+    // Body
+    ctx.fillStyle=boost?COL.boost:COL.car;
+    ctx.beginPath();
+    ctx.moveTo(x-w*0.4,y+h*0.4);
+    ctx.lineTo(x-w*0.35,y-h*0.1);
+    ctx.quadraticCurveTo(x-w*0.3,y-h*0.4,x,y-h*0.45);
+    ctx.quadraticCurveTo(x+w*0.3,y-h*0.4,x+w*0.35,y-h*0.1);
+    ctx.lineTo(x+w*0.4,y+h*0.4);
+    ctx.quadraticCurveTo(x+w*0.35,y+h*0.45,x,y+h*0.45);
+    ctx.quadraticCurveTo(x-w*0.35,y+h*0.45,x-w*0.4,y+h*0.4);
+    ctx.fill();
+    // Roof
+    ctx.fillStyle=boost?"#66ffcc":COL.carDark;
+    ctx.beginPath();
+    ctx.moveTo(x-w*0.22,y-h*0.05);
+    ctx.quadraticCurveTo(x-w*0.2,y-h*0.3,x,y-h*0.32);
+    ctx.quadraticCurveTo(x+w*0.2,y-h*0.3,x+w*0.22,y-h*0.05);
+    ctx.closePath();ctx.fill();
+    // Window
+    ctx.fillStyle=COL.window_;
+    ctx.globalAlpha=0.7;
+    ctx.beginPath();
+    ctx.moveTo(x-w*0.18,y-h*0.08);
+    ctx.quadraticCurveTo(x-w*0.15,y-h*0.25,x,y-h*0.27);
+    ctx.quadraticCurveTo(x+w*0.15,y-h*0.25,x+w*0.18,y-h*0.08);
+    ctx.closePath();ctx.fill();
+    ctx.globalAlpha=1;
+    // Wheels
+    ctx.fillStyle=COL.wheel;
+    ctx.fillRect(x-w*0.42,y+h*0.15,w*0.1,h*0.15);
+    ctx.fillRect(x+w*0.32,y+h*0.15,w*0.1,h*0.15);
+    ctx.fillRect(x-w*0.42,y-h*0.15,w*0.1,h*0.15);
+    ctx.fillRect(x+w*0.32,y-h*0.15,w*0.1,h*0.15);
+    // Headlights
+    ctx.fillStyle="#ff8";
+    ctx.globalAlpha=0.8;
+    ctx.beginPath();ctx.arc(x-w*0.2,y-h*0.38,3,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x+w*0.2,y-h*0.38,3,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    // Boost flames
+    if(boost){
+        ctx.fillStyle="#0f8";
+        ctx.globalAlpha=0.6+Math.sin(G.animFrame*0.3)*0.3;
+        ctx.beginPath();
+        ctx.moveTo(x-w*0.15,y+h*0.45);
+        ctx.lineTo(x,y+h*0.45+10+Math.random()*8);
+        ctx.lineTo(x+w*0.15,y+h*0.45);
+        ctx.closePath();ctx.fill();
+        ctx.globalAlpha=1;
+    }
+}
+
+// Draw obstacle
+function drawObs(obs){
+    var t=obs.type;
+    var w=CAR_W*t.w,h=CAR_H*t.h;
+    var x=obs.x,y=obs.y;
+    // Shadow
+    ctx.fillStyle="rgba(0,0,0,0.25)";
+    ctx.beginPath();ctx.ellipse(x,y+h*0.48,w*0.45,h*0.1,0,0,Math.PI*2);ctx.fill();
+    // Body
+    ctx.fillStyle=t.color;
+    if(t.name==="barrel"){
+        ctx.beginPath();ctx.ellipse(x,y,w*0.45,h*0.45,0,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle="#aa5500";ctx.lineWidth=2;
+        ctx.beginPath();ctx.ellipse(x,y,w*0.35,h*0.35,0,0,Math.PI*2);ctx.stroke();
+    } else {
+        ctx.fillRect(x-w*0.4,y-h*0.4,w*0.8,h*0.8);
+        ctx.fillStyle="#222";
+        ctx.fillRect(x-w*0.35,y-h*0.35,w*0.7,h*0.25);
+        // Hazard stripes
+        ctx.fillStyle="#000";
+        for(var s=-2;s<3;s++){
+            ctx.fillRect(x+s*w*0.18-w*0.04,y+h*0.1,w*0.08,h*0.08);
+        }
+    }
+}
+
+// Draw coin
+function drawCoin(c){
+    var r=CAR_W*0.2;
+    var pulse=1+Math.sin(G.animFrame*0.1+c.x)*0.1;
+    r*=pulse;
+    ctx.fillStyle=COL.coin;
+    ctx.beginPath();ctx.arc(c.x,c.y,r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=COL.coinDark;
+    ctx.beginPath();ctx.arc(c.x,c.y,r*0.6,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=COL.coin;
+    ctx.font="bold "+Math.floor(r*1.1)+"px sans-serif";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText("$",c.x,c.y+1);
+}
+
+// Draw road
+function drawRoad(){
+    // Background
+    var grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,COL.bg1);grad.addColorStop(1,COL.bg2);
+    ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+    // Road surface
+    ctx.fillStyle=COL.road;
+    ctx.fillRect(0,0,W,H);
+    // Lane lines
+    ctx.strokeStyle=COL.line;ctx.lineWidth=2;ctx.setLineDash([30,20]);
+    for(var i=1;i<3;i++){
+        ctx.beginPath();ctx.moveTo(i*LANE_W,0);ctx.lineTo(i*LANE_W,H);ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // Road stripes (animated)
+    ctx.fillStyle=COL.stripe;
+    var off=G.roadOffset%60;
+    for(var y=-60+off;y<H+60;y+=60){
+        for(var i=0;i<3;i++){
+            ctx.fillRect(i*LANE_W+LANE_W*0.48,y,LANE_W*0.04,25);
+        }
+    }
+    // Side barriers
+    ctx.fillStyle="#333366";
+    ctx.fillRect(0,0,4,H);ctx.fillRect(W-4,0,4,H);
+}
+
+// Draw HUD
+function drawHUD(){
+    // Score
+    ctx.fillStyle=COL.text;ctx.font="bold 22px sans-serif";ctx.textAlign="left";
+    ctx.fillText("分数: "+G.score,12,32);
+
+    // High score
+    ctx.fillStyle=COL.coin;ctx.font="14px sans-serif";
+    ctx.fillText("最高: "+G.hiScore,12,52);
+
+    // Speed indicator
+    ctx.fillStyle=COL.textDim;ctx.font="13px sans-serif";
+    ctx.fillText("速度: "+G.speed.toFixed(1)+"x",12,70);
+
+    // Distance
+    ctx.fillStyle="#0ff";ctx.font="13px sans-serif";
+    ctx.fillText("距离: "+Math.floor(G.distance/10)+"m",12,88);
+
+    // Combo
+    if(G.combo>=3){
+        ctx.fillStyle="#ff0";ctx.font="bold "+Math.min(24,16+G.combo)+"px sans-serif";ctx.textAlign="center";
+        ctx.fillText("连击 x"+G.combo,W/2,50);
+    }
+
+    // Lives
+    for(var i=0;i<G.lives;i++){
+        ctx.fillStyle=COL.life;
+        ctx.beginPath();
+        var hx=W-30-i*28,hy=22;
+        ctx.moveTo(hx,hy+4);
+        ctx.bezierCurveTo(hx,hy,hx-8,hy-6,hx-8,hy+2);
+        ctx.bezierCurveTo(hx-8,hy+8,hx,hy+14,hx,hy+16);
+        ctx.bezierCurveTo(hx,hy+14,hx+8,hy+8,hx+8,hy+2);
+        ctx.bezierCurveTo(hx+8,hy-6,hx,hy,hx,hy+4);
+        ctx.fill();
+    }
+
+    // Boost bar
+    if(G.boostTimer>0){
+        ctx.fillStyle="rgba(0,0,0,0.5)";
+        ctx.fillRect(W/2-60,H-35,120,14);
+        ctx.fillStyle=COL.boost;
+        ctx.fillRect(W/2-59,H-34,118*(G.boostTimer/180),12);
+        ctx.fillStyle=COL.text;ctx.font="10px sans-serif";ctx.textAlign="center";
+        ctx.fillText("BOOST",W/2,H-24);
+    }
+
+    // Pause hint
+    ctx.fillStyle=COL.textDim;ctx.font="11px sans-serif";ctx.textAlign="right";
+    ctx.fillText("P/ESC: 暂停",W-12,H-10);
+}
+
+// Draw menu
+function drawMenu(){
+    drawRoad();
+
+    // Animated background cars
+    if(G.animFrame%120===0){
+        addParticles(W*Math.random(),-20,COL.obs1,3);
+    }
+
+    // Title with glow effect
+    ctx.save();
+    ctx.shadowColor="#ff6600";
+    ctx.shadowBlur=20;
+    ctx.fillStyle=COL.text;ctx.font="bold 48px sans-serif";ctx.textAlign="center";
+    ctx.fillText("赛车躲避",W/2,H*0.18);
+    ctx.restore();
+
+    ctx.font="16px sans-serif";ctx.fillStyle=COL.textDim;
+    ctx.fillText("Racing Dodge",W/2,H*0.24);
+
+    // Decorative line
+    ctx.strokeStyle=COL.btn;ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(W*0.2,H*0.27);ctx.lineTo(W*0.8,H*0.27);ctx.stroke();
+
+    // Stats
+    ctx.font="14px sans-serif";ctx.fillStyle=COL.coin;
+    ctx.fillText("最高分: "+G.hiScore,W/2,H*0.34);
+    ctx.fillStyle=COL.textDim;
+    ctx.fillText("累计金币: "+G.totalCoins+" | 游戏次数: "+G.totalGames,W/2,H*0.39);
+
+    // Start button with hover effect
+    var bx=W/2-90,by=H*0.46,bw=180,bh=55;
+    ctx.fillStyle=COL.btn;
+    ctx.shadowColor=COL.btn;ctx.shadowBlur=15;
+    ctx.beginPath();ctx.roundRect(bx,by,bw,bh,12);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle=COL.text;ctx.font="bold 24px sans-serif";
+    ctx.fillText("开始游戏",W/2,by+35);
+
+    // Controls section
+    ctx.fillStyle=COL.textDim;ctx.font="13px sans-serif";
+    var cy=H*0.62;
+    ctx.fillText("── 操作说明 ──",W/2,cy);
+    cy+=25;
+    ctx.fillText("← → 或 A D 切换车道",W/2,cy);
+    cy+=20;
+    ctx.fillText("点击/触摸屏幕左右区域",W/2,cy);
+    cy+=20;
+    ctx.fillText("P/ESC 暂停游戏",W/2,cy);
+    cy+=25;
+    ctx.fillStyle="#aaa";
+    ctx.fillText("收集金币加速 | 躲避障碍物",W/2,cy);
+    cy+=18;
+    ctx.fillText("连续躲避获得连击加分",W/2,cy);
+
+    // Achievement button
+    var abx=W/2-60,aby=H*0.85,abw=120,abh=35;
+    ctx.fillStyle="#666";
+    ctx.beginPath();ctx.roundRect(abx,aby,abw,abh,8);ctx.fill();
+    ctx.fillStyle=COL.text;ctx.font="14px sans-serif";
+    ctx.fillText("成就",W/2,aby+22);
+
+    // Animated car at bottom
+    drawCar(W/2,H*0.95,CAR_W*1.2,CAR_H*1.2,G.animFrame%60<30);
+
+    // Particles for menu animation
+    drawParticles();
+}
+
+// Draw pause
+function drawPause(){
+    ctx.fillStyle="rgba(0,0,0,0.7)";ctx.fillRect(0,0,W,H);
+
+    // Pause panel
+    var px=W/2-120,py=H/2-80,pw=240,ph=160;
+    ctx.fillStyle="#1a1a3e";
+    ctx.strokeStyle=COL.btn;ctx.lineWidth=2;
+    ctx.beginPath();ctx.roundRect(px,py,pw,ph,15);ctx.fill();ctx.stroke();
+
+    ctx.fillStyle=COL.text;ctx.font="bold 36px sans-serif";ctx.textAlign="center";
+    ctx.fillText("暂停",W/2,py+50);
+
+    ctx.font="15px sans-serif";ctx.fillStyle=COL.textDim;
+    ctx.fillText("按 P / ESC 继续",W/2,py+85);
+    ctx.fillText("当前分数: "+G.score,W/2,py+110);
+    ctx.fillText("连击: "+G.combo,W/2,py+130);
+}
+
+// Draw game over
+function drawGameOver(){
+    ctx.fillStyle="rgba(0,0,0,0.8)";ctx.fillRect(0,0,W,H);
+
+    // Game over panel
+    var gx=W/2-140,gy=H*0.15,gw=280,gh=H*0.55;
+    ctx.fillStyle="#1a1a3e";
+    ctx.strokeStyle="#ff4466";ctx.lineWidth=3;
+    ctx.beginPath();ctx.roundRect(gx,gy,gw,gh,20);ctx.fill();ctx.stroke();
+
+    // Title with shake effect
+    ctx.save();
+    if(G.shakeTimer>0)ctx.translate(G.shakeX*0.5,G.shakeY*0.5);
+    ctx.fillStyle="#ff4466";ctx.font="bold 40px sans-serif";ctx.textAlign="center";
+    ctx.fillText("游戏结束",W/2,gy+50);
+    ctx.restore();
+
+    // Score
+    ctx.font="28px sans-serif";ctx.fillStyle=COL.coin;
+    ctx.fillText("得分: "+G.score,W/2,gy+100);
+
+    // New record
+    if(G.score>=G.hiScore&&G.score>0){
+        ctx.fillStyle="#ff4466";ctx.font="bold 20px sans-serif";
+        ctx.fillText("★ 新纪录! ★",W/2,gy+135);
+    }
+
+    // Stats
+    ctx.fillStyle=COL.textDim;ctx.font="15px sans-serif";
+    ctx.fillText("最高分: "+G.hiScore,W/2,gy+170);
+    ctx.fillText("距离: "+Math.floor(G.distance/10)+"m",W/2,gy+195);
+    ctx.fillText("最大连击: "+G.maxCombo,W/2,gy+220);
+    ctx.fillText("存活: "+Math.floor(G.animFrame/60)+"秒",W/2,gy+245);
+
+    // Retry button
+    var bx=W/2-80,by=gy+gh-80,bw=160,bh=50;
+    ctx.fillStyle=COL.btn;
+    ctx.shadowColor=COL.btn;ctx.shadowBlur=10;
+    ctx.beginPath();ctx.roundRect(bx,by,bw,bh,12);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle=COL.text;ctx.font="bold 22px sans-serif";
+    ctx.fillText("再来一次",W/2,by+32);
+
+    // Menu button
+    var mbx=W/2-60,mby=gy+gh-25,mbw=120,mbh=35;
+    ctx.fillStyle="#555";
+    ctx.beginPath();ctx.roundRect(mbx,mby,mbw,mbh,8);ctx.fill();
+    ctx.fillStyle=COL.text;ctx.font="14px sans-serif";
+    ctx.fillText("返回菜单",W/2,mby+22);
+
+    // Particles
+    drawParticles();
+}
+
+// Collision check
+function checkCollision(a,b,aw,ah,bw,bh){
+    return Math.abs(a.x-b.x)<(aw+bw)*0.4&&Math.abs(a.y-b.y)<(ah+bh)*0.4;
+}
+
+// Game update
+function update(){
+    if(G.state!==STATE.PLAY)return;
+    G.animFrame++;
+    G.roadOffset+=G.speed*2;
+    G.distance+=G.speed;
+
+    // Smooth lane transition
+    var targetX=LANE_W*G.targetLane+LANE_W/2;
+    G.carX+=(targetX-G.carX)*0.15;
+    if(Math.abs(G.carX-targetX)<2){G.carX=targetX;G.lane=G.targetLane;}
+
+    // Boost
+    if(G.boostTimer>0){G.boostTimer--;G.boostSpeed=2;}else{G.boostSpeed*=0.95;}
+    var curSpeed=G.speed+G.boostSpeed;
+
+    // Shake
+    if(G.shakeTimer>0){G.shakeTimer--;G.shakeX=(Math.random()-0.5)*8;G.shakeY=(Math.random()-0.5)*8;}else{G.shakeX=0;G.shakeY=0;}
+
+    // Difficulty - based on distance and score
+    G.difficulty=1+Math.floor(G.distance/1000)*0.5+G.score/1000;
+    G.speed=G.baseSpeed+Math.min(G.difficulty*0.3,5);
+
+    // Spawn obstacles
+    G.spawnTimer++;
+    var spawnRate=Math.max(20,55-G.difficulty*4);
+    if(G.spawnTimer>=spawnRate){
+        G.spawnTimer=0;
+        spawnObs();
+        // Extra obstacles at higher difficulty
+        if(G.difficulty>3&&Math.random()<0.4)spawnObs();
+        if(G.difficulty>5&&Math.random()<0.2)spawnObs();
+    }
+
+    // Spawn coins
+    G.coinTimer++;
+    var coinRate=Math.max(60,100-G.difficulty*5);
+    if(G.coinTimer>=coinRate){G.coinTimer=0;spawnCoin();}
+
+    // Update obstacles
+    for(var i=G.obstacles.length-1;i>=0;i--){
+        var o=G.obstacles[i];
+        o.y+=curSpeed*2.5;
+
+        // Passed obstacle (score)
+        if(o.y>H*0.78&&!o.passed){
+            o.passed=true;
+            G.score+=5;
+            G.combo++;
+            G.maxCombo=Math.max(G.maxCombo,G.combo);
+            // Combo bonus
+            if(G.combo>=5&&G.combo%5===0){
+                G.score+=G.combo*2;
+                addParticles(G.carX,G.carY-30,"#ffff00",5);
+            }
+        }
+
+        // Remove off-screen
+        if(o.y>H+80){G.obstacles.splice(i,1);}
+
+        // Collision
+        var oW=CAR_W*o.type.w,oH=CAR_H*o.type.h;
+        if(checkCollision({x:G.carX,y:G.carY},o,CAR_W*0.65,CAR_H*0.65,oW*0.65,oH*0.65)){
+            G.obstacles.splice(i,1);
+            G.lives--;
+            G.combo=0;
+            G.shakeTimer=15;
+            addParticles(G.carX,G.carY,"#ff4444",15);
+            sfxCrash();
+            if(G.lives<=0){
+                G.state=STATE.OVER;
+                if(G.score>G.hiScore){G.hiScore=G.score;localStorage.setItem("racingDodge_hi",G.hiScore);}
+                localStorage.setItem("racingDodge_coins",G.totalCoins);
+            }
+        }
+    }
+
+    // Update coins
+    for(var i=G.coins.length-1;i>=0;i--){
+        var c=G.coins[i];
+        c.y+=curSpeed*2.5;
+        if(c.y>H+40){G.coins.splice(i,1);continue;}
+        if(!c.collected&&checkCollision({x:G.carX,y:G.carY},c,CAR_W*0.6,CAR_H*0.6,CAR_W*0.35,CAR_W*0.35)){
+            c.collected=true;G.coins.splice(i,1);
+            G.score+=15;
+            G.totalCoins++;
+            G.boostTimer=Math.min(G.boostTimer+45,180);
+            addParticles(c.x,c.y,COL.coin,10);
+            sfxCoin();
+        }
+    }
+
+    // Particles
+    updateParticles();
+}
+
+// Draw achievements
+function drawAchievements(){
+    ctx.fillStyle="#0a0a2e";ctx.fillRect(0,0,W,H);
+
+    // Title
+    ctx.save();
+    ctx.shadowColor="#ff6600";ctx.shadowBlur=15;
+    ctx.fillStyle=COL.text;ctx.font="bold 36px sans-serif";ctx.textAlign="center";
+    ctx.fillText("成就系统",W/2,60);
+    ctx.restore();
+
+    ctx.strokeStyle=COL.btn;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(W*0.2,80);ctx.lineTo(W*0.8,80);ctx.stroke();
+
+    // Achievement list
+    var startY=110;
+    for(var i=0;i<ACHIEVEMENTS.length;i++){
+        var a=ACHIEVEMENTS[i];
+        var unlocked=a.check();
+
+        // Background
+        ctx.fillStyle=unlocked?"#1a3a1a":"#1a1a2e";
+        ctx.strokeStyle=unlocked?"#4CAF50":"#333";
+        ctx.lineWidth=1;
+        ctx.beginPath();ctx.roundRect(20,startY+i*70,W-40,60,10);ctx.fill();ctx.stroke();
+
+        // Icon
+        ctx.fillStyle=unlocked?"#FFD700":"#555";
+        ctx.font="24px sans-serif";
+        ctx.textAlign="left";
+        ctx.fillText(unlocked?"★":"☆",35,startY+i*70+38);
+
+        // Name
+        ctx.fillStyle=unlocked?COL.text:"#888";
+        ctx.font="bold 16px sans-serif";
+        ctx.fillText(a.name,70,startY+i*70+25);
+
+        // Description
+        ctx.fillStyle=unlocked?"#aaa":"#666";
+        ctx.font="13px sans-serif";
+        ctx.fillText(a.desc,70,startY+i*70+45);
+
+        // Status
+        ctx.textAlign="right";
+        ctx.fillStyle=unlocked?"#4CAF50":"#666";
+        ctx.font="12px sans-serif";
+        ctx.fillText(unlocked?"已解锁":"未解锁",W-35,startY+i*70+35);
+        ctx.textAlign="left";
+    }
+
+    // Back button
+    ctx.fillStyle="#555";
+    ctx.beginPath();ctx.roundRect(W/2-60,H-70,120,40,8);ctx.fill();
+    ctx.fillStyle=COL.text;ctx.font="16px sans-serif";ctx.textAlign="center";
+    ctx.fillText("返回",W/2,H-45);
+
+    // Total progress
+    var unlocked=ACHIEVEMENTS.filter(function(a){return a.check();}).length;
+    ctx.fillStyle=COL.textDim;ctx.font="14px sans-serif";
+    ctx.fillText("进度: "+unlocked+"/"+ACHIEVEMENTS.length,W/2,H-20);
+}
+
+// Render
+function render(){
+    ctx.save();
+    if(G.state===STATE.PLAY){ctx.translate(G.shakeX,G.shakeY);}
+    if(G.state===STATE.MENU){drawMenu();ctx.restore();return;}
+    if(G.state===STATE.ACHIEVEMENTS){drawAchievements();ctx.restore();return;}
+
+    drawRoad();
+
+    // Coins
+    for(var i=0;i<G.coins.length;i++){if(!G.coins[i].collected)drawCoin(G.coins[i]);}
+
+    // Obstacles
+    for(var i=0;i<G.obstacles.length;i++)drawObs(G.obstacles[i]);
+
+    // Player car
+    drawCar(G.carX,G.carY,CAR_W,CAR_H,G.boostTimer>0);
+
+    // Particles
+    drawParticles();
+
+    // HUD
+    drawHUD();
+
+    ctx.restore();
+
+    if(G.state===STATE.PAUSE)drawPause();
+    if(G.state===STATE.OVER)drawGameOver();
+}
+
+// Main loop
+function gameLoop(){
+    update();render();
+    requestAnimationFrame(gameLoop);
+}
+
+// Show achievements
+function showAchievements(){
+    G.state=STATE.ACHIEVEMENTS;
+    sfxClick();
+}
+
+// Draw obstacle - enhanced version
+function drawObs(obs){
+    var t=obs.type;
+    var w=CAR_W*t.w,h=CAR_H*t.h;
+    var x=obs.x,y=obs.y;
+
+    // Shadow
+    ctx.fillStyle="rgba(0,0,0,0.3)";
+    ctx.beginPath();ctx.ellipse(x,y+h*0.48,w*0.45,h*0.1,0,0,Math.PI*2);ctx.fill();
+
+    // Body
+    ctx.fillStyle=t.color;
+
+    if(t.name==="barrel"){
+        // Barrel - round shape
+        ctx.beginPath();ctx.ellipse(x,y,w*0.45,h*0.45,0,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle="#aa5500";ctx.lineWidth=2;
+        ctx.beginPath();ctx.ellipse(x,y,w*0.35,h*0.35,0,0,Math.PI*2);ctx.stroke();
+        // Hazard mark
+        ctx.fillStyle="#000";
+        ctx.font="bold "+Math.floor(w*0.3)+"px sans-serif";
+        ctx.textAlign="center";ctx.textBaseline="middle";
+        ctx.fillText("!",x,y);
+    } else if(t.name==="cone"){
+        // Traffic cone
+        ctx.fillStyle="#ff6600";
+        ctx.beginPath();
+        ctx.moveTo(x,y-h*0.4);
+        ctx.lineTo(x-w*0.3,y+h*0.35);
+        ctx.lineTo(x+w*0.3,y+h*0.35);
+        ctx.closePath();ctx.fill();
+        // White stripes
+        ctx.fillStyle="#fff";
+        ctx.fillRect(x-w*0.15,y-h*0.1,w*0.3,h*0.08);
+        ctx.fillRect(x-w*0.2,y+h*0.1,w*0.4,h*0.08);
+        // Base
+        ctx.fillStyle="#333";
+        ctx.fillRect(x-w*0.35,y+h*0.3,w*0.7,h*0.1);
+    } else if(t.name==="box"){
+        // Cardboard box
+        ctx.fillStyle="#8B7355";
+        ctx.fillRect(x-w*0.4,y-h*0.4,w*0.8,h*0.8);
+        ctx.strokeStyle="#6B5335";ctx.lineWidth=2;
+        ctx.strokeRect(x-w*0.4,y-h*0.4,w*0.8,h*0.8);
+        // Tape
+        ctx.fillStyle="#DAA520";
+        ctx.fillRect(x-w*0.05,y-h*0.4,w*0.1,h*0.8);
+    } else {
+        // Car/truck
+        ctx.fillRect(x-w*0.4,y-h*0.4,w*0.8,h*0.8);
+        // Window
+        ctx.fillStyle="#222";
+        ctx.fillRect(x-w*0.35,y-h*0.35,w*0.7,h*0.25);
+        // Hazard stripes
+        ctx.fillStyle="#000";
+        for(var s=-2;s<3;s++){
+            ctx.fillRect(x+s*w*0.18-w*0.04,y+h*0.1,w*0.08,h*0.08);
+        }
+    }
+}
+
+// roundRect polyfill
+if(!ctx.roundRect){
+    CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+        if(typeof r==="number")r={tl:r,tr:r,br:r,bl:r};
+        this.moveTo(x+r.tl,y);
+        this.lineTo(x+w-r.tr,y);this.quadraticCurveTo(x+w,y,x+w,y+r.tr);
+        this.lineTo(x+w,y+h-r.br);this.quadraticCurveTo(x+w,y+h,x+w-r.br,y+h);
+        this.lineTo(x+r.bl,y+h);this.quadraticCurveTo(x,y+h,x,y+h-r.bl);
+        this.lineTo(x,y+r.tl);this.quadraticCurveTo(x,y,x+r.tl,y);
+        this.closePath();
+    };
+}
+
+// Start
+gameLoop();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

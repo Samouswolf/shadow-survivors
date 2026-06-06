@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>卡牌对战</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a12; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+canvas { image-rendering: pixelated; border: 2px solid #c49bff; cursor: pointer; max-width: 100%; height: auto; }
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="startScreen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a12;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1000">
+  <h1 style="font-size:48px;color:#c49bff;margin-bottom:20px">🃏 卡牌对战</h1>
+  <p style="color:#888;margin-bottom:40px">策略出牌 · 能量管理 · 击败对手</p>
+  <button id="startBtn" style="padding:15px 60px;font-size:20px;background:linear-gradient(135deg,#8e44ad,#c49bff);color:#fff;border:none;border-radius:12px;cursor:pointer">开始游戏</button>
+</div>
+<button id="pauseBtn" style="position:fixed;top:10px;right:10px;width:44px;height:44px;font-size:20px;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:8px;z-index:100;display:none">⏸</button>
+<div id="pauseScreen" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);flex-direction:column;align-items:center;justify-content:center;z-index:999">
+  <h2 style="color:#fff;margin-bottom:30px">游戏暂停</h2>
+  <button id="resumeBtn" style="padding:12px 40px;font-size:18px;background:#c49bff;color:#fff;border:none;border-radius:8px;margin-bottom:15px">继续游戏</button>
+  <button id="restartBtn" style="padding:12px 40px;font-size:18px;background:#666;color:#fff;border:none;border-radius:8px">重新开始</button>
+</div>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 800, H = 600;
+canvas.width = W; canvas.height = H;
+
+function resizeCanvas() {
+    const maxW = window.innerWidth - 20;
+    if (W > maxW) { canvas.style.width = maxW + 'px'; canvas.style.height = (H * maxW / W) + 'px'; }
+    else { canvas.style.width = ''; canvas.style.height = ''; }
+}
+window.addEventListener('resize', resizeCanvas); resizeCanvas();
+
+if (!ctx.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        r = Math.min(r, w / 2, h / 2);
+        this.moveTo(x + r, y);
+        this.arcTo(x + w, y, x + w, y + h, r);
+        this.arcTo(x + w, y + h, x, y + h, r);
+        this.arcTo(x, y + h, x, y, r);
+        this.arcTo(x, y, x + w, y, r);
+        this.closePath();
+    };
+}
+
+// Audio
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playSound(freq, dur, type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type || 'square';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + dur);
+}
+
+// Card definitions
+const CARD_DEFS = [
+    { name: '火球术', cost: 2, damage: 8, heal: 0, shield: 0, desc: '造成8点伤害', color: '#f55', icon: '🔥' },
+    { name: '冰冻术', cost: 2, damage: 5, heal: 0, shield: 0, desc: '造成5点伤害,冻结1回合', color: '#5af', icon: '❄️', freeze: 1 },
+    { name: '治疗术', cost: 2, damage: 0, heal: 8, shield: 0, desc: '恢复8点生命', color: '#5f5', icon: '💚' },
+    { name: '护盾术', cost: 1, damage: 0, heal: 0, shield: 5, desc: '获得5点护盾', color: '#aa5', icon: '🛡️' },
+    { name: '雷电术', cost: 3, damage: 12, heal: 0, shield: 0, desc: '造成12点伤害', color: '#ff5', icon: '⚡' },
+    { name: '汲取术', cost: 2, damage: 4, heal: 4, shield: 0, desc: '造成4伤害,恢复4生命', color: '#a5f', icon: '🩸' },
+    { name: '重击', cost: 1, damage: 4, heal: 0, shield: 0, desc: '造成4点伤害', color: '#fa5', icon: '⚔️' },
+    { name: '冥想', cost: 0, damage: 0, heal: 3, shield: 0, desc: '恢复3点生命,抽1张牌', color: '#5af', icon: '🧘', draw: 1 },
+    { name: '火焰风暴', cost: 4, damage: 18, heal: 0, shield: 0, desc: '造成18点伤害', color: '#f44', icon: '🌋' },
+    { name: '铁壁', cost: 2, damage: 0, heal: 0, shield: 10, desc: '获得10点护盾', color: '#888', icon: '🏰' }
+];
+
+// Game state
+let G = {};
+function resetGame() {
+    const deck = [];
+    for (let i = 0; i < 5; i++) deck.push(Math.floor(Math.random() * 7)); // basic cards
+    deck.push(8, 9); // some strong cards
+    shuffle(deck);
+    const aiDeck = [...deck];
+    shuffle(aiDeck);
+
+    G = {
+        state: 'menu', // menu, playing, playerTurn, aiTurn, gameover, victory
+        player: { hp: 30, maxHp: 30, shield: 0, energy: 3, maxEnergy: 3, deck: deck, hand: [], discard: [], frozen: 0 },
+        ai: { hp: 35, maxHp: 35, shield: 0, energy: 3, maxEnergy: 3, deck: aiDeck, hand: [], discard: [], frozen: 0 },
+        turn: 0, round: 1,
+        animState: null, animTimer: 0,
+        log: [],
+        highScore: parseInt(localStorage.getItem('cardBattleHigh') || '0'),
+        score: 0,
+        selectedCard: -1
+    };
+    // Draw initial hands
+    for (let i = 0; i < 4; i++) { drawCard(G.player); drawCard(G.ai); }
+}
+resetGame();
+
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+}
+
+function drawCard(entity) {
+    if (entity.hand.length >= 7) return;
+    if (entity.deck.length === 0) {
+        entity.deck = [...entity.discard];
+        entity.discard = [];
+        shuffle(entity.deck);
+    }
+    if (entity.deck.length > 0) {
+        entity.hand.push(entity.deck.pop());
+    }
+}
+
+function addLog(text) {
+    G.log.unshift(text);
+    if (G.log.length > 8) G.log.pop();
+}
+
+function playCard(entity, cardIdx, target) {
+    const cardId = entity.hand[cardIdx];
+    const card = CARD_DEFS[cardId];
+    if (entity.energy < card.cost) return false;
+    if (entity.frozen > 0) return false;
+
+    entity.energy -= card.cost;
+    entity.hand.splice(cardIdx, 1);
+    entity.discard.push(cardId);
+
+    // Apply effects
+    if (card.damage > 0) {
+        let dmg = card.damage;
+        if (target.shield > 0) {
+            const absorbed = Math.min(target.shield, dmg);
+            target.shield -= absorbed;
+            dmg -= absorbed;
+        }
+        target.hp -= dmg;
+    }
+    if (card.heal > 0) {
+        entity.hp = Math.min(entity.maxHp, entity.hp + card.heal);
+    }
+    if (card.shield > 0) {
+        entity.shield += card.shield;
+    }
+    if (card.freeze) {
+        target.frozen = card.freeze;
+    }
+    if (card.draw) {
+        for (let i = 0; i < card.draw; i++) drawCard(entity);
+    }
+    return true;
+}
+
+// AI logic
+function aiTurn() {
+    if (G.ai.frozen > 0) {
+        G.ai.frozen--;
+        addLog('AI被冻结，跳过回合');
+        endTurn();
+        return;
+    }
+    // Simple AI: play cards greedily
+    let played = true;
+    while (played) {
+        played = false;
+        let bestIdx = -1, bestScore = -1;
+        G.ai.hand.forEach((cardId, i) => {
+            const card = CARD_DEFS[cardId];
+            if (card.cost > G.ai.energy) return;
+            let score = 0;
+            if (card.damage > 0) score += card.damage * 1.5;
+            if (card.heal > 0 && G.ai.hp < G.ai.maxHp - 5) score += card.heal;
+            if (card.shield > 0 && G.ai.shield < 5) score += card.shield * 0.8;
+            if (score > bestScore) { bestScore = score; bestIdx = i; }
+        });
+        if (bestIdx >= 0) {
+            const card = CARD_DEFS[G.ai.hand[bestIdx]];
+            if (playCard(G.ai, bestIdx, G.player)) {
+                addLog('AI使用了' + card.name);
+                playSound(300, 0.1, 'sawtooth');
+                played = true;
+            }
+        }
+    }
+    endTurn();
+}
+
+function endTurn() {
+    // Check game over
+    if (G.player.hp <= 0) {
+        G.state = 'gameover';
+        addLog('你被击败了!');
+        return;
+    }
+    if (G.ai.hp <= 0) {
+        G.state = 'victory';
+        G.score = 100 + G.player.hp * 5;
+        if (G.score > G.highScore) {
+            G.highScore = G.score;
+            localStorage.setItem('cardBattleHigh', G.highScore);
+        }
+        addLog('你胜利了!');
+        return;
+    }
+
+    G.turn = 1 - G.turn;
+    if (G.turn === 0) {
+        G.round++;
+        G.player.energy = Math.min(G.player.maxEnergy, G.player.energy + 2);
+        G.ai.energy = Math.min(G.ai.maxEnergy, G.ai.energy + 2);
+        if (G.player.frozen > 0) {
+            G.player.frozen--;
+            addLog('你被冻结，跳过回合');
+            G.turn = 1;
+            setTimeout(aiTurn, 800);
+        } else {
+            drawCard(G.player);
+            addLog('--- 你的回合 ---');
+        }
+    } else {
+        setTimeout(aiTurn, 600);
+    }
+}
+
+// Draw card
+function drawCardUI(cardId, x, y, w, h, selected) {
+    const card = CARD_DEFS[cardId];
+    ctx.fillStyle = selected ? '#3a3a5a' : '#1a1a2e';
+    ctx.strokeStyle = selected ? '#c49bff' : '#444';
+    ctx.lineWidth = selected ? 3 : 1;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill(); ctx.stroke();
+
+    // Icon
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(card.icon, x + w/2, y + 30);
+
+    // Name
+    ctx.fillStyle = card.color;
+    ctx.font = 'bold 12px Arial';
+    ctx.fillText(card.name, x + w/2, y + 50);
+
+    // Cost
+    ctx.fillStyle = '#fa0';
+    ctx.font = '11px Arial';
+    ctx.fillText('⚡' + card.cost, x + w/2, y + 66);
+
+    // Desc
+    ctx.fillStyle = '#aaa';
+    ctx.font = '9px Arial';
+    ctx.fillText(card.desc, x + w/2, y + 82);
+}
+
+// Draw HP bar
+function drawHPBar(x, y, w, hp, maxHp, shield, label) {
+    ctx.fillStyle = '#222';
+    ctx.fillRect(x, y, w, 20);
+    ctx.fillStyle = '#5a5';
+    ctx.fillRect(x, y, w * (hp / maxHp), 20);
+    if (shield > 0) {
+        ctx.fillStyle = '#aa5';
+        ctx.fillRect(x + w * (hp / maxHp), y, w * (shield / maxHp), 20);
+    }
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, 20);
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(label + ' ' + hp + '/' + maxHp + (shield > 0 ? ' +' + shield : ''), x + w/2, y + 15);
+}
+
+// Render
+function render() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Title
+    ctx.fillStyle = '#c49bff';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('卡牌对战  回合 ' + G.round, W/2, 22);
+
+    // Energy
+    ctx.fillStyle = '#fa0';
+    ctx.textAlign = 'left';
+    ctx.font = '14px Arial';
+    ctx.fillText('能量: ' + G.player.energy + '/' + G.player.maxEnergy, 20, 22);
+
+    // AI area
+    drawHPBar(200, 40, 400, G.ai.hp, G.ai.maxHp, G.ai.shield, 'AI');
+    ctx.fillStyle = '#888';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('手牌: ' + G.ai.hand.length + '  牌组: ' + G.ai.deck.length, W/2, 75);
+
+    // AI hand (face down)
+    const aiHandY = 85;
+    const aiCardW = 60;
+    const aiStartX = W/2 - (G.ai.hand.length * (aiCardW + 5))/2;
+    for (let i = 0; i < G.ai.hand.length; i++) {
+        const cx = aiStartX + i * (aiCardW + 5);
+        ctx.fillStyle = '#2a2a4a';
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(cx, aiHandY, aiCardW, 80, 6); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#c49bff';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('?', cx + aiCardW/2, aiHandY + 45);
+    }
+
+    // Center divider
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(20, 200); ctx.lineTo(W-20, 200); ctx.stroke();
+
+    // Battle area
+    ctx.fillStyle = '#888';
+    ctx.font = '13px Arial';
+    ctx.textAlign = 'center';
+    if (G.turn === 0 && G.state === 'playing') {
+        ctx.fillStyle = '#5f5';
+        ctx.fillText('你的回合 - 选择卡牌出牌', W/2, 225);
+    } else if (G.turn === 1) {
+        ctx.fillStyle = '#f55';
+        ctx.fillText('AI回合...', W/2, 225);
+    }
+
+    // Log
+    ctx.fillStyle = '#555';
+    ctx.font = '11px Arial';
+    ctx.textAlign = 'left';
+    G.log.forEach((msg, i) => {
+        ctx.globalAlpha = 1 - i * 0.1;
+        ctx.fillText(msg, 20, 260 + i * 16);
+    });
+    ctx.globalAlpha = 1;
+
+    // Player HP
+    drawHPBar(200, 400, 400, G.player.hp, G.player.maxHp, G.player.shield, '你');
+
+    // Player hand
+    const handY = 430;
+    const cardW = 90, cardH = 95;
+    const handStartX = W/2 - (G.player.hand.length * (cardW + 8))/2;
+    for (let i = 0; i < G.player.hand.length; i++) {
+        const cx = handStartX + i * (cardW + 8);
+        drawCardUI(G.player.hand[i], cx, handY, cardW, cardH, i === G.selectedCard);
+    }
+
+    // Deck info
+    ctx.fillStyle = '#666';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('牌组: ' + G.player.deck.length + '  弃牌: ' + G.player.discard.length, W/2, H - 15);
+
+    // End turn button
+    if (G.turn === 0 && G.state === 'playing') {
+        ctx.fillStyle = '#c49bff';
+        ctx.beginPath(); ctx.roundRect(W - 150, 400, 130, 36, 8); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('结束回合', W - 85, 423);
+    }
+
+    // Game over
+    if (G.state === 'gameover' || G.state === 'victory') {
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.textAlign = 'center';
+        if (G.state === 'victory') {
+            ctx.fillStyle = '#5f5'; ctx.font = '48px Arial';
+            ctx.fillText('胜利!', W/2, H/2 - 60);
+        } else {
+            ctx.fillStyle = '#f55'; ctx.font = '48px Arial';
+            ctx.fillText('失败', W/2, H/2 - 60);
+        }
+        ctx.fillStyle = '#fff'; ctx.font = '20px Arial';
+        ctx.fillText('得分: ' + G.score + '  最高: ' + G.highScore, W/2, H/2);
+        ctx.fillStyle = '#c49bff';
+        ctx.beginPath(); ctx.roundRect(W/2 - 80, H/2 + 30, 160, 45, 10); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = '18px Arial';
+        ctx.fillText('再来一局', W/2, H/2 + 58);
+    }
+}
+
+// Input
+function getCanvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width, scaleY = H / rect.height;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+}
+
+function handleClick(e) {
+    const pos = getCanvasPos(e);
+
+    // Game over restart
+    if (G.state === 'gameover' || G.state === 'victory') {
+        if (pos.x > W/2-80 && pos.x < W/2+80 && pos.y > H/2+30 && pos.y < H/2+75) {
+            resetGame();
+            G.state = 'playing';
+        }
+        return;
+    }
+
+    if (G.state !== 'playing' || G.turn !== 0) return;
+
+    // End turn button
+    if (pos.x >= W - 150 && pos.x <= W - 20 && pos.y >= 400 && pos.y <= 436) {
+        G.selectedCard = -1;
+        endTurn();
+        return;
+    }
+
+    // Card selection
+    const handY = 430, cardW = 90, cardH = 95;
+    const handStartX = W/2 - (G.player.hand.length * (cardW + 8))/2;
+    for (let i = 0; i < G.player.hand.length; i++) {
+        const cx = handStartX + i * (cardW + 8);
+        if (pos.x >= cx && pos.x <= cx + cardW && pos.y >= handY && pos.y <= handY + cardH) {
+            if (G.selectedCard === i) {
+                // Play the card
+                const cardId = G.player.hand[i];
+                const card = CARD_DEFS[cardId];
+                if (G.player.energy >= card.cost && G.player.frozen <= 0) {
+                    playCard(G.player, i, G.ai);
+                    addLog('你使用了' + card.name);
+                    playSound(500, 0.12, 'sine');
+                    G.selectedCard = -1;
+                    // Check win
+                    if (G.ai.hp <= 0) {
+                        G.state = 'victory';
+                        G.score = 100 + G.player.hp * 5;
+                        if (G.score > G.highScore) {
+                            G.highScore = G.score;
+                            localStorage.setItem('cardBattleHigh', G.highScore);
+                        }
+                    }
+                } else if (G.player.frozen > 0) {
+                    addLog('你被冻结了!');
+                } else {
+                    addLog('能量不足!');
+                }
+            } else {
+                G.selectedCard = i;
+            }
+            return;
+        }
+    }
+
+    // Click elsewhere deselects
+    G.selectedCard = -1;
+}
+
+canvas.addEventListener('click', handleClick);
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (e.changedTouches) {
+        handleClick({ clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY });
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (G.state === 'playing') {
+            G.state = 'paused';
+            document.getElementById('pauseScreen').style.display = 'flex';
+        }
+    }
+    if (e.key >= '1' && e.key <= '9') {
+        const idx = parseInt(e.key) - 1;
+        if (idx < G.player.hand.length) {
+            G.selectedCard = idx;
+        }
+    }
+    if (e.key === 'Enter' && G.selectedCard >= 0) {
+        handleClick({ clientX: 0, clientY: 500 }); // trigger play
+    }
+    if (e.key === 'e' || e.key === 'E') {
+        if (G.turn === 0 && G.state === 'playing') {
+            G.selectedCard = -1;
+            endTurn();
+        }
+    }
+});
+
+// UI buttons
+document.getElementById('startBtn').addEventListener('click', () => {
+    audioCtx.resume();
+    document.getElementById('startScreen').style.display = 'none';
+    document.getElementById('pauseBtn').style.display = 'block';
+    resetGame();
+    G.state = 'playing';
+    addLog('--- 你的回合 ---');
+});
+document.getElementById('pauseBtn').addEventListener('click', () => {
+    if (G.state === 'playing') {
+        G.state = 'paused';
+        document.getElementById('pauseScreen').style.display = 'flex';
+    }
+});
+document.getElementById('resumeBtn').addEventListener('click', () => {
+    G.state = 'playing';
+    document.getElementById('pauseScreen').style.display = 'none';
+});
+document.getElementById('restartBtn').addEventListener('click', () => {
+    resetGame();
+    G.state = 'playing';
+    document.getElementById('pauseScreen').style.display = 'none';
+    addLog('--- 你的回合 ---');
+});
+
+// Main loop
+function gameLoop() {
+    render();
+    requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

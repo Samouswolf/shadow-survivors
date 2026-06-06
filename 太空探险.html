@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>太空探险</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:none}
+canvas{display:block;width:100%;height:100%;image-rendering:pixelated}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+
+/* ========== CONSTANTS ========== */
+const CANVAS = document.getElementById("c");
+const ctx = CANVAS.getContext("2d");
+const PI2 = Math.PI * 2;
+const DEG = Math.PI / 180;
+const HS_KEY = "space_adventure_high_score";
+
+const SHIP_W = 32, SHIP_H = 36;
+const STAR_COUNT = 120;
+const RESOURCE_TYPES = [
+    { name: "晶石", color: "#00ffff", radius: 8, score: 10, speed: 0.8 },
+    { name: "能量", color: "#ffff00", radius: 6, score: 15, speed: 1.2 },
+    { name: "稀矿", color: "#ff66ff", radius: 10, score: 25, speed: 0.6 },
+    { name: "星核", color: "#ff4444", radius: 12, score: 50, speed: 0.4 }
+];
+const ASTEROID_SIZES = [
+    { radius: 15, hp: 1, speed: 1.0, score: 5 },
+    { radius: 25, hp: 2, speed: 0.7, score: 15 },
+    { radius: 40, hp: 4, speed: 0.4, score: 30 }
+];
+const DIFFICULTY_INTERVAL = 30; // seconds between difficulty increases
+
+/* ========== GAME STATE ========== */
+let W, H;
+let STATE = "menu"; // menu | playing | paused | gameover
+let score = 0, highScore = 0, gameTime = 0;
+let difficultyLevel = 0;
+let lastTime = 0, deltaTime = 0;
+let shakeTimer = 0, shakeIntensity = 0;
+
+/* Player */
+let ship = { x: 0, y: 0, vx: 0, vy: 0, angle: -90 * DEG, shield: 3, invTimer: 0, thrust: 0 };
+
+/* Entities */
+let stars = [], asteroids = [], resources = [], particles = [], bullets = [];
+let spawnTimerA = 0, spawnTimerR = 0;
+let shootCooldown = 0;
+
+/* Input */
+let keys = {};
+let mouseX = -1, mouseY = -1, mouseDown = false;
+let touchActive = false, touchX = -1, touchY = -1;
+let targetAngle = -90 * DEG;
+
+/* ========== AUDIO ========== */
+let audioCtx = null;
+function initAudio() {
+    if (audioCtx) return;
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+}
+function playSound(type) {
+    if (!audioCtx) return;
+    try {
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        switch(type) {
+            case "shoot":
+                osc.type = "square"; osc.frequency.setValueAtTime(600, now);
+                osc.frequency.linearRampToValueAtTime(200, now + 0.1);
+                gain.gain.setValueAtTime(0.12, now); gain.gain.linearRampToValueAtTime(0, now + 0.1);
+                osc.start(now); osc.stop(now + 0.1); break;
+            case "collect":
+                osc.type = "sine"; osc.frequency.setValueAtTime(500, now);
+                osc.frequency.linearRampToValueAtTime(900, now + 0.15);
+                gain.gain.setValueAtTime(0.15, now); gain.gain.linearRampToValueAtTime(0, now + 0.15);
+                osc.start(now); osc.stop(now + 0.15); break;
+            case "hit":
+                osc.type = "sawtooth"; osc.frequency.setValueAtTime(200, now);
+                osc.frequency.linearRampToValueAtTime(80, now + 0.2);
+                gain.gain.setValueAtTime(0.2, now); gain.gain.linearRampToValueAtTime(0, now + 0.2);
+                osc.start(now); osc.stop(now + 0.2); break;
+            case "explode":
+                osc.type = "sawtooth"; osc.frequency.setValueAtTime(120, now);
+                osc.frequency.linearRampToValueAtTime(30, now + 0.4);
+                gain.gain.setValueAtTime(0.25, now); gain.gain.linearRampToValueAtTime(0, now + 0.4);
+                osc.start(now); osc.stop(now + 0.4); break;
+            case "gameover":
+                osc.type = "square"; osc.frequency.setValueAtTime(400, now);
+                osc.frequency.linearRampToValueAtTime(100, now + 0.6);
+                gain.gain.setValueAtTime(0.2, now); gain.gain.linearRampToValueAtTime(0, now + 0.6);
+                osc.start(now); osc.stop(now + 0.6); break;
+        }
+    } catch(e) {}
+}
+
+/* ========== RESIZE ========== */
+function resize() {
+    W = CANVAS.width = window.innerWidth;
+    H = CANVAS.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ========== STARS ========== */
+function initStars() {
+    stars = [];
+    for (let i = 0; i < STAR_COUNT; i++) {
+        stars.push({
+            x: Math.random() * W,
+            y: Math.random() * H,
+            size: Math.random() * 2 + 0.5,
+            speed: Math.random() * 0.5 + 0.1,
+            brightness: Math.random() * 0.5 + 0.5
+        });
+    }
+}
+
+function updateStars() {
+    for (let s of stars) {
+        s.y += s.speed * 60 * deltaTime;
+        if (s.y > H + 5) { s.y = -5; s.x = Math.random() * W; }
+    }
+}
+
+function drawStars() {
+    for (let s of stars) {
+        ctx.globalAlpha = s.brightness;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(s.x, s.y, s.size, s.size);
+    }
+    ctx.globalAlpha = 1;
+}
+
+/* ========== PARTICLES ========== */
+function spawnParticles(x, y, color, count, speed) {
+    for (let i = 0; i < count; i++) {
+        const ang = Math.random() * PI2;
+        const spd = Math.random() * speed + speed * 0.3;
+        particles.push({
+            x: x, y: y,
+            vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+            life: 0.5 + Math.random() * 0.5,
+            maxLife: 0.5 + Math.random() * 0.5,
+            color: color,
+            size: Math.random() * 3 + 1
+        });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx * 60 * deltaTime;
+        p.y += p.vy * 60 * deltaTime;
+        p.life -= deltaTime;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (let p of particles) {
+        ctx.globalAlpha = p.life / p.maxLife;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+}
+
+/* ========== SHIP ========== */
+function resetShip() {
+    ship.x = W / 2;
+    ship.y = H / 2;
+    ship.vx = 0; ship.vy = 0;
+    ship.angle = -90 * DEG;
+    ship.shield = 3;
+    ship.invTimer = 0;
+    ship.thrust = 0;
+    targetAngle = -90 * DEG;
+}
+
+function drawShip() {
+    const blink = ship.invTimer > 0 && Math.floor(gameTime * 10) % 2 === 0;
+    if (blink) return;
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.angle + 90 * DEG);
+    // Body
+    ctx.fillStyle = "#4488ff";
+    ctx.beginPath();
+    ctx.moveTo(0, -SHIP_H/2);
+    ctx.lineTo(-SHIP_W/2, SHIP_H/2);
+    ctx.lineTo(SHIP_W/2, SHIP_H/2);
+    ctx.closePath();
+    ctx.fill();
+    // Cockpit
+    ctx.fillStyle = "#88ccff";
+    ctx.beginPath();
+    ctx.moveTo(0, -SHIP_H/2 + 6);
+    ctx.lineTo(-6, SHIP_H/4);
+    ctx.lineTo(6, SHIP_H/4);
+    ctx.closePath();
+    ctx.fill();
+    // Thrust flame
+    if (ship.thrust > 0.3) {
+        const fl = 8 + Math.random() * 8 * ship.thrust;
+        ctx.fillStyle = `rgba(255,${100+Math.random()*155},0,${ship.thrust})`;
+        ctx.beginPath();
+        ctx.moveTo(-5, SHIP_H/2);
+        ctx.lineTo(0, SHIP_H/2 + fl);
+        ctx.lineTo(5, SHIP_H/2);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+    // Shield indicator
+    if (ship.shield > 0) {
+        ctx.strokeStyle = `rgba(0,200,255,${0.3 + Math.sin(gameTime * 4) * 0.1})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(ship.x, ship.y, SHIP_W, 0, PI2);
+        ctx.stroke();
+    }
+}
+
+/* ========== BULLETS ========== */
+function shoot() {
+    if (shootCooldown > 0) return;
+    shootCooldown = 0.15;
+    const spd = 400;
+    bullets.push({
+        x: ship.x + Math.cos(ship.angle) * SHIP_H/2,
+        y: ship.y + Math.sin(ship.angle) * SHIP_H/2,
+        vx: Math.cos(ship.angle) * spd,
+        vy: Math.sin(ship.angle) * spd,
+        life: 1.5
+    });
+    playSound("shoot");
+}
+
+function updateBullets() {
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.x += b.vx * deltaTime;
+        b.y += b.vy * deltaTime;
+        b.life -= deltaTime;
+        if (b.life <= 0 || b.x < -20 || b.x > W+20 || b.y < -20 || b.y > H+20) {
+            bullets.splice(i, 1);
+        }
+    }
+}
+
+function drawBullets() {
+    ctx.fillStyle = "#ffff44";
+    for (let b of bullets) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 3, 0, PI2);
+        ctx.fill();
+    }
+}
+
+/* ========== ASTEROIDS ========== */
+function spawnAsteroid() {
+    const sizeIdx = Math.random() < 0.5 ? 0 : (Math.random() < 0.6 ? 1 : 2);
+    const size = ASTEROID_SIZES[sizeIdx];
+    const edge = Math.floor(Math.random() * 4);
+    let x, y;
+    switch(edge) {
+        case 0: x = -50; y = Math.random() * H; break;
+        case 1: x = W + 50; y = Math.random() * H; break;
+        case 2: x = Math.random() * W; y = -50; break;
+        default: x = Math.random() * W; y = H + 50; break;
+    }
+    const tx = W/2 + (Math.random() - 0.5) * W * 0.6;
+    const ty = H/2 + (Math.random() - 0.5) * H * 0.6;
+    const ang = Math.atan2(ty - y, tx - x);
+    const spd = size.speed * (60 + difficultyLevel * 8) * (0.8 + Math.random() * 0.4);
+    asteroids.push({
+        x: x, y: y,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        radius: size.radius + Math.random() * 5,
+        hp: size.hp + Math.floor(difficultyLevel / 3),
+        maxHp: size.hp + Math.floor(difficultyLevel / 3),
+        score: size.score,
+        rot: Math.random() * PI2,
+        rotSpd: (Math.random() - 0.5) * 2,
+        verts: generateAsteroidShape(size.radius + Math.random() * 5)
+    });
+}
+
+function generateAsteroidShape(r) {
+    const verts = [];
+    const n = 8 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < n; i++) {
+        const ang = (i / n) * PI2;
+        const dist = r * (0.7 + Math.random() * 0.3);
+        verts.push({ x: Math.cos(ang) * dist, y: Math.sin(ang) * dist });
+    }
+    return verts;
+}
+
+function updateAsteroids() {
+    for (let i = asteroids.length - 1; i >= 0; i--) {
+        const a = asteroids[i];
+        a.x += a.vx * deltaTime;
+        a.y += a.vy * deltaTime;
+        a.rot += a.rotSpd * deltaTime;
+        if (a.x < -100 || a.x > W+100 || a.y < -100 || a.y > H+100) {
+            asteroids.splice(i, 1);
+        }
+    }
+}
+
+function drawAsteroids() {
+    for (let a of asteroids) {
+        ctx.save();
+        ctx.translate(a.x, a.y);
+        ctx.rotate(a.rot);
+        ctx.fillStyle = "#886644";
+        ctx.strokeStyle = "#aa8866";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(a.verts[0].x, a.verts[0].y);
+        for (let j = 1; j < a.verts.length; j++) {
+            ctx.lineTo(a.verts[j].x, a.verts[j].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // HP bar for multi-hit
+        if (a.maxHp > 1) {
+            const bw = a.radius * 1.5;
+            const bh = 4;
+            const ratio = a.hp / a.maxHp;
+            ctx.fillStyle = "#333";
+            ctx.fillRect(-bw/2, -a.radius - 10, bw, bh);
+            ctx.fillStyle = ratio > 0.5 ? "#0f0" : (ratio > 0.25 ? "#ff0" : "#f00");
+            ctx.fillRect(-bw/2, -a.radius - 10, bw * ratio, bh);
+        }
+        ctx.restore();
+    }
+}
+
+/* ========== RESOURCES ========== */
+function spawnResource() {
+    const typeIdx = Math.random() < 0.5 ? 0 : (Math.random() < 0.6 ? 1 : (Math.random() < 0.7 ? 2 : 3));
+    const rt = RESOURCE_TYPES[typeIdx];
+    const edge = Math.floor(Math.random() * 4);
+    let x, y;
+    switch(edge) {
+        case 0: x = -30; y = Math.random() * H; break;
+        case 1: x = W + 30; y = Math.random() * H; break;
+        case 2: x = Math.random() * W; y = -30; break;
+        default: x = Math.random() * W; y = H + 30; break;
+    }
+    const tx = W * 0.2 + Math.random() * W * 0.6;
+    const ty = H * 0.2 + Math.random() * H * 0.6;
+    const ang = Math.atan2(ty - y, tx - x);
+    resources.push({
+        x: x, y: y,
+        vx: Math.cos(ang) * rt.speed * 40,
+        vy: Math.sin(ang) * rt.speed * 40,
+        radius: rt.radius, color: rt.color,
+        score: rt.score, type: typeIdx,
+        pulse: Math.random() * PI2
+    });
+}
+
+function updateResources() {
+    for (let i = resources.length - 1; i >= 0; i--) {
+        const r = resources[i];
+        r.x += r.vx * deltaTime;
+        r.y += r.vy * deltaTime;
+        r.pulse += deltaTime * 4;
+        if (r.x < -60 || r.x > W+60 || r.y < -60 || r.y > H+60) {
+            resources.splice(i, 1);
+        }
+    }
+}
+
+function drawResources() {
+    for (let r of resources) {
+        const pr = r.radius + Math.sin(r.pulse) * 2;
+        // Glow
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = r.color;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, pr * 2, 0, PI2);
+        ctx.fill();
+        // Core
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = r.color;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, pr, 0, PI2);
+        ctx.fill();
+        // Highlight
+        ctx.fillStyle = "#fff";
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.arc(r.x - pr*0.3, r.y - pr*0.3, pr*0.3, 0, PI2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+/* ========== COLLISIONS ========== */
+function checkCollisions() {
+    // Ship vs Asteroids
+    if (ship.invTimer <= 0) {
+        for (let i = asteroids.length - 1; i >= 0; i--) {
+            const a = asteroids[i];
+            const dx = ship.x - a.x, dy = ship.y - a.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < a.radius + SHIP_W/3) {
+                ship.shield--;
+                ship.invTimer = 1.5;
+                shakeTimer = 0.3; shakeIntensity = 8;
+                spawnParticles(a.x, a.y, "#ff8844", 10, 150);
+                playSound("hit");
+                if (ship.shield <= 0) {
+                    gameOver();
+                    return;
+                }
+                // Destroy small asteroids on collision
+                if (a.hp <= 1) {
+                    score += a.score;
+                    asteroids.splice(i, 1);
+                }
+                break;
+            }
+        }
+    }
+
+    // Bullets vs Asteroids
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        for (let j = asteroids.length - 1; j >= 0; j--) {
+            const a = asteroids[j];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < a.radius) {
+                a.hp--;
+                bullets.splice(i, 1);
+                spawnParticles(b.x, b.y, "#ffaa44", 5, 80);
+                if (a.hp <= 0) {
+                    score += a.score;
+                    spawnParticles(a.x, a.y, "#ff6622", 15, 200);
+                    playSound("explode");
+                    asteroids.splice(j, 1);
+                }
+                break;
+            }
+        }
+    }
+
+    // Ship vs Resources
+    for (let i = resources.length - 1; i >= 0; i--) {
+        const r = resources[i];
+        const dx = ship.x - r.x, dy = ship.y - r.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < r.radius + SHIP_W/2) {
+            score += r.score;
+            spawnParticles(r.x, r.y, r.color, 8, 100);
+            playSound("collect");
+            resources.splice(i, 1);
+        }
+    }
+}
+
+/* ========== INPUT ========== */
+document.addEventListener("keydown", function(e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === " " || e.key === "Enter") e.preventDefault();
+    if (STATE === "menu" && (e.key === " " || e.key === "Enter")) {
+        initAudio(); startGame();
+    }
+    if (STATE === "playing" && e.key.toLowerCase() === "p") STATE = "paused";
+    else if (STATE === "paused" && e.key.toLowerCase() === "p") STATE = "playing";
+    if (STATE === "gameover" && (e.key === " " || e.key === "Enter")) {
+        initAudio(); startGame();
+    }
+});
+document.addEventListener("keyup", function(e) { keys[e.key.toLowerCase()] = false; });
+
+CANVAS.addEventListener("mousedown", function(e) {
+    mouseDown = true;
+    mouseX = e.clientX; mouseY = e.clientY;
+    handleClick(e.clientX, e.clientY);
+});
+CANVAS.addEventListener("mousemove", function(e) {
+    mouseX = e.clientX; mouseY = e.clientY;
+});
+CANVAS.addEventListener("mouseup", function() { mouseDown = false; });
+
+CANVAS.addEventListener("touchstart", function(e) {
+    e.preventDefault();
+    touchActive = true;
+    const t = e.touches[0];
+    touchX = t.clientX; touchY = t.clientY;
+    handleClick(t.clientX, t.clientY);
+}, { passive: false });
+CANVAS.addEventListener("touchmove", function(e) {
+    e.preventDefault();
+    const t = e.touches[0];
+    touchX = t.clientX; touchY = t.clientY;
+}, { passive: false });
+CANVAS.addEventListener("touchend", function(e) {
+    e.preventDefault();
+    touchActive = false;
+}, { passive: false });
+
+function handleClick(x, y) {
+    initAudio();
+    if (STATE === "menu") { startGame(); return; }
+    if (STATE === "paused") { STATE = "playing"; return; }
+    if (STATE === "gameover") { startGame(); return; }
+}
+
+function processInput(dt) {
+    let ax = 0, ay = 0;
+    // Keyboard
+    if (keys["w"] || keys["arrowup"]) ay = -1;
+    if (keys["s"] || keys["arrowdown"]) ay = 1;
+    if (keys["a"] || keys["arrowleft"]) ax = -1;
+    if (keys["d"] || keys["arrowright"]) ax = 1;
+
+    // Mouse/touch aim
+    const aimSource = touchActive ? { x: touchX, y: touchY } : (mouseDown ? { x: mouseX, y: mouseY } : null);
+    if (aimSource && aimSource.x >= 0) {
+        const dx = aimSource.x - ship.x;
+        const dy = aimSource.y - ship.y;
+        targetAngle = Math.atan2(dy, dx);
+    }
+
+    // Movement
+    const accel = 500;
+    const friction = 0.92;
+    if (ax !== 0 || ay !== 0) {
+        ship.vx += ax * accel * dt;
+        ship.vy += ay * accel * dt;
+    }
+    ship.vx *= friction;
+    ship.vy *= friction;
+    ship.x += ship.vx * dt;
+    ship.y += ship.vy * dt;
+
+    // Clamp
+    ship.x = Math.max(SHIP_W, Math.min(W - SHIP_W, ship.x));
+    ship.y = Math.max(SHIP_W, Math.min(H - SHIP_W, ship.y));
+
+    // Angle lerp
+    let diff = targetAngle - ship.angle;
+    while (diff > Math.PI) diff -= PI2;
+    while (diff < -Math.PI) diff += PI2;
+    ship.angle += diff * 8 * dt;
+
+    ship.thrust = (ax !== 0 || ay !== 0) ? 0.8 : 0.1;
+
+    // Shooting (auto if mouse/touch held, space, or j key)
+    if (shootCooldown > 0) shootCooldown -= dt;
+    if (keys[" "] || keys["j"] || mouseDown || touchActive) {
+        shoot();
+    }
+}
+
+/* ========== GAME FLOW ========== */
+function startGame() {
+    STATE = "playing";
+    score = 0;
+    gameTime = 0;
+    difficultyLevel = 0;
+    spawnTimerA = 0;
+    spawnTimerR = 0;
+    asteroids = [];
+    resources = [];
+    particles = [];
+    bullets = [];
+    shakeTimer = 0;
+    resetShip();
+    initStars();
+}
+
+function gameOver() {
+    STATE = "gameover";
+    playSound("gameover");
+    spawnParticles(ship.x, ship.y, "#ff4444", 30, 250);
+    spawnParticles(ship.x, ship.y, "#ffaa00", 20, 200);
+    if (score > highScore) {
+        highScore = score;
+        try { localStorage.setItem(HS_KEY, highScore); } catch(e) {}
+    }
+}
+
+/* ========== UPDATE ========== */
+function update(dt) {
+    if (STATE !== "playing") return;
+    gameTime += dt;
+
+    // Difficulty
+    difficultyLevel = Math.floor(gameTime / DIFFICULTY_INTERVAL);
+
+    // Spawn
+    spawnTimerA -= dt;
+    spawnTimerR -= dt;
+    const astInterval = Math.max(0.3, 1.5 - difficultyLevel * 0.1);
+    const resInterval = Math.max(0.8, 2.5 - difficultyLevel * 0.05);
+    if (spawnTimerA <= 0) { spawnAsteroid(); spawnTimerA = astInterval; }
+    if (spawnTimerR <= 0) { spawnResource(); spawnTimerR = resInterval; }
+
+    processInput(dt);
+    updateBullets();
+    updateAsteroids();
+    updateResources();
+    updateParticles();
+    checkCollisions();
+
+    if (ship.invTimer > 0) ship.invTimer -= dt;
+    if (shakeTimer > 0) shakeTimer -= dt;
+}
+
+/* ========== RENDER ========== */
+function drawHUD() {
+    // Score
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 20px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("分数: " + score, 15, 35);
+    ctx.font = "14px monospace";
+    ctx.fillStyle = "#aaa";
+    ctx.fillText("最高: " + highScore, 15, 55);
+    // Time
+    ctx.fillStyle = "#88ccff";
+    ctx.textAlign = "right";
+    ctx.fillText(formatTime(gameTime), W - 15, 35);
+    // Difficulty
+    ctx.fillStyle = "#ff8844";
+    ctx.fillText("难度 Lv." + (difficultyLevel + 1), W - 15, 55);
+    // Shield
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#00ccff";
+    ctx.font = "16px monospace";
+    ctx.fillText("护盾: ", 15, 80);
+    for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i < ship.shield ? "#00ccff" : "#333";
+        ctx.beginPath();
+        ctx.arc(80 + i * 22, 76, 8, 0, PI2);
+        ctx.fill();
+    }
+}
+
+function formatTime(t) {
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60);
+    return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+function drawMenu() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, W, H);
+    drawStars();
+
+    // Title
+    ctx.fillStyle = "#4488ff";
+    ctx.font = "bold 48px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("太空探险", W/2, H * 0.28);
+
+    // Subtitle
+    ctx.fillStyle = "#88ccff";
+    ctx.font = "18px monospace";
+    ctx.fillText("探索宇宙 · 收集资源 · 躲避陨石", W/2, H * 0.36);
+
+    // High score
+    if (highScore > 0) {
+        ctx.fillStyle = "#ffcc00";
+        ctx.font = "16px monospace";
+        ctx.fillText("最高分: " + highScore, W/2, H * 0.44);
+    }
+
+    // Controls
+    ctx.fillStyle = "#aaa";
+    ctx.font = "14px monospace";
+    const controls = [
+        "操作说明:",
+        "WASD / 方向键 - 移动飞船",
+        "鼠标/触屏 - 瞄准方向",
+        "空格/J/点击 - 射击",
+        "P - 暂停"
+    ];
+    for (let i = 0; i < controls.length; i++) {
+        ctx.fillText(controls[i], W/2, H * 0.54 + i * 24);
+    }
+
+    // Start prompt
+    const blink = Math.sin(gameTime * 3) > 0;
+    if (blink) {
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 22px monospace";
+        ctx.fillText("点击或按空格开始", W/2, H * 0.82);
+    }
+}
+
+function drawPaused() {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 40px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("暂停", W/2, H/2 - 20);
+    ctx.font = "18px monospace";
+    ctx.fillStyle = "#aaa";
+    ctx.fillText("按 P 或点击继续", W/2, H/2 + 20);
+}
+
+function drawGameOver() {
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = "#ff4444";
+    ctx.font = "bold 44px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("任务失败", W/2, H * 0.3);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "22px monospace";
+    ctx.fillText("得分: " + score, W/2, H * 0.42);
+
+    if (score >= highScore && score > 0) {
+        ctx.fillStyle = "#ffcc00";
+        ctx.font = "bold 18px monospace";
+        ctx.fillText("新纪录!", W/2, H * 0.48);
+    }
+
+    ctx.fillStyle = "#88ccff";
+    ctx.font = "16px monospace";
+    ctx.fillText("最高分: " + highScore, W/2, H * 0.55);
+    ctx.fillText("生存时间: " + formatTime(gameTime), W/2, H * 0.60);
+    ctx.fillText("难度等级: " + (difficultyLevel + 1), W/2, H * 0.65);
+
+    const blink = Math.sin(gameTime * 3) > 0;
+    if (blink) {
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 20px monospace";
+        ctx.fillText("点击或按空格重新开始", W/2, H * 0.78);
+    }
+}
+
+function render() {
+    ctx.fillStyle = "#000511";
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    // Camera shake
+    if (shakeTimer > 0) {
+        const sx = (Math.random() - 0.5) * shakeIntensity * (shakeTimer / 0.3);
+        const sy = (Math.random() - 0.5) * shakeIntensity * (shakeTimer / 0.3);
+        ctx.translate(sx, sy);
+    }
+
+    drawStars();
+
+    if (STATE === "menu") {
+        drawMenu();
+        ctx.restore();
+        return;
+    }
+
+    drawResources();
+    drawAsteroids();
+    drawBullets();
+    drawParticles();
+    drawShip();
+
+    ctx.restore();
+
+    drawHUD();
+
+    if (STATE === "paused") drawPaused();
+    if (STATE === "gameover") drawGameOver();
+}
+
+/* ========== MAIN LOOP ========== */
+function loop(ts) {
+    requestAnimationFrame(loop);
+    deltaTime = Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    if (STATE === "menu" || STATE === "gameover") {
+        gameTime += deltaTime;
+        updateStars();
+    }
+    update(deltaTime);
+    render();
+}
+
+/* ========== INIT ========== */
+highScore = parseInt(localStorage.getItem(HS_KEY)) || 0;
+initStars();
+lastTime = performance.now();
+requestAnimationFrame(loop);
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

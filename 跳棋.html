@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>跳棋</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Microsoft YaHei', sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+        #gameCanvas {
+            background: #0a0a15;
+            border-radius: 10px;
+            box-shadow: 0 0 30px rgba(100, 100, 255, 0.3);
+            max-width: 100vw;
+            max-height: 100vh;
+        }
+    </style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+        // ==================== 游戏配置 ====================
+        const CONFIG = {
+            WIDTH: 800,
+            HEIGHT: 900,
+            FPS: 60,
+            BOARD_RADIUS: 280,
+            HOLE_RADIUS: 18,
+            PEG_RADIUS: 14,
+            CORNERS: 6,
+            CORNER_PEGS: 10,
+            PLAYER_COLORS: ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#44ffff'],
+            AI_DELAY: 500,
+            ANIMATION_SPEED: 8
+        };
+
+        // ==================== 音效系统 ====================
+        const AudioSystem = {
+            ctx: null,
+            init() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            },
+            playTone(freq, duration, type = 'sine', volume = 0.3) {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(volume, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            },
+            move() { this.playTone(400, 0.1); },
+            jump() { this.playTone(600, 0.15); },
+            select() { this.playTone(500, 0.08); },
+            error() { this.playTone(200, 0.2, 'square'); },
+            win() {
+                [523, 659, 784, 1047].forEach((f, i) => {
+                    setTimeout(() => this.playTone(f, 0.3), i * 150);
+                });
+            },
+            lose() {
+                [400, 350, 300, 250].forEach((f, i) => {
+                    setTimeout(() => this.playTone(f, 0.4, 'sawtooth', 0.2), i * 200);
+                });
+            }
+        };
+
+        // ==================== 游戏状态 ====================
+        const G = {
+            canvas: null,
+            ctx: null,
+            state: 'menu', // menu, playing, paused, gameover
+            playerCount: 2,
+            aiEnabled: true,
+            aiDifficulty: 1, // 0=easy, 1=medium, 2=hard
+            currentPlayer: 0,
+            selectedPeg: null,
+            validMoves: [],
+            board: [],
+            playerPegs: [],
+            scores: [],
+            highScore: 0,
+            animating: false,
+            animationPeg: null,
+            animationTarget: null,
+            animationProgress: 0,
+            aiThinking: false,
+            aiTimer: null,
+            lastTime: 0,
+            deltaTime: 0,
+            particles: []
+        };
+
+        // ==================== 棋盘布局 ====================
+        // 6角棋盘，每个角10个棋子位置
+        function initBoard() {
+            G.board = [];
+            const cx = CONFIG.WIDTH / 2;
+            const cy = CONFIG.HEIGHT / 2;
+            const R = CONFIG.BOARD_RADIUS;
+
+            // 生成6个角的棋子位置
+            for (let corner = 0; corner < CONFIG.CORNERS; corner++) {
+                const angle = (corner * 60 - 90) * Math.PI / 180;
+                const startX = cx + Math.cos(angle) * R;
+                const startY = cy + Math.sin(angle) * R;
+                const dirX = Math.cos(angle);
+                const dirY = Math.sin(angle);
+
+                for (let i = 0; i < CONFIG.CORNER_PEGS; i++) {
+                    const t = i / (CONFIG.CORNER_PEGS - 1);
+                    const x = startX - dirX * R * t * 0.8;
+                    const y = startY - dirY * R * t * 0.8;
+                    G.board.push({
+                        x: x,
+                        y: y,
+                        corner: corner,
+                        index: i,
+                        peg: null,
+                        neighbors: []
+                    });
+                }
+            }
+
+            // 计算邻居关系
+            calculateNeighbors();
+        }
+
+        function calculateNeighbors() {
+            const threshold = 45;
+            for (let i = 0; i < G.board.length; i++) {
+                G.board[i].neighbors = [];
+                for (let j = 0; j < G.board.length; j++) {
+                    if (i === j) continue;
+                    const dx = G.board[i].x - G.board[j].x;
+                    const dy = G.board[i].y - G.board[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < threshold) {
+                        G.board[i].neighbors.push(j);
+                    }
+                }
+            }
+        }
+
+        // ==================== 游戏初始化 ====================
+        function initGame() {
+            G.canvas = document.getElementById('gameCanvas');
+            G.ctx = G.canvas.getContext('2d');
+            G.canvas.width = CONFIG.WIDTH;
+            G.canvas.height = CONFIG.HEIGHT;
+
+            // 加载最高分
+            G.highScore = parseInt(localStorage.getItem('jumpChessHighScore')) || 0;
+
+            // 初始化事件
+            initEvents();
+
+            // 开始游戏循环
+            G.lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            initBoard();
+            G.state = 'playing';
+            G.currentPlayer = 0;
+            G.selectedPeg = null;
+            G.validMoves = [];
+            G.scores = Array(G.playerCount).fill(0);
+            G.particles = [];
+
+            // 放置初始棋子
+            placeInitialPegs();
+
+            AudioSystem.init();
+            AudioSystem.select();
+        }
+
+        function placeInitialPegs() {
+            // 清空棋盘
+            G.board.forEach(pos => pos.peg = null);
+            G.playerPegs = Array(G.playerCount).fill().map(() => []);
+
+            // 每个玩家占据一个角
+            const cornersPerPlayer = Math.floor(6 / G.playerCount);
+
+            for (let p = 0; p < G.playerCount; p++) {
+                for (let c = 0; c < cornersPerPlayer; c++) {
+                    const corner = (p * cornersPerPlayer + c) % 6;
+                    for (let i = 0; i < CONFIG.CORNER_PEGS; i++) {
+                        const posIndex = corner * CONFIG.CORNER_PEGS + i;
+                        G.board[posIndex].peg = p;
+                        G.playerPegs[p].push(posIndex);
+                    }
+                }
+            }
+        }
+
+        // ==================== 游戏循环 ====================
+        function gameLoop(timestamp) {
+            G.deltaTime = timestamp - G.lastTime;
+            G.lastTime = timestamp;
+
+            update();
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            if (G.state === 'playing') {
+                // 更新粒子
+                updateParticles();
+
+                // 更新动画
+                if (G.animating) {
+                    G.animationProgress += CONFIG.ANIMATION_SPEED * G.deltaTime / 1000;
+                    if (G.animationProgress >= 1) {
+                        G.animating = false;
+                        G.animationProgress = 1;
+                        completeMove();
+                    }
+                }
+
+                // AI回合
+                if (G.aiEnabled && G.currentPlayer === 1 && !G.animating && !G.aiThinking) {
+                    G.aiThinking = true;
+                    G.aiTimer = setTimeout(() => {
+                        aiMove();
+                        G.aiThinking = false;
+                    }, CONFIG.AI_DELAY);
+                }
+            }
+        }
+
+        function render() {
+            const ctx = G.ctx;
+            ctx.clearRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+
+            // 绘制背景
+            ctx.fillStyle = '#0a0a15';
+            ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+
+            if (G.state === 'menu') {
+                renderMenu();
+            } else if (G.state === 'playing' || G.state === 'paused') {
+                renderGame();
+                if (G.state === 'paused') {
+                    renderPauseOverlay();
+                }
+            } else if (G.state === 'gameover') {
+                renderGame();
+                renderGameOver();
+            }
+        }
+
+        // ==================== 渲染函数 ====================
+        function renderMenu() {
+            const ctx = G.ctx;
+            const cx = CONFIG.WIDTH / 2;
+
+            // 标题
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 64px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.fillText('跳 棋', cx, 150);
+
+            ctx.font = '20px Microsoft YaHei';
+            ctx.fillStyle = '#aaaaaa';
+            ctx.fillText('经典跳棋对战', cx, 200);
+
+            // 选项
+            const options = [
+                { text: '2人对战', y: 350 },
+                { text: '人机对战', y: 420 },
+                { text: 'AI难度: ' + ['简单', '中等', '困难'][G.aiDifficulty], y: 490 }
+            ];
+
+            options.forEach((opt, i) => {
+                const isHover = G.mouseY > opt.y - 25 && G.mouseY < opt.y + 25 &&
+                               G.mouseX > cx - 120 && G.mouseX < cx + 120;
+
+                ctx.fillStyle = isHover ? '#4a90e2' : '#2a2a4a';
+                ctx.fillRect(cx - 120, opt.y - 25, 240, 50);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '24px Microsoft YaHei';
+                ctx.fillText(opt.text, cx, opt.y + 8);
+            });
+
+            // 最高分
+            ctx.fillStyle = '#888888';
+            ctx.font = '16px Microsoft YaHei';
+            ctx.fillText('最高分: ' + G.highScore, cx, 600);
+        }
+
+        function renderGame() {
+            const ctx = G.ctx;
+
+            // 绘制棋盘背景
+            drawBoardBackground();
+
+            // 绘制连接线
+            drawConnections();
+
+            // 绘制棋子位置
+            drawPositions();
+
+            // 绘制有效移动位置
+            drawValidMoves();
+
+            // 绘制选中的棋子
+            drawSelectedPeg();
+
+            // 绘制动画中的棋子
+            if (G.animating) {
+                drawAnimatingPeg();
+            }
+
+            // 绘制粒子
+            drawParticles();
+
+            // 绘制UI
+            drawGameUI();
+        }
+
+        function drawBoardBackground() {
+            const ctx = G.ctx;
+            const cx = CONFIG.WIDTH / 2;
+            const cy = CONFIG.HEIGHT / 2;
+
+            // 六边形背景
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const angle = (i * 60 - 90) * Math.PI / 180;
+                const x = cx + Math.cos(angle) * (CONFIG.BOARD_RADIUS + 30);
+                const y = cy + Math.sin(angle) * (CONFIG.BOARD_RADIUS + 30);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fill();
+            ctx.strokeStyle = '#3a3a5a';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawConnections() {
+            const ctx = G.ctx;
+            ctx.strokeStyle = '#2a2a4a';
+            ctx.lineWidth = 1;
+
+            for (let i = 0; i < G.board.length; i++) {
+                const pos = G.board[i];
+                for (const neighborIdx of pos.neighbors) {
+                    const neighbor = G.board[neighborIdx];
+                    ctx.beginPath();
+                    ctx.moveTo(pos.x, pos.y);
+                    ctx.lineTo(neighbor.x, neighbor.y);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function drawPositions() {
+            const ctx = G.ctx;
+
+            for (let i = 0; i < G.board.length; i++) {
+                const pos = G.board[i];
+                const isSelected = G.selectedPeg === i;
+                const isAnimating = G.animating && G.animationPeg === i;
+
+                // 绘制位置圆圈
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, CONFIG.HOLE_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = '#1a1a2e';
+                ctx.fill();
+                ctx.strokeStyle = isSelected ? '#ffffff' : '#3a3a5a';
+                ctx.lineWidth = isSelected ? 3 : 1;
+                ctx.stroke();
+
+                // 绘制棋子
+                if (pos.peg !== null && !isAnimating) {
+                    drawPeg(ctx, pos.x, pos.y, pos.peg, isSelected);
+                }
+            }
+        }
+
+        function drawPeg(ctx, x, y, player, isSelected) {
+            const gradient = ctx.createRadialGradient(x - 3, y - 3, 2, x, y, CONFIG.PEG_RADIUS);
+            gradient.addColorStop(0, lightenColor(CONFIG.PLAYER_COLORS[player], 40));
+            gradient.addColorStop(1, CONFIG.PLAYER_COLORS[player]);
+
+            ctx.beginPath();
+            ctx.arc(x, y, CONFIG.PEG_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            if (isSelected) {
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function drawValidMoves() {
+            const ctx = G.ctx;
+
+            for (const move of G.validMoves) {
+                const pos = G.board[move.target];
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, CONFIG.HOLE_RADIUS - 4, 0, Math.PI * 2);
+                ctx.fillStyle = move.isJump ? 'rgba(100, 255, 100, 0.4)' : 'rgba(100, 100, 255, 0.3)';
+                ctx.fill();
+                ctx.strokeStyle = move.isJump ? '#44ff44' : '#4444ff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function drawSelectedPeg() {
+            if (G.selectedPeg === null) return;
+            const ctx = G.ctx;
+            const pos = G.board[G.selectedPeg];
+
+            // 选中动画
+            const pulse = Math.sin(Date.now() / 200) * 0.2 + 0.8;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, CONFIG.HOLE_RADIUS * pulse, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        function drawAnimatingPeg() {
+            const ctx = G.ctx;
+            const from = G.board[G.animationPeg];
+            const to = G.board[G.animationTarget];
+            const t = G.animationProgress;
+
+            // 缓动函数
+            const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+            const x = from.x + (to.x - from.x) * ease;
+            const y = from.y + (to.y - from.y) * ease - Math.sin(t * Math.PI) * 30;
+
+            drawPeg(ctx, x, y, G.currentPlayer, false);
+        }
+
+        function drawParticles() {
+            const ctx = G.ctx;
+
+            for (const p of G.particles) {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        function drawGameUI() {
+            const ctx = G.ctx;
+
+            // 当前玩家指示
+            ctx.fillStyle = CONFIG.PLAYER_COLORS[G.currentPlayer];
+            ctx.font = 'bold 24px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.fillText('玩家 ' + (G.currentPlayer + 1) + ' 的回合', CONFIG.WIDTH / 2, 40);
+
+            // 分数
+            for (let i = 0; i < G.playerCount; i++) {
+                ctx.fillStyle = CONFIG.PLAYER_COLORS[i];
+                ctx.font = '18px Microsoft YaHei';
+                ctx.textAlign = 'left';
+                ctx.fillText('玩家' + (i + 1) + ': ' + G.scores[i], 20, 30 + i * 30);
+            }
+
+            // 暂停按钮
+            ctx.fillStyle = '#2a2a4a';
+            ctx.fillRect(CONFIG.WIDTH - 80, 10, 60, 30);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '14px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.fillText('暂停', CONFIG.WIDTH - 50, 30);
+        }
+
+        function renderPauseOverlay() {
+            const ctx = G.ctx;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 48px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.fillText('暂停', CONFIG.WIDTH / 2, CONFIG.HEIGHT / 2 - 50);
+
+            ctx.font = '24px Microsoft YaHei';
+            ctx.fillText('点击继续', CONFIG.WIDTH / 2, CONFIG.HEIGHT / 2 + 20);
+        }
+
+        function renderGameOver() {
+            const ctx = G.ctx;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+
+            const winner = getWinner();
+            ctx.fillStyle = CONFIG.PLAYER_COLORS[winner];
+            ctx.font = 'bold 48px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.fillText('玩家 ' + (winner + 1) + ' 获胜!', CONFIG.WIDTH / 2, CONFIG.HEIGHT / 2 - 80);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '24px Microsoft YaHei';
+            ctx.fillText('得分: ' + G.scores[winner], CONFIG.WIDTH / 2, CONFIG.HEIGHT / 2);
+
+            ctx.font = '20px Microsoft YaHei';
+            ctx.fillText('点击重新开始', CONFIG.WIDTH / 2, CONFIG.HEIGHT / 2 + 60);
+        }
+
+        // ==================== 游戏逻辑 ====================
+        function getValidMoves(posIndex) {
+            const pos = G.board[posIndex];
+            const moves = [];
+
+            // 检查相邻位置
+            for (const neighborIdx of pos.neighbors) {
+                const neighbor = G.board[neighborIdx];
+                if (neighbor.peg === null) {
+                    moves.push({ target: neighborIdx, isJump: false });
+                } else {
+                    // 检查跳跃
+                    const jumpTarget = getJumpTarget(posIndex, neighborIdx);
+                    if (jumpTarget !== -1 && G.board[jumpTarget].peg === null) {
+                        moves.push({ target: jumpTarget, isJump: true });
+                    }
+                }
+            }
+
+            return moves;
+        }
+
+        function getJumpTarget(from, over) {
+            const fromPos = G.board[from];
+            const overPos = G.board[over];
+
+            // 计算跳跃目标
+            const dx = overPos.x - fromPos.x;
+            const dy = overPos.y - fromPos.y;
+
+            // 查找目标位置
+            for (let i = 0; i < G.board.length; i++) {
+                if (i === from || i === over) continue;
+                const target = G.board[i];
+                const dist = Math.sqrt(Math.pow(target.x - (overPos.x + dx * 0.5), 2) +
+                                      Math.pow(target.y - (overPos.y + dy * 0.5), 2));
+                if (dist < 10) {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        function makeMove(from, to, isJump) {
+            const fromPos = G.board[from];
+            const toPos = G.board[to];
+
+            // 开始动画
+            G.animating = true;
+            G.animationPeg = from;
+            G.animationTarget = to;
+            G.animationProgress = 0;
+
+            // 移除原位置棋子
+            fromPos.peg = null;
+            const pegIndex = G.playerPegs[G.currentPlayer].indexOf(from);
+            if (pegIndex !== -1) {
+                G.playerPegs[G.currentPlayer].splice(pegIndex, 1);
+            }
+
+            // 设置新位置
+            toPos.peg = G.currentPlayer;
+            G.playerPegs[G.currentPlayer].push(to);
+
+            // 播放音效
+            if (isJump) {
+                AudioSystem.jump();
+                G.scores[G.currentPlayer] += 10;
+                createParticles(toPos.x, toPos.y, CONFIG.PLAYER_COLORS[G.currentPlayer]);
+            } else {
+                AudioSystem.move();
+            }
+
+            // 重置选择
+            G.selectedPeg = null;
+            G.validMoves = [];
+        }
+
+        function completeMove() {
+            // 检查是否有连续跳跃
+            const lastMove = G.playerPegs[G.currentPlayer][G.playerPegs[G.currentPlayer].length - 1];
+            const jumpMoves = getValidMoves(lastMove).filter(m => m.isJump);
+
+            if (jumpMoves.length > 0) {
+                // 可以继续跳跃
+                G.selectedPeg = lastMove;
+                G.validMoves = jumpMoves;
+            } else {
+                // 换玩家
+                nextPlayer();
+            }
+
+            // 检查游戏结束
+            if (checkGameOver()) {
+                G.state = 'gameover';
+                const winner = getWinner();
+                if (winner === 0 || !G.aiEnabled) {
+                    AudioSystem.win();
+                } else {
+                    AudioSystem.lose();
+                }
+                saveHighScore();
+            }
+        }
+
+        function nextPlayer() {
+            G.currentPlayer = (G.currentPlayer + 1) % G.playerCount;
+        }
+
+        function checkGameOver() {
+            // 检查是否所有棋子都到达目标角
+            const targetCorner = (G.currentPlayer + 3) % 6;
+            const targetPositions = G.board.filter(pos => pos.corner === targetCorner);
+            return targetPositions.every(pos => pos.peg === G.currentPlayer);
+        }
+
+        function getWinner() {
+            let maxScore = 0;
+            let winner = 0;
+            for (let i = 0; i < G.playerCount; i++) {
+                if (G.scores[i] > maxScore) {
+                    maxScore = G.scores[i];
+                    winner = i;
+                }
+            }
+            return winner;
+        }
+
+        function saveHighScore() {
+            const maxScore = Math.max(...G.scores);
+            if (maxScore > G.highScore) {
+                G.highScore = maxScore;
+                localStorage.setItem('jumpChessHighScore', G.highScore);
+            }
+        }
+
+        // ==================== AI逻辑 ====================
+        function aiMove() {
+            if (G.state !== 'playing' || G.currentPlayer !== 1) return;
+
+            const allMoves = [];
+            for (const pegPos of G.playerPegs[1]) {
+                const moves = getValidMoves(pegPos);
+                for (const move of moves) {
+                    allMoves.push({
+                        from: pegPos,
+                        to: move.target,
+                        isJump: move.isJump,
+                        score: evaluateMove(pegPos, move)
+                    });
+                }
+            }
+
+            if (allMoves.length === 0) return;
+
+            // 根据难度选择移动
+            allMoves.sort((a, b) => b.score - a.score);
+
+            let selectedMove;
+            if (G.aiDifficulty === 0) {
+                // 简单：随机选择
+                selectedMove = allMoves[Math.floor(Math.random() * allMoves.length)];
+            } else if (G.aiDifficulty === 1) {
+                // 中等：70%选择最佳，30%随机
+                selectedMove = Math.random() < 0.7 ? allMoves[0] : allMoves[Math.floor(Math.random() * allMoves.length)];
+            } else {
+                // 困难：总是选择最佳
+                selectedMove = allMoves[0];
+            }
+
+            makeMove(selectedMove.from, selectedMove.to, selectedMove.isJump);
+        }
+
+        function evaluateMove(from, move) {
+            const fromPos = G.board[from];
+            const toPos = G.board[move.target];
+
+            let score = 0;
+
+            // 奖励跳跃
+            if (move.isJump) score += 50;
+
+            // 奖励向目标角移动
+            const targetCorner = (1 + 3) % 6; // 玩家1的目标角
+            const targetCenter = getCornerCenter(targetCorner);
+            const distBefore = Math.sqrt(Math.pow(fromPos.x - targetCenter.x, 2) + Math.pow(fromPos.y - targetCenter.y, 2));
+            const distAfter = Math.sqrt(Math.pow(toPos.x - targetCenter.x, 2) + Math.pow(toPos.y - targetCenter.y, 2));
+            score += (distBefore - distAfter) * 0.5;
+
+            // 惩罚回到起点
+            const startCorner = 1;
+            if (toPos.corner === startCorner) score -= 30;
+
+            return score;
+        }
+
+        function getCornerCenter(corner) {
+            const cx = CONFIG.WIDTH / 2;
+            const cy = CONFIG.HEIGHT / 2;
+            const angle = (corner * 60 - 90) * Math.PI / 180;
+            return {
+                x: cx + Math.cos(angle) * CONFIG.BOARD_RADIUS * 0.5,
+                y: cy + Math.sin(angle) * CONFIG.BOARD_RADIUS * 0.5
+            };
+        }
+
+        // ==================== 粒子系统 ====================
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 10; i++) {
+                G.particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    size: Math.random() * 4 + 2,
+                    color: color,
+                    life: 1
+                });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = G.particles.length - 1; i >= 0; i--) {
+                const p = G.particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+                if (p.life <= 0) {
+                    G.particles.splice(i, 1);
+                }
+            }
+        }
+
+        // ==================== 事件处理 ====================
+        function initEvents() {
+            G.mouseX = 0;
+            G.mouseY = 0;
+
+            G.canvas.addEventListener('click', handleClick);
+            G.canvas.addEventListener('mousemove', handleMouseMove);
+            G.canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+            G.canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+            document.addEventListener('keydown', handleKeyDown);
+        }
+
+        function handleClick(e) {
+            const rect = G.canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * (CONFIG.WIDTH / rect.width);
+            const y = (e.clientY - rect.top) * (CONFIG.HEIGHT / rect.height);
+
+            handleInput(x, y);
+        }
+
+        function handleMouseMove(e) {
+            const rect = G.canvas.getBoundingClientRect();
+            G.mouseX = (e.clientX - rect.left) * (CONFIG.WIDTH / rect.width);
+            G.mouseY = (e.clientY - rect.top) * (CONFIG.HEIGHT / rect.height);
+        }
+
+        function handleTouchStart(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = G.canvas.getBoundingClientRect();
+            const x = (touch.clientX - rect.left) * (CONFIG.WIDTH / rect.width);
+            const y = (touch.clientY - rect.top) * (CONFIG.HEIGHT / rect.height);
+
+            handleInput(x, y);
+        }
+
+        function handleTouchMove(e) {
+            e.preventDefault();
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'Escape' || e.key === 'p') {
+                if (G.state === 'playing') {
+                    G.state = 'paused';
+                } else if (G.state === 'paused') {
+                    G.state = 'playing';
+                }
+            }
+        }
+
+        function handleInput(x, y) {
+            if (G.state === 'menu') {
+                handleMenuClick(x, y);
+            } else if (G.state === 'playing') {
+                handleGameClick(x, y);
+            } else if (G.state === 'paused') {
+                G.state = 'playing';
+            } else if (G.state === 'gameover') {
+                G.state = 'menu';
+            }
+        }
+
+        function handleMenuClick(x, y) {
+            const cx = CONFIG.WIDTH / 2;
+
+            // 2人对战按钮
+            if (y > 325 && y < 375 && x > cx - 120 && x < cx + 120) {
+                G.playerCount = 2;
+                G.aiEnabled = false;
+                startGame();
+            }
+
+            // 人机对战按钮
+            if (y > 395 && y < 445 && x > cx - 120 && x < cx + 120) {
+                G.playerCount = 2;
+                G.aiEnabled = true;
+                startGame();
+            }
+
+            // AI难度按钮
+            if (y > 465 && y < 515 && x > cx - 120 && x < cx + 120) {
+                G.aiDifficulty = (G.aiDifficulty + 1) % 3;
+                AudioSystem.init();
+                AudioSystem.select();
+            }
+        }
+
+        function handleGameClick(x, y) {
+            // 检查暂停按钮
+            if (x > CONFIG.WIDTH - 80 && x < CONFIG.WIDTH - 20 && y > 10 && y < 40) {
+                G.state = 'paused';
+                return;
+            }
+
+            // 如果AI正在思考或正在动画，忽略点击
+            if (G.aiThinking || G.animating) return;
+
+            // 如果是AI回合，忽略点击
+            if (G.aiEnabled && G.currentPlayer === 1) return;
+
+            // 查找点击的棋子位置
+            let clickedPos = -1;
+            for (let i = 0; i < G.board.length; i++) {
+                const pos = G.board[i];
+                const dx = x - pos.x;
+                const dy = y - pos.y;
+                if (dx * dx + dy * dy < CONFIG.HOLE_RADIUS * CONFIG.HOLE_RADIUS) {
+                    clickedPos = i;
+                    break;
+                }
+            }
+
+            if (clickedPos === -1) return;
+
+            const pos = G.board[clickedPos];
+
+            // 如果有选中的棋子，尝试移动
+            if (G.selectedPeg !== null) {
+                const move = G.validMoves.find(m => m.target === clickedPos);
+                if (move) {
+                    makeMove(G.selectedPeg, clickedPos, move.isJump);
+                    return;
+                }
+            }
+
+            // 选择棋子
+            if (pos.peg === G.currentPlayer) {
+                G.selectedPeg = clickedPos;
+                G.validMoves = getValidMoves(clickedPos);
+                AudioSystem.select();
+            }
+        }
+
+        // ==================== 工具函数 ====================
+        function lightenColor(hex, percent) {
+            const num = parseInt(hex.replace('#', ''), 16);
+            const r = Math.min(255, (num >> 16) + percent);
+            const g = Math.min(255, ((num >> 8) & 0x00FF) + percent);
+            const b = Math.min(255, (num & 0x0000FF) + percent);
+            return '#' + (b | (g << 8) | (r << 16)).toString(16).padStart(6, '0');
+        }
+
+        // ==================== 启动游戏 ====================
+        initGame();
+    
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

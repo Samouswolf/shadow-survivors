@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>弹跳球</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);touch-action:none}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function(){
+"use strict";
+
+// ==================== 配置 ====================
+var W=480,H=720;
+var GRAVITY=0.35,JUMP_POWER=-8.5,MOVE_SPEED=5;
+var STAR_COUNT=5,OBSTACLE_INTERVAL=120,DIFFICULTY_INTERVAL=600;
+var PLATFORM_COUNT=6,PLATFORM_MIN_W=60,PLATFORM_MAX_W=120;
+var BALL_RADIUS=12;
+
+// ==================== Canvas ====================
+var canvas=document.getElementById('c');
+var ctx=canvas.getContext('2d');
+canvas.width=W;canvas.height=H;
+
+function fitCanvas(){
+    var s=Math.min(window.innerWidth/W,window.innerHeight/H);
+    canvas.style.width=(W*s)+'px';
+    canvas.style.height=(H*s)+'px';
+}
+fitCanvas();
+window.addEventListener('resize',fitCanvas);
+
+// ==================== 音效 ====================
+var audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function playSound(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        var o=audioCtx.createOscillator();
+        var g=audioCtx.createGain();
+        o.type=type||'square';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxJump(){playSound(520,0.12,'sine',0.2)}
+function sfxStar(){playSound(880,0.08,'square',0.15);playSound(1100,0.08,'square',0.1)}
+function sfxHit(){playSound(150,0.3,'sawtooth',0.25)}
+function sfxGameOver(){playSound(200,0.2,'sawtooth',0.2);setTimeout(function(){playSound(150,0.3,'sawtooth',0.2)},200)}
+function sfxBtn(){playSound(660,0.06,'sine',0.12)}
+
+// ==================== 工具函数 ====================
+function rand(a,b){return Math.random()*(b-a)+a}
+function randInt(a,b){return Math.floor(rand(a,b+1))}
+function clamp(v,mn,mx){return v<mn?mn:v>mx?mx:v}
+function dist(x1,y1,x2,y2){return Math.sqrt((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2))}
+function rectOverlap(ax,ay,aw,ah,bx,by,bw,bh){return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by}
+
+// ==================== 游戏状态 ====================
+var STATE={MENU:0,PLAY:1,PAUSE:2,OVER:3};
+var G={
+    state:STATE.MENU,
+    score:0,highScore:0,combo:0,maxCombo:0,
+    ball:null,platforms:[],stars:[],obstacles:[],particles:[],
+    cameraY:0,maxHeight:0,spawnY:0,
+    frame:0,difficulty:1,obstacleTimer:0,
+    moveLeft:false,moveRight:false,
+    shakeX:0,shakeY:0,shakeDur:0
+};
+
+// 加载最高分
+try{G.highScore=parseInt(localStorage.getItem('bounceBall_high'))||0}catch(e){}
+
+// ==================== 球 ====================
+function createBall(x,y){
+    return{x:x,y:y,vx:0,vy:0,r:BALL_RADIUS,alive:true,jumpCount:0,maxJump:2,trail:[]};
+}
+
+// ==================== 平台 ====================
+function createPlatform(x,y,w,type){
+    return{x:x,y:y,w:w,h:10,type:type||'normal',broken:false,breakTimer:0,moveDir:1,moveSpeed:type==='move'?1.5:0,bounceFactor:type==='bounce'?1.6:1.1};
+}
+
+// ==================== 星星 ====================
+function createStar(x,y){
+    return{x:x,y:y,r:10,collected:false,collectedTimer:0,angle:rand(0,Math.PI*2)};
+}
+
+// ==================== 障碍物 ====================
+function createObstacle(x,y,type){
+    if(type===0){return{x:x,y:y,w:30,h:30,type:0,vy:1.5+G.difficulty*0.3}}
+    if(type===1){return{x:x,y:y,w:50,h:12,type:1,moveDir:1,moveSpeed:2+G.difficulty*0.2}}
+    return{x:x,y:y,w:20,h:20,type:2,angle:0,vy:1+G.difficulty*0.2};
+}
+
+// ==================== 粒子 ====================
+function spawnParticles(x,y,color,count,speed){
+    for(var i=0;i<count;i++){
+        var a=rand(0,Math.PI*2);
+        var s=rand(1,speed||4);
+        G.particles.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,decay:rand(0.02,0.05),color:color,r:rand(2,5)});
+    }
+}
+
+// ==================== 生成逻辑 ====================
+function generatePlatforms(){
+    G.platforms=[];
+    var y=H-80;
+    // 底部固定平台
+    G.platforms.push(createPlatform(W/2-60,y,120,'normal'));
+    for(var i=1;i<PLATFORM_COUNT;i++){
+        y-=randInt(80,130);
+        var pw=randInt(PLATFORM_MIN_W,PLATFORM_MAX_W);
+        var px=randInt(10,W-pw-10);
+        var t='normal';
+        var r=Math.random();
+        if(r<0.15)t='move';
+        else if(r<0.25)t='bounce';
+        G.platforms.push(createPlatform(px,y,pw,t));
+    }
+    G.spawnY=y-60;
+}
+
+function generateStars(){
+    G.stars=[];
+    for(var i=0;i<STAR_COUNT;i++){
+        var py=G.cameraY+randInt(50,H-100);
+        var px=randInt(30,W-30);
+        G.stars.push(createStar(px,py));
+    }
+}
+
+function addPlatformAbove(){
+    var topY=G.cameraY;
+    var highest=G.platforms.reduce(function(a,b){return a.y<b.y?a:b});
+    while(highest.y>topY-100){
+        var ny=highest.y-randInt(70,130-G.difficulty*5);
+        var nw=randInt(PLATFORM_MIN_W-Math.min(G.difficulty*3,30),PLATFORM_MAX_W-Math.min(G.difficulty*5,40));
+        nw=Math.max(nw,35);
+        var nx=randInt(10,W-nw-10);
+        var t='normal';
+        var r=Math.random();
+        if(G.difficulty>2&&r<0.2)t='move';
+        else if(G.difficulty>1&&r<0.3)t='bounce';
+        var p=createPlatform(nx,ny,nw,t);
+        G.platforms.push(p);
+        // 星星
+        if(Math.random()<0.4){
+            G.stars.push(createStar(nx+nw/2,ny-25));
+        }
+        highest=p;
+    }
+}
+
+function addObstacle(){
+    var type=randInt(0,2);
+    var ox=randInt(20,W-50);
+    var oy=G.cameraY-30;
+    G.obstacles.push(createObstacle(ox,oy,type));
+}
+
+// ==================== 初始化/重置 ====================
+function initGame(){
+    G.score=0;G.combo=0;G.maxCombo=0;
+    G.cameraY=0;G.maxHeight=0;
+    G.frame=0;G.difficulty=1;
+    G.obstacleTimer=0;
+    G.particles=[];G.obstacles=[];
+    G.moveLeft=false;G.moveRight=false;
+    G.shakeDur=0;
+    generatePlatforms();
+    generateStars();
+    G.ball=createBall(W/2,H-120);
+    G.ball.vy=JUMP_POWER;
+}
+
+// ==================== 更新 ====================
+function update(){
+    if(G.state!==STATE.PLAY)return;
+    G.frame++;
+
+    var b=G.ball;
+    if(!b.alive)return;
+
+    // 难度递增
+    if(G.frame%DIFFICULTY_INTERVAL===0&&G.difficulty<10){
+        G.difficulty++;
+    }
+
+    // 水平移动
+    if(G.moveLeft)b.vx=-MOVE_SPEED;
+    else if(G.moveRight)b.vx=MOVE_SPEED;
+    else b.vx*=0.85;
+    b.x+=b.vx;
+
+    // 边界
+    if(b.x<b.r){b.x=b.r;b.vx=0;}
+    if(b.x>W-b.r){b.x=W-b.r;b.vx=0;}
+
+    // 重力
+    b.vy+=GRAVITY;
+    b.y+=b.vy;
+
+    // 轨迹
+    b.trail.push({x:b.x,y:b.y});
+    if(b.trail.length>8)b.trail.shift();
+
+    // 平台碰撞（只在下落时）
+    if(b.vy>0){
+        for(var i=0;i<G.platforms.length;i++){
+            var p=G.platforms[i];
+            if(p.broken)continue;
+            // 球底部与平台顶部碰撞
+            if(b.x+b.r>p.x&&b.x-b.r<p.x+p.w){
+                var ballBottom=b.y+b.r;
+                var prevBottom=ballBottom-b.vy;
+                if(ballBottom>=p.y&&prevBottom<=p.y+5){
+                    b.y=p.y-b.r;
+                    b.vy=JUMP_POWER*p.bounceFactor;
+                    b.jumpCount=0;
+                    G.combo=0;
+                    sfxJump();
+                    spawnParticles(b.x,p.y,'#88ccff',4,2);
+                    if(p.type==='move'){p.moveDir*=-1}
+                    if(p.type==='bounce'){spawnParticles(b.x,p.y,'#ffaa00',6,3)}
+                    if(p.type==='break'){
+                        p.broken=true;p.breakTimer=30;
+                    }
+                }
+            }
+        }
+    }
+
+    // 二段跳
+    // （已通过 jumpCount 管理，按键事件中处理）
+
+    // 星星收集
+    for(var i=G.stars.length-1;i>=0;i--){
+        var s=G.stars[i];
+        if(s.collected){
+            s.collectedTimer--;
+            if(s.collectedTimer<=0)G.stars.splice(i,1);
+            continue;
+        }
+        if(dist(b.x,b.y,s.x,s.y)<b.r+s.r){
+            s.collected=true;s.collectedTimer=15;
+            G.combo++;if(G.combo>G.maxCombo)G.maxCombo=G.combo;
+            G.score+=10*G.combo;
+            sfxStar();
+            spawnParticles(s.x,s.y,'#ffdd44',8,3);
+        }
+    }
+
+    // 障碍物更新与碰撞
+    for(var i=G.obstacles.length-1;i>=0;i--){
+        var o=G.obstacles[i];
+        if(o.type===0){o.y+=o.vy}
+        if(o.type===1){o.x+=o.moveSpeed*o.moveDir;if(o.x<0||o.x+o.w>W)o.moveDir*=-1}
+        if(o.type===2){o.y+=o.vy;o.angle+=0.05}
+        // 超出屏幕
+        if(o.y>G.cameraY+H+50){G.obstacles.splice(i,1);continue}
+        // 碰撞检测
+        var bx=b.x-b.r,by=b.y-b.r,bw=b.r*2,bh=b.r*2;
+        if(rectOverlap(bx,by,bw,bh,o.x,o.y,o.w,o.h)){
+            sfxHit();
+            spawnParticles(b.x,b.y,'#ff4444',12,4);
+            G.shakeDur=15;
+            b.alive=false;
+            G.state=STATE.OVER;
+            if(G.score>G.highScore){
+                G.highScore=G.score;
+                try{localStorage.setItem('bounceBall_high',G.highScore)}catch(e){}
+            }
+            sfxGameOver();
+            return;
+        }
+    }
+
+    // 摄像机跟随
+    var targetCY=b.y-H*0.4;
+    if(targetCY<G.cameraY){
+        G.cameraY+=(targetCY-G.cameraY)*0.1;
+    }
+    var heightSoFar=G.cameraY*-1;
+    if(heightSoFar>G.maxHeight){
+        G.score+=Math.floor((heightSoFar-G.maxHeight)/10);
+        G.maxHeight=heightSoFar;
+    }
+
+    // 障碍物生成
+    G.obstacleTimer++;
+    var interval=Math.max(40,OBSTACLE_INTERVAL-G.difficulty*8);
+    if(G.obstacleTimer>=interval){
+        G.obstacleTimer=0;
+        addObstacle();
+    }
+
+    // 补充平台
+    addPlatformAbove();
+
+    // 清理屏幕外物体
+    var bottomEdge=G.cameraY+H+100;
+    G.platforms=G.platforms.filter(function(p){return p.y<bottomEdge});
+    G.stars=G.stars.filter(function(s){return s.y<bottomEdge||s.collected});
+    G.obstacles=G.obstacles.filter(function(o){return o.y<bottomEdge});
+
+    // 破碎平台恢复
+    for(var i=0;i<G.platforms.length;i++){
+        var p=G.platforms[i];
+        if(p.broken){p.breakTimer--;if(p.breakTimer<=0)p.broken=false;}
+        if(p.type==='move'&&!p.broken){p.x+=p.moveSpeed*p.moveDir;if(p.x<0||p.x+p.w>W)p.moveDir*=-1}
+    }
+
+    // 粒子更新
+    for(var i=G.particles.length-1;i>=0;i--){
+        var pt=G.particles[i];
+        pt.x+=pt.vx;pt.y+=pt.vy;
+        pt.life-=pt.decay;
+        if(pt.life<=0)G.particles.splice(i,1);
+    }
+
+    // 镜头震动
+    if(G.shakeDur>0){G.shakeDur--;G.shakeX=rand(-3,3);G.shakeY=rand(-3,3)}
+    else{G.shakeX=0;G.shakeY=0}
+
+    // 掉落死亡
+    if(b.y>G.cameraY+H+50){
+        b.alive=false;
+        G.state=STATE.OVER;
+        if(G.score>G.highScore){
+            G.highScore=G.score;
+            try{localStorage.setItem('bounceBall_high',G.highScore)}catch(e){}
+        }
+        sfxGameOver();
+    }
+}
+
+// ==================== 渲染 ====================
+var gradientCache=null;
+function getBgGradient(){
+    if(!gradientCache){
+        gradientCache=ctx.createLinearGradient(0,0,0,H);
+        gradientCache.addColorStop(0,'#0a0a2e');
+        gradientCache.addColorStop(0.5,'#1a1a4e');
+        gradientCache.addColorStop(1,'#0d0d3d');
+    }
+    return gradientCache;
+}
+
+function render(){
+    ctx.save();
+    ctx.translate(G.shakeX,G.shakeY);
+
+    // 背景
+    ctx.fillStyle=getBgGradient();
+    ctx.fillRect(-5,-5,W+10,H+10);
+
+    // 背景星星装饰
+    ctx.fillStyle='rgba(255,255,255,0.3)';
+    for(var i=0;i<30;i++){
+        var sx=(i*137+50)%W;
+        var sy=((i*251+G.cameraY*0.1)%H+H)%H;
+        var sr=(i%3)+1;
+        ctx.beginPath();ctx.arc(sx,sy,sr,0,Math.PI*2);ctx.fill();
+    }
+
+    if(G.state===STATE.MENU){
+        renderMenu();
+    }else if(G.state===STATE.PLAY||G.state===STATE.PAUSE){
+        renderGame();
+        if(G.state===STATE.PAUSE)renderPause();
+    }else if(G.state===STATE.OVER){
+        renderGame();
+        renderGameOver();
+    }
+
+    ctx.restore();
+}
+
+function renderGame(){
+    ctx.save();
+    ctx.translate(0,-G.cameraY);
+
+    // 平台
+    for(var i=0;i<G.platforms.length;i++){
+        var p=G.platforms[i];
+        if(p.broken){
+            ctx.globalAlpha=0.3;
+            ctx.fillStyle='#555';
+            ctx.fillRect(p.x,p.y,p.w,p.h);
+            ctx.globalAlpha=1;
+            continue;
+        }
+        if(p.type==='normal'){ctx.fillStyle='#4a9eff'}
+        else if(p.type==='move'){ctx.fillStyle='#ff9944'}
+        else if(p.type==='bounce'){ctx.fillStyle='#44ffaa'}
+        else if(p.type==='break'){ctx.fillStyle='#ff6688'}
+        // 圆角矩形
+        var ph=10,r=5;
+        ctx.beginPath();
+        ctx.moveTo(p.x+r,p.y);
+        ctx.lineTo(p.x+p.w-r,p.y);
+        ctx.quadraticCurveTo(p.x+p.w,p.y,p.x+p.w,p.y+r);
+        ctx.lineTo(p.x+p.w,p.y+ph-r);
+        ctx.quadraticCurveTo(p.x+p.w,p.y+ph,p.x+p.w-r,p.y+ph);
+        ctx.lineTo(p.x+r,p.y+ph);
+        ctx.quadraticCurveTo(p.x,p.y+ph,p.x,p.y+ph-r);
+        ctx.lineTo(p.x,p.y+r);
+        ctx.quadraticCurveTo(p.x,p.y,p.x+r,p.y);
+        ctx.closePath();
+        ctx.fill();
+        // 高光
+        ctx.fillStyle='rgba(255,255,255,0.3)';
+        ctx.fillRect(p.x+2,p.y+1,p.w-4,3);
+        // 移动平台标记
+        if(p.type==='move'){
+            ctx.fillStyle='rgba(255,255,255,0.5)';
+            ctx.font='8px sans-serif';
+            ctx.fillText('>>',p.x+p.w/2-6,p.y+8);
+        }
+        // 弹跳平台标记
+        if(p.type==='bounce'){
+            ctx.fillStyle='rgba(255,255,255,0.5)';
+            ctx.font='8px sans-serif';
+            ctx.fillText('UP',p.x+p.w/2-7,p.y+8);
+        }
+    }
+
+    // 星星
+    for(var i=0;i<G.stars.length;i++){
+        var s=G.stars[i];
+        if(s.collected){
+            ctx.globalAlpha=s.collectedTimer/15;
+            ctx.fillStyle='#ffdd44';
+            drawStar(ctx,s.x,s.y,s.r*(1+(15-s.collectedTimer)/10),s.angle);
+            ctx.globalAlpha=1;
+            continue;
+        }
+        s.angle+=0.03;
+        ctx.fillStyle='#ffdd44';
+        drawStar(ctx,s.x,s.y,s.r,s.angle);
+        // 光晕
+        ctx.fillStyle='rgba(255,221,68,0.15)';
+        ctx.beginPath();ctx.arc(s.x,s.y,s.r+6,0,Math.PI*2);ctx.fill();
+    }
+
+    // 障碍物
+    for(var i=0;i<G.obstacles.length;i++){
+        var o=G.obstacles[i];
+        if(o.type===0){
+            ctx.fillStyle='#ff4466';
+            ctx.fillRect(o.x,o.y,o.w,o.h);
+            ctx.fillStyle='rgba(255,255,255,0.3)';
+            ctx.fillRect(o.x+3,o.y+3,o.w-6,4);
+            // 危险标记
+            ctx.fillStyle='#fff';
+            ctx.font='bold 16px sans-serif';
+            ctx.fillText('!',o.x+10,o.y+22);
+        }else if(o.type===1){
+            ctx.fillStyle='#ff66aa';
+            ctx.fillRect(o.x,o.y,o.w,o.h);
+            ctx.fillStyle='rgba(255,255,255,0.3)';
+            ctx.fillRect(o.x+3,o.y+2,o.w-6,3);
+        }else{
+            ctx.save();
+            ctx.translate(o.x+o.w/2,o.y+o.h/2);
+            ctx.rotate(o.angle);
+            ctx.fillStyle='#cc44ff';
+            ctx.fillRect(-o.w/2,-o.h/2,o.w,o.h);
+            ctx.restore();
+        }
+    }
+
+    // 球
+    var b=G.ball;
+    if(b&&b.alive){
+        // 轨迹
+        for(var i=0;i<b.trail.length;i++){
+            var t=b.trail[i];
+            ctx.globalAlpha=i/b.trail.length*0.3;
+            ctx.fillStyle='#88ddff';
+            ctx.beginPath();ctx.arc(t.x,t.y,b.r*(i/b.trail.length)*0.8,0,Math.PI*2);ctx.fill();
+        }
+        ctx.globalAlpha=1;
+        // 球体
+        var grad=ctx.createRadialGradient(b.x-3,b.y-3,2,b.x,b.y,b.r);
+        grad.addColorStop(0,'#aaddff');
+        grad.addColorStop(0.7,'#4488cc');
+        grad.addColorStop(1,'#2255aa');
+        ctx.fillStyle=grad;
+        ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+        // 高光
+        ctx.fillStyle='rgba(255,255,255,0.6)';
+        ctx.beginPath();ctx.arc(b.x-3,b.y-3,b.r*0.35,0,Math.PI*2);ctx.fill();
+        // 跳跃计数指示
+        if(b.jumpCount>0){
+            ctx.fillStyle='rgba(255,255,255,0.7)';
+            ctx.font='bold 10px sans-serif';
+            ctx.textAlign='center';
+            ctx.fillText(b.jumpCount+'/'+b.maxJump,b.x,b.y-b.r-5);
+            ctx.textAlign='left';
+        }
+    }
+
+    // 粒子
+    for(var i=0;i<G.particles.length;i++){
+        var pt=G.particles[i];
+        ctx.globalAlpha=pt.life;
+        ctx.fillStyle=pt.color;
+        ctx.beginPath();ctx.arc(pt.x,pt.y,pt.r*pt.life,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    ctx.restore();
+
+    // HUD
+    renderHUD();
+}
+
+function drawStar(ctx,x,y,r,angle){
+    ctx.save();
+    ctx.translate(x,y);ctx.rotate(angle);
+    ctx.beginPath();
+    for(var i=0;i<5;i++){
+        var a=i*Math.PI*2/5-Math.PI/2;
+        var ox=Math.cos(a)*r,oy=Math.sin(a)*r;
+        if(i===0)ctx.moveTo(ox,oy);else ctx.lineTo(ox,oy);
+        var ia=a+Math.PI/5;
+        ctx.lineTo(Math.cos(ia)*r*0.45,Math.sin(ia)*r*0.45);
+    }
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+}
+
+function renderHUD(){
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    ctx.fillRect(0,0,W,44);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px sans-serif';
+    ctx.fillText('分数: '+G.score,10,28);
+    ctx.fillText('连击: x'+G.combo,W/2-30,28);
+    ctx.fillStyle='#aaa';
+    ctx.font='13px sans-serif';
+    ctx.fillText('最高: '+G.highScore,W-100,28);
+    // 难度条
+    ctx.fillStyle='rgba(255,255,255,0.2)';
+    ctx.fillRect(10,38,W-20,4);
+    ctx.fillStyle='#44aaff';
+    ctx.fillRect(10,38,(W-20)*(G.difficulty/10),4);
+}
+
+function renderMenu(){
+    // 标题
+    ctx.fillStyle='#fff';
+    ctx.font='bold 42px sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText('弹跳球',W/2,H*0.25);
+
+    // 球动画
+    var bounceY=H*0.42+Math.sin(Date.now()/300)*15;
+    var grad=ctx.createRadialGradient(W/2-3,bounceY-3,2,W/2,bounceY,BALL_RADIUS);
+    grad.addColorStop(0,'#aaddff');grad.addColorStop(0.7,'#4488cc');grad.addColorStop(1,'#2255aa');
+    ctx.fillStyle=grad;
+    ctx.beginPath();ctx.arc(W/2,bounceY,BALL_RADIUS,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.6)';
+    ctx.beginPath();ctx.arc(W/2-3,bounceY-3,BALL_RADIUS*0.35,0,Math.PI*2);ctx.fill();
+
+    // 开始按钮
+    var btnX=W/2-100,btnY=H*0.55,btnW=200,btnH=50;
+    ctx.fillStyle='rgba(74,158,255,0.8)';
+    roundRect(ctx,btnX,btnY,btnW,btnH,12);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 22px sans-serif';
+    ctx.fillText('开始游戏',W/2,btnY+33);
+
+    // 操作说明
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    ctx.font='14px sans-serif';
+    ctx.fillText('← → / 触屏左右移动',W/2,H*0.72);
+    ctx.fillText('↑ / 点击屏幕 二段跳',W/2,H*0.77);
+    ctx.fillText('P / 双指触屏 暂停',W/2,H*0.82);
+
+    // 最高分
+    if(G.highScore>0){
+        ctx.fillStyle='#ffdd44';ctx.font='bold 16px sans-serif';
+        ctx.fillText('最高分: '+G.highScore,W/2,H*0.9);
+    }
+    ctx.textAlign='left';
+
+    // 保存按钮区域供点击检测
+    G._menuBtn={x:btnX,y:btnY,w:btnW,h:btnH};
+}
+
+function renderPause(){
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';ctx.font='bold 36px sans-serif';ctx.textAlign='center';
+    ctx.fillText('暂停',W/2,H/2-20);
+    ctx.font='18px sans-serif';ctx.fillStyle='rgba(255,255,255,0.7)';
+    ctx.fillText('按 P 或 点击继续',W/2,H/2+20);
+    ctx.textAlign='left';
+}
+
+function renderGameOver(){
+    ctx.fillStyle='rgba(0,0,0,0.7)';
+    ctx.fillRect(0,0,W,H);
+
+    ctx.textAlign='center';
+    ctx.fillStyle='#ff6666';ctx.font='bold 38px sans-serif';
+    ctx.fillText('游戏结束',W/2,H*0.3);
+
+    ctx.fillStyle='#fff';ctx.font='bold 22px sans-serif';
+    ctx.fillText('分数: '+G.score,W/2,H*0.42);
+
+    ctx.fillStyle='#ffdd44';ctx.font='18px sans-serif';
+    ctx.fillText('最高分: '+G.highScore,W/2,H*0.5);
+
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    ctx.fillText('最大连击: x'+G.maxCombo,W/2,H*0.57);
+
+    if(G.score>=G.highScore&&G.score>0){
+        ctx.fillStyle='#ff4444';ctx.font='bold 20px sans-serif';
+        ctx.fillText('新纪录!',W/2,H*0.65);
+    }
+
+    // 重来按钮
+    var btnX=W/2-90,btnY=H*0.72,btnW=180,btnH=48;
+    ctx.fillStyle='rgba(74,158,255,0.8)';
+    roundRect(ctx,btnX,btnY,btnW,btnH,12);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 20px sans-serif';
+    ctx.fillText('再来一局',W/2,btnY+32);
+
+    G._overBtn={x:btnX,y:btnY,w:btnW,h:btnH};
+    ctx.textAlign='left';
+}
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+// ==================== 输入处理 ====================
+function getCanvasPos(clientX,clientY){
+    var rect=canvas.getBoundingClientRect();
+    var sx=W/rect.width,sy=H/rect.height;
+    return{x:(clientX-rect.left)*sx,y:(clientY-rect.top)*sy};
+}
+
+function isInBtn(pos,btn){return btn&&pos.x>=btn.x&&pos.x<=btn.x+btn.w&&pos.y>=btn.y&&pos.y<=btn.y+btn.h}
+
+// 键盘
+var keysDown={};
+document.addEventListener('keydown',function(e){
+    keysDown[e.code]=true;
+    if(e.code==='ArrowLeft'||e.code==='KeyA')G.moveLeft=true;
+    if(e.code==='ArrowRight'||e.code==='KeyD')G.moveRight=true;
+    if(e.code==='ArrowUp'||e.code==='KeyW'||e.code==='Space'){
+        e.preventDefault();
+        tryJump();
+    }
+    if(e.code==='KeyP'||e.code==='Escape'){
+        if(G.state===STATE.PLAY){G.state=STATE.PAUSE}
+        else if(G.state===STATE.PAUSE){G.state=STATE.PLAY}
+    }
+    if(G.state===STATE.MENU&&(e.code==='Enter'||e.code==='Space')){
+        startGame();
+    }
+    if(G.state===STATE.OVER&&(e.code==='Enter'||e.code==='Space')){
+        startGame();
+    }
+});
+document.addEventListener('keyup',function(e){
+    keysDown[e.code]=false;
+    if(e.code==='ArrowLeft'||e.code==='KeyA')G.moveLeft=false;
+    if(e.code==='ArrowRight'||e.code==='KeyD')G.moveRight=false;
+});
+
+function tryJump(){
+    if(G.state!==STATE.PLAY||!G.ball||!G.ball.alive)return;
+    var b=G.ball;
+    if(b.jumpCount<b.maxJump){
+        b.vy=JUMP_POWER;
+        b.jumpCount++;
+        sfxJump();
+        spawnParticles(b.x,b.y+b.r,'#88ccff',5,2);
+    }
+}
+
+function startGame(){
+    sfxBtn();
+    initAudio();
+    G.state=STATE.PLAY;
+    initGame();
+}
+
+// 鼠标
+canvas.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    initAudio();
+    var pos=getCanvasPos(e.clientX,e.clientY);
+    handleClick(pos);
+});
+canvas.addEventListener('mousemove',function(e){
+    if(G.state===STATE.PLAY&&G.ball&&G.ball.alive){
+        var pos=getCanvasPos(e.clientX,e.clientY);
+        if(pos.x<W/2)G.moveLeft=true;else G.moveLeft=false;
+        if(pos.x>W/2)G.moveRight=true;else G.moveRight=false;
+    }
+});
+
+// 触屏
+var touchIds={left:null,right:null,jump:null};
+canvas.addEventListener('touchstart',function(e){
+    e.preventDefault();initAudio();
+    for(var i=0;i<e.changedTouches.length;i++){
+        var t=e.changedTouches[i];
+        var pos=getCanvasPos(t.clientX,t.clientY);
+        if(G.state===STATE.MENU||G.state===STATE.OVER){
+            handleClick(pos);
+        }else if(G.state===STATE.PLAY){
+            if(e.touches.length>=2&&G.state===STATE.PLAY){
+                G.state=STATE.PAUSE;continue;
+            }
+            if(pos.x<W*0.35){G.moveLeft=true;touchIds.left=t.identifier}
+            else if(pos.x>W*0.65){G.moveRight=true;touchIds.right=t.identifier}
+            else{tryJump();touchIds.jump=t.identifier}
+        }else if(G.state===STATE.PAUSE){
+            G.state=STATE.PLAY;
+        }
+    }
+},{passive:false});
+canvas.addEventListener('touchmove',function(e){
+    e.preventDefault();
+    if(G.state!==STATE.PLAY)return;
+    G.moveLeft=false;G.moveRight=false;
+    for(var i=0;i<e.touches.length;i++){
+        var t=e.touches[i];
+        var pos=getCanvasPos(t.clientX,t.clientY);
+        if(pos.x<W*0.35)G.moveLeft=true;
+        else if(pos.x>W*0.65)G.moveRight=true;
+    }
+},{passive:false});
+canvas.addEventListener('touchend',function(e){
+    e.preventDefault();
+    for(var i=0;i<e.changedTouches.length;i++){
+        var t=e.changedTouches[i];
+        if(t.identifier===touchIds.left){G.moveLeft=false;touchIds.left=null}
+        if(t.identifier===touchIds.right){G.moveRight=false;touchIds.right=null}
+    }
+    if(e.touches.length===0){G.moveLeft=false;G.moveRight=false}
+},{passive:false});
+
+function handleClick(pos){
+    if(G.state===STATE.MENU){
+        if(isInBtn(pos,G._menuBtn))startGame();
+    }else if(G.state===STATE.OVER){
+        if(isInBtn(pos,G._overBtn))startGame();
+    }
+}
+
+// ==================== 游戏循环 ====================
+var lastTime=0,accum=0,step=1000/60;
+function loop(ts){
+    requestAnimationFrame(loop);
+    if(!lastTime)lastTime=ts;
+    var dt=ts-lastTime;lastTime=ts;
+    if(dt>200)dt=200;
+    accum+=dt;
+    while(accum>=step){
+        update();accum-=step;
+    }
+    render();
+}
+requestAnimationFrame(loop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

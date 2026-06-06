@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>填色游戏</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    background: #0a0a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+#gameCanvas {
+    background: #0f0f2a;
+    border: 2px solid #1a1a3a;
+    border-radius: 10px;
+    image-rendering: pixelated;
+}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ============ 画布尺寸 ============
+const BASE_WIDTH = 420;
+const BASE_HEIGHT = 720;
+canvas.width = BASE_WIDTH;
+canvas.height = BASE_HEIGHT;
+
+// ============ 游戏状态 ============
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, LEVEL_COMPLETE: 3, GAME_OVER: 4 };
+
+// ============ 常量 ============
+const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22'];
+const COLOR_NAMES = ['红', '蓝', '绿', '黄', '紫', '橙'];
+const HIGHLIGHT_ALPHA = 0.35;
+
+// ============ 关卡数据 ============
+// 每关：regions数组 {id, path, color(当前), target(目标索引), neighbors[]}
+// 规则：相邻区域不能同色，用最少颜色填满
+
+const LEVELS = [
+    { name: '入门', gridW: 4, gridH: 5, numColors: 3, targetMoves: 8, desc: '3色4x5网格' },
+    { name: '初级', gridW: 5, gridH: 6, numColors: 3, targetMoves: 12, desc: '3色5x6网格' },
+    { name: '进阶', gridW: 5, gridH: 7, numColors: 4, targetMoves: 15, desc: '4色5x7网格' },
+    { name: '挑战', gridW: 6, gridH: 7, numColors: 4, targetMoves: 18, desc: '4色6x7网格' },
+    { name: '高手', gridW: 6, gridH: 8, numColors: 5, targetMoves: 22, desc: '5色6x8网格' },
+    { name: '大师', gridW: 7, gridH: 8, numColors: 5, targetMoves: 26, desc: '5色7x8网格' },
+    { name: '宗师', gridW: 7, gridH: 9, numColors: 6, targetMoves: 30, desc: '6色7x9网格' },
+    { name: '传说', gridW: 8, gridH: 9, numColors: 6, targetMoves: 35, desc: '6色8x9网格' }
+];
+
+// ============ 游戏变量 ============
+var gameState = STATE.MENU;
+var level = 0;
+var grid = [];        // grid[row][col] = colorIndex (-1 = uncolored)
+var regions = [];     // merged regions for click detection
+var regionAdj = [];   // adjacency matrix
+var selectedColor = 0;
+var moves = 0;
+var score = 0;
+var totalScore = 0;
+var highScore = parseInt(localStorage.getItem('colorfill_highScore')) || 0;
+var animTimer = 0;
+var particles = [];
+var shakeTimer = 0;
+var shakeIntensity = 0;
+var flashAlpha = 0;
+var levelStartTime = 0;
+var hoverRegion = -1;
+
+// ============ 音效系统 ============
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+}
+
+function playTone(freq, duration, type, vol) {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (duration || 0.15));
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + (duration || 0.15));
+}
+
+function sfxFill() { playTone(520, 0.12, 'sine', 0.18); playTone(680, 0.1, 'sine', 0.1); }
+function sfxError() { playTone(180, 0.2, 'square', 0.12); }
+function sfxComplete() {
+    playTone(440, 0.15, 'sine', 0.2);
+    setTimeout(function(){ playTone(550, 0.15, 'sine', 0.2); }, 100);
+    setTimeout(function(){ playTone(660, 0.2, 'sine', 0.2); }, 200);
+    setTimeout(function(){ playTone(880, 0.3, 'sine', 0.25); }, 300);
+}
+function sfxClick() { playTone(400, 0.08, 'sine', 0.1); }
+function sfxGameOver() {
+    playTone(400, 0.2, 'square', 0.15);
+    setTimeout(function(){ playTone(300, 0.2, 'square', 0.15); }, 200);
+    setTimeout(function(){ playTone(200, 0.4, 'square', 0.15); }, 400);
+}
+
+// ============ 粒子系统 ============
+function spawnParticles(x, y, color, count) {
+    for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 1 + Math.random() * 3;
+        particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            color: color,
+            size: 2 + Math.random() * 4
+        });
+    }
+}
+
+function updateParticles() {
+    for (var i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= 0.025;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (var i = 0; i < particles.length; i++) {
+        var p = particles[i];
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ============ 网格与区域生成 ============
+function generateLevel(lvl) {
+    var L = LEVELS[lvl];
+    var gw = L.gridW, gh = L.gridH, nc = L.numColors;
+    grid = [];
+    regions = [];
+
+    // 生成随机解：先给每个cell随机颜色，保证相邻不同
+    var solution = [];
+    for (var r = 0; r < gh; r++) {
+        solution[r] = [];
+        for (var c = 0; c < gw; c++) {
+            var tried = {};
+            var color;
+            var maxTry = 20;
+            do {
+                color = Math.floor(Math.random() * nc);
+                maxTry--;
+                if (maxTry <= 0) { color = 0; break; }
+            } while (tried[color] || (c > 0 && solution[r][c-1] === color) || (r > 0 && solution[r-1][c] === color));
+            tried[color] = true;
+            solution[r][c] = color;
+        }
+    }
+
+    // 生成区域：随机合并相邻同色或留空
+    // 先标记所有cell为未分配区域
+    var regionMap = [];
+    for (var r = 0; r < gh; r++) {
+        regionMap[r] = [];
+        for (var c = 0; c < gw; c++) {
+            regionMap[r][c] = -1;
+        }
+    }
+
+    // 使用洪水填充创建区域
+    var regionId = 0;
+    for (var r = 0; r < gh; r++) {
+        for (var c = 0; c < gw; c++) {
+            if (regionMap[r][c] === -1) {
+                // 50% chance to merge with a neighbor of same solution color
+                regionMap[r][c] = regionId;
+                var regionCells = [{r: r, c: c}];
+
+                // Try to expand region
+                var neighbors = getNeighbors(r, c, gw, gh);
+                for (var n = 0; n < neighbors.length; n++) {
+                    var nr = neighbors[n].r, ncc = neighbors[n].c;
+                    if (regionMap[nr][ncc] === -1 && solution[nr][ncc] === solution[r][c] && Math.random() < 0.45) {
+                        regionMap[nr][ncc] = regionId;
+                        regionCells.push({r: nr, c: ncc});
+                    }
+                }
+                regions.push({
+                    id: regionId,
+                    cells: regionCells,
+                    color: -1,  // -1 = uncolored
+                    solution: solution[r][c]
+                });
+                regionId++;
+            }
+        }
+    }
+
+    // Build adjacency
+    regionAdj = [];
+    for (var i = 0; i < regions.length; i++) regionAdj[i] = {};
+    for (var r = 0; r < gh; r++) {
+        for (var c = 0; c < gw; c++) {
+            var rid = regionMap[r][c];
+            var neighbors = getNeighbors(r, c, gw, gh);
+            for (var n = 0; n < neighbors.length; n++) {
+                var nrid = regionMap[neighbors[n].r][neighbors[n].c];
+                if (nrid !== rid) {
+                    regionAdj[rid][nrid] = true;
+                    regionAdj[nrid][rid] = true;
+                }
+            }
+        }
+    }
+
+    // Pre-color some cells (difficulty-dependent)
+    var preColorCount = Math.max(1, Math.floor(regions.length * (0.15 - lvl * 0.01)));
+    var indices = [];
+    for (var i = 0; i < regions.length; i++) indices.push(i);
+    shuffle(indices);
+    for (var i = 0; i < preColorCount && i < indices.length; i++) {
+        regions[indices[i]].color = regions[indices[i]].solution;
+    }
+
+    selectedColor = 0;
+    moves = 0;
+    score = 0;
+    levelStartTime = Date.now();
+    hoverRegion = -1;
+}
+
+function getNeighbors(r, c, gw, gh) {
+    var result = [];
+    if (r > 0) result.push({r: r-1, c: c});
+    if (r < gh-1) result.push({r: r+1, c: c});
+    if (c > 0) result.push({r: r, c: c-1});
+    if (c < gw-1) result.push({r: r, c: c+1});
+    return result;
+}
+
+function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+}
+
+// ============ 区域几何计算 ============
+function getRegionLayout() {
+    var L = LEVELS[level];
+    var gw = L.gridW, gh = L.gridH;
+    var padding = 20;
+    var topOffset = 120;
+    var bottomOffset = 180;
+    var availW = BASE_WIDTH - padding * 2;
+    var availH = BASE_HEIGHT - topOffset - bottomOffset;
+    var cellSize = Math.min(Math.floor(availW / gw), Math.floor(availH / gh));
+    var offsetX = (BASE_WIDTH - cellSize * gw) / 2;
+    var offsetY = topOffset + (availH - cellSize * gh) / 2;
+    return { cellSize: cellSize, offsetX: offsetX, offsetY: offsetY, gw: gw, gh: gh };
+}
+
+// ============ 碰撞检测 ============
+function getRegionAtPos(px, py) {
+    var layout = getRegionLayout();
+    var col = Math.floor((px - layout.offsetX) / layout.cellSize);
+    var row = Math.floor((py - layout.offsetY) / layout.cellSize);
+    if (col < 0 || col >= layout.gw || row < 0 || row >= layout.gh) return -1;
+
+    // Find which region contains this cell
+    var L = LEVELS[level];
+    for (var i = 0; i < regions.length; i++) {
+        for (var j = 0; j < regions[i].cells.length; j++) {
+            if (regions[i].cells[j].r === row && regions[i].cells[j].c === col) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+// ============ 填色逻辑 ============
+function tryFillRegion(rid) {
+    if (rid < 0 || rid >= regions.length) return;
+    var region = regions[rid];
+    if (region.color === selectedColor) return; // already this color
+
+    // Check adjacency conflicts
+    var conflict = false;
+    for (var nid in regionAdj[rid]) {
+        if (regionAdj[rid].hasOwnProperty(nid)) {
+            var neighbor = regions[parseInt(nid)];
+            if (neighbor.color === selectedColor) {
+                conflict = true;
+                break;
+            }
+        }
+    }
+
+    if (conflict) {
+        sfxError();
+        shakeTimer = 8;
+        shakeIntensity = 4;
+        return;
+    }
+
+    // Fill!
+    region.color = selectedColor;
+    moves++;
+    sfxFill();
+
+    // Particles
+    var layout = getRegionLayout();
+    for (var j = 0; j < region.cells.length; j++) {
+        var cx = layout.offsetX + region.cells[j].c * layout.cellSize + layout.cellSize / 2;
+        var cy = layout.offsetY + region.cells[j].r * layout.cellSize + layout.cellSize / 2;
+        spawnParticles(cx, cy, COLORS[selectedColor], 4);
+    }
+
+    // Check completion
+    var allFilled = true;
+    for (var i = 0; i < regions.length; i++) {
+        if (regions[i].color === -1) { allFilled = false; break; }
+    }
+
+    if (allFilled) {
+        // Verify all adjacency constraints are met
+        var valid = true;
+        for (var i = 0; i < regions.length; i++) {
+            for (var nid in regionAdj[i]) {
+                if (regionAdj[i].hasOwnProperty(nid)) {
+                    if (regions[i].color === regions[parseInt(nid)].color) {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+            if (!valid) break;
+        }
+
+        if (valid) {
+            // Level complete!
+            var L = LEVELS[level];
+            var timeBonus = Math.max(0, 300 - Math.floor((Date.now() - levelStartTime) / 1000)) * 2;
+            var moveBonus = Math.max(0, L.targetMoves - moves) * 10;
+            score = L.targetMoves * 10 + timeBonus + moveBonus;
+            totalScore += score;
+            if (totalScore > highScore) {
+                highScore = totalScore;
+                localStorage.setItem('colorfill_highScore', highScore);
+            }
+            gameState = STATE.LEVEL_COMPLETE;
+            sfxComplete();
+            flashAlpha = 0.5;
+        }
+    }
+}
+
+// ============ 渲染 ============
+function draw() {
+    ctx.save();
+
+    // Screen shake
+    if (shakeTimer > 0) {
+        shakeTimer--;
+        var sx = (Math.random() - 0.5) * shakeIntensity;
+        var sy = (Math.random() - 0.5) * shakeIntensity;
+        ctx.translate(sx, sy);
+    }
+
+    // Clear
+    ctx.fillStyle = '#0f0f2a';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    if (gameState === STATE.MENU) {
+        drawMenu();
+    } else if (gameState === STATE.PLAYING || gameState === STATE.PAUSED) {
+        drawGame();
+        drawHUD();
+        if (gameState === STATE.PAUSED) drawPauseOverlay();
+    } else if (gameState === STATE.LEVEL_COMPLETE) {
+        drawGame();
+        drawHUD();
+        drawLevelComplete();
+    } else if (gameState === STATE.GAME_OVER) {
+        drawGame();
+        drawHUD();
+        drawGameOver();
+    }
+
+    // Flash effect
+    if (flashAlpha > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,' + flashAlpha + ')';
+        ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+        flashAlpha -= 0.03;
+        if (flashAlpha < 0) flashAlpha = 0;
+    }
+
+    drawParticles();
+    ctx.restore();
+}
+
+function drawMenu() {
+    // Background pattern
+    drawBackgroundPattern();
+
+    // Title
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#3498db';
+    ctx.font = 'bold 48px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('填色游戏', BASE_WIDTH / 2, 180);
+
+    // Subtitle
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('按区域填充颜色，相邻不能同色', BASE_WIDTH / 2, 220);
+
+    // Color preview
+    var startX = BASE_WIDTH / 2 - (COLORS.length * 40) / 2;
+    for (var i = 0; i < COLORS.length; i++) {
+        ctx.fillStyle = COLORS[i];
+        ctx.beginPath();
+        ctx.arc(startX + i * 40 + 20, 270, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+
+    // Difficulty preview
+    ctx.fillStyle = '#ddd';
+    ctx.font = '15px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('8个关卡 · 3~6色 · 逐步解锁', BASE_WIDTH / 2, 320);
+
+    // Controls
+    ctx.fillStyle = '#888';
+    ctx.font = '14px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('鼠标/触屏：选色后点击区域', BASE_WIDTH / 2, 380);
+    ctx.fillText('键盘：1-6选色，方向键/Tab切换区域', BASE_WIDTH / 2, 405);
+    ctx.fillText('Enter/Space 填色，P/Esc 暂停', BASE_WIDTH / 2, 430);
+
+    // High score
+    if (highScore > 0) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = '16px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('最高分: ' + highScore, BASE_WIDTH / 2, 480);
+    }
+
+    // Start button
+    var blink = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
+    ctx.fillStyle = 'rgba(52, 152, 219, ' + blink + ')';
+    ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('点击开始', BASE_WIDTH / 2, 550);
+}
+
+function drawBackgroundPattern() {
+    ctx.globalAlpha = 0.06;
+    for (var r = 0; r < 12; r++) {
+        for (var c = 0; c < 8; c++) {
+            ctx.fillStyle = COLORS[(r + c) % COLORS.length];
+            ctx.fillRect(c * 55 + 10, r * 65 + 10, 45, 55);
+        }
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawGame() {
+    var layout = getRegionLayout();
+    var L = LEVELS[level];
+
+    // Draw grid cells with regions
+    for (var i = 0; i < regions.length; i++) {
+        var region = regions[i];
+        var isHover = (hoverRegion === i);
+
+        for (var j = 0; j < region.cells.length; j++) {
+            var cell = region.cells[j];
+            var x = layout.offsetX + cell.c * layout.cellSize;
+            var y = layout.offsetY + cell.r * layout.cellSize;
+            var s = layout.cellSize;
+
+            // Cell background
+            if (region.color >= 0) {
+                ctx.fillStyle = COLORS[region.color];
+                ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+
+                // Inner gradient effect
+                var grad = ctx.createLinearGradient(x, y, x, y + s);
+                grad.addColorStop(0, 'rgba(255,255,255,0.15)');
+                grad.addColorStop(0.5, 'rgba(255,255,255,0)');
+                grad.addColorStop(1, 'rgba(0,0,0,0.15)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+            } else {
+                // Uncolored - subtle pattern
+                ctx.fillStyle = '#1a1a3e';
+                ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+
+                // Dots pattern
+                ctx.fillStyle = '#252550';
+                for (var dx = 8; dx < s - 2; dx += 12) {
+                    for (var dy = 8; dy < s - 2; dy += 12) {
+                        ctx.fillRect(x + dx, y + dy, 2, 2);
+                    }
+                }
+            }
+
+            // Hover highlight
+            if (isHover && region.color === -1) {
+                ctx.fillStyle = COLORS[selectedColor];
+                ctx.globalAlpha = HIGHLIGHT_ALPHA;
+                ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+                ctx.globalAlpha = 1;
+            }
+
+            // Border
+            ctx.strokeStyle = isHover ? '#fff' : '#2a2a5a';
+            ctx.lineWidth = isHover ? 2 : 1;
+            ctx.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+
+            // Region merge indicator: remove internal borders
+            if (j > 0) {
+                // Check if previous cell is adjacent
+                var prev = region.cells[j - 1];
+                if (prev.r === cell.r && prev.c === cell.c - 1) {
+                    // Left border removal
+                    ctx.fillStyle = region.color >= 0 ? COLORS[region.color] : '#1a1a3e';
+                    ctx.fillRect(x, y + 1, 2, s - 2);
+                }
+                if (prev.r === cell.r - 1 && prev.c === cell.c) {
+                    // Top border removal
+                    ctx.fillStyle = region.color >= 0 ? COLORS[region.color] : '#1a1a3e';
+                    ctx.fillRect(x + 1, y, s - 2, 2);
+                }
+            }
+        }
+    }
+
+    // Draw region number hints for uncolored regions
+    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (var i = 0; i < regions.length; i++) {
+        if (regions[i].color === -1) {
+            var cx = 0, cy = 0;
+            for (var j = 0; j < regions[i].cells.length; j++) {
+                cx += layout.offsetX + regions[i].cells[j].c * layout.cellSize + layout.cellSize / 2;
+                cy += layout.offsetY + regions[i].cells[j].r * layout.cellSize + layout.cellSize / 2;
+            }
+            cx /= regions[i].cells.length;
+            cy /= regions[i].cells.length;
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.fillText('' + (i + 1), cx, cy);
+        }
+    }
+}
+
+function drawHUD() {
+    var L = LEVELS[level];
+
+    // Top bar
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, BASE_WIDTH, 100);
+
+    // Level name
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('关卡 ' + (level + 1) + ': ' + L.name, 16, 28);
+
+    // Moves
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('步数: ' + moves + ' / 目标: ' + L.targetMoves, 16, 50);
+
+    // Score
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('总分: ' + totalScore, BASE_WIDTH - 16, 28);
+
+    // High score
+    ctx.fillStyle = '#aaa';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('最高: ' + highScore, BASE_WIDTH - 16, 48);
+
+    // Color palette (bottom)
+    var paletteY = BASE_HEIGHT - 140;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, paletteY - 15, BASE_WIDTH, 90);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#888';
+    ctx.font = '12px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('选择颜色', BASE_WIDTH / 2, paletteY - 2);
+
+    var nc = L.numColors;
+    var paletteSpacing = Math.min(55, (BASE_WIDTH - 60) / nc);
+    var paletteStartX = BASE_WIDTH / 2 - (nc * paletteSpacing) / 2 + paletteSpacing / 2;
+
+    for (var i = 0; i < nc; i++) {
+        var cx = paletteStartX + i * paletteSpacing;
+        var cy = paletteY + 28;
+        var radius = 18;
+
+        // Selected indicator
+        if (selectedColor === i) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = COLORS[i];
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('' + (i + 1), cx, cy + 3);
+
+        ctx.fillStyle = '#aaa';
+        ctx.font = '11px "Segoe UI", Arial, sans-serif';
+        ctx.fillText(COLOR_NAMES[i], cx, cy + 32);
+    }
+
+    // Description
+    ctx.fillStyle = '#666';
+    ctx.font = '12px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(L.desc, BASE_WIDTH / 2, paletteY + 65);
+}
+
+function drawPauseOverlay() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('游戏暂停', BASE_WIDTH / 2, BASE_HEIGHT / 2 - 40);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('按 P / Esc 继续', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 20);
+}
+
+function drawLevelComplete() {
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#2ecc71';
+    ctx.font = 'bold 36px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('关卡完成!', BASE_WIDTH / 2, BASE_HEIGHT / 2 - 100);
+
+    var L = LEVELS[level];
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(L.name + ' - ' + L.desc, BASE_WIDTH / 2, BASE_HEIGHT / 2 - 50);
+
+    ctx.fillStyle = '#ddd';
+    ctx.font = '16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('步数: ' + moves, BASE_WIDTH / 2, BASE_HEIGHT / 2);
+    ctx.fillText('得分: ' + score, BASE_WIDTH / 2, BASE_HEIGHT / 2 + 30);
+
+    if (score > 0) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('总分: ' + totalScore, BASE_WIDTH / 2, BASE_HEIGHT / 2 + 70);
+    }
+
+    var isLast = level >= LEVELS.length - 1;
+    ctx.fillStyle = '#aaa';
+    ctx.font = '15px "Segoe UI", Arial, sans-serif';
+    if (isLast) {
+        ctx.fillText('恭喜通关所有关卡!', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 110);
+        ctx.fillText('点击返回主菜单', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 140);
+    } else {
+        ctx.fillText('点击进入下一关', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 110);
+    }
+}
+
+function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = 'bold 36px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('游戏结束', BASE_WIDTH / 2, BASE_HEIGHT / 2 - 60);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('最终得分: ' + totalScore, BASE_WIDTH / 2, BASE_HEIGHT / 2 - 10);
+
+    if (totalScore >= highScore && totalScore > 0) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('新纪录!', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 25);
+    }
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '15px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('点击重新开始', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 70);
+}
+
+// ============ 更新 ============
+function update() {
+    animTimer++;
+    updateParticles();
+}
+
+// ============ 游戏循环 ============
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// ============ 初始化 ============
+function initGame() {
+    totalScore = 0;
+    level = 0;
+    generateLevel(level);
+}
+
+// ============ 交互处理 ============
+function handleCanvasClick(px, py) {
+    initAudio();
+
+    if (gameState === STATE.MENU) {
+        gameState = STATE.PLAYING;
+        initGame();
+        sfxClick();
+        return;
+    }
+
+    if (gameState === STATE.GAME_OVER) {
+        gameState = STATE.PLAYING;
+        initGame();
+        sfxClick();
+        return;
+    }
+
+    if (gameState === STATE.LEVEL_COMPLETE) {
+        if (level >= LEVELS.length - 1) {
+            gameState = STATE.MENU;
+        } else {
+            level++;
+            generateLevel(level);
+            gameState = STATE.PLAYING;
+        }
+        sfxClick();
+        return;
+    }
+
+    if (gameState === STATE.PAUSED) {
+        return;
+    }
+
+    if (gameState === STATE.PLAYING) {
+        // Check color palette click
+        var paletteY = BASE_HEIGHT - 140;
+        if (py >= paletteY - 15 && py <= paletteY + 75) {
+            var L = LEVELS[level];
+            var nc = L.numColors;
+            var paletteSpacing = Math.min(55, (BASE_WIDTH - 60) / nc);
+            var paletteStartX = BASE_WIDTH / 2 - (nc * paletteSpacing) / 2 + paletteSpacing / 2;
+            for (var i = 0; i < nc; i++) {
+                var cx = paletteStartX + i * paletteSpacing;
+                var dist = Math.sqrt((px - cx) * (px - cx) + (py - (paletteY + 28)) * (py - (paletteY + 28)));
+                if (dist <= 22) {
+                    selectedColor = i;
+                    sfxClick();
+                    return;
+                }
+            }
+        }
+
+        // Check region click
+        var rid = getRegionAtPos(px, py);
+        if (rid >= 0) {
+            tryFillRegion(rid);
+        }
+    }
+}
+
+// Mouse events
+canvas.addEventListener('click', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = BASE_WIDTH / rect.width;
+    var scaleY = BASE_HEIGHT / rect.height;
+    var px = (e.clientX - rect.left) * scaleX;
+    var py = (e.clientY - rect.top) * scaleY;
+    handleCanvasClick(px, py);
+});
+
+canvas.addEventListener('mousemove', function(e) {
+    if (gameState !== STATE.PLAYING) return;
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = BASE_WIDTH / rect.width;
+    var scaleY = BASE_HEIGHT / rect.height;
+    var px = (e.clientX - rect.left) * scaleX;
+    var py = (e.clientY - rect.top) * scaleY;
+    hoverRegion = getRegionAtPos(px, py);
+});
+
+// Touch events
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var touch = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = BASE_WIDTH / rect.width;
+    var scaleY = BASE_HEIGHT / rect.height;
+    var px = (touch.clientX - rect.left) * scaleX;
+    var py = (touch.clientY - rect.top) * scaleY;
+    handleCanvasClick(px, py);
+}, { passive: false });
+
+// Keyboard events
+var keyboardSelectedRegion = -1;
+document.addEventListener('keydown', function(e) {
+    initAudio();
+
+    // Number keys 1-6 for color selection
+    var num = parseInt(e.key);
+    if (num >= 1 && num <= 6 && gameState === STATE.PLAYING) {
+        var L = LEVELS[level];
+        if (num <= L.numColors) {
+            selectedColor = num - 1;
+            sfxClick();
+            return;
+        }
+    }
+
+    // Arrow keys / Tab for region navigation
+    if (gameState === STATE.PLAYING) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            if (regions.length > 0) {
+                keyboardSelectedRegion = (keyboardSelectedRegion + 1) % regions.length;
+                // Skip colored regions
+                var tries = 0;
+                while (regions[keyboardSelectedRegion].color >= 0 && tries < regions.length) {
+                    keyboardSelectedRegion = (keyboardSelectedRegion + 1) % regions.length;
+                    tries++;
+                }
+                hoverRegion = keyboardSelectedRegion;
+                sfxClick();
+            }
+            return;
+        }
+
+        if (e.key === 'Enter' || e.code === 'Space') {
+            e.preventDefault();
+            if (hoverRegion >= 0) {
+                tryFillRegion(hoverRegion);
+            }
+            return;
+        }
+    }
+
+    // Space / Enter for menu actions
+    if (e.code === 'Space' || e.key === 'Enter') {
+        e.preventDefault();
+        if (gameState === STATE.MENU) {
+            gameState = STATE.PLAYING;
+            initGame();
+            sfxClick();
+        } else if (gameState === STATE.GAME_OVER) {
+            gameState = STATE.PLAYING;
+            initGame();
+            sfxClick();
+        } else if (gameState === STATE.LEVEL_COMPLETE) {
+            if (level >= LEVELS.length - 1) {
+                gameState = STATE.MENU;
+            } else {
+                level++;
+                generateLevel(level);
+                gameState = STATE.PLAYING;
+            }
+            sfxClick();
+        }
+        return;
+    }
+
+    // P / Escape for pause
+    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+        if (gameState === STATE.PLAYING) {
+            gameState = STATE.PAUSED;
+            sfxClick();
+        } else if (gameState === STATE.PAUSED) {
+            gameState = STATE.PLAYING;
+            sfxClick();
+        }
+    }
+});
+
+// ============ 响应式画布 ============
+function resizeCanvas() {
+    var ratio = BASE_WIDTH / BASE_HEIGHT;
+    var w = window.innerWidth;
+    var h = window.innerHeight;
+    if (w / h > ratio) {
+        w = h * ratio;
+    } else {
+        h = w / ratio;
+    }
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============ 启动 ============
+gameLoop();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>飞行躲避</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function(){
+"use strict";
+
+/* ===== Canvas Setup ===== */
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+let W,H;
+function resize(){
+    W=canvas.width=window.innerWidth;
+    H=canvas.height=window.innerHeight;
+}
+resize();
+window.addEventListener("resize",resize);
+
+/* ===== Audio System ===== */
+const AudioCtx=window.AudioContext||window.webkitAudioContext;
+let audioCtx=null;
+function ensureAudio(){
+    if(!audioCtx) audioCtx=new AudioCtx();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+}
+function playSound(type){
+    if(!audioCtx) return;
+    const t=audioCtx.currentTime;
+    const o=audioCtx.createOscillator();
+    const g=audioCtx.createGain();
+    o.connect(g);g.connect(audioCtx.destination);
+    switch(type){
+        case"collect":
+            o.type="sine";o.frequency.setValueAtTime(880,t);
+            o.frequency.linearRampToValueAtTime(1320,t+0.1);
+            g.gain.setValueAtTime(0.15,t);g.gain.linearRampToValueAtTime(0,t+0.15);
+            o.start(t);o.stop(t+0.15);break;
+        case"hit":
+            o.type="sawtooth";o.frequency.setValueAtTime(200,t);
+            o.frequency.linearRampToValueAtTime(60,t+0.3);
+            g.gain.setValueAtTime(0.2,t);g.gain.linearRampToValueAtTime(0,t+0.3);
+            o.start(t);o.stop(t+0.3);break;
+        case"powerup":
+            o.type="triangle";o.frequency.setValueAtTime(440,t);
+            o.frequency.linearRampToValueAtTime(880,t+0.15);
+            o.frequency.linearRampToValueAtTime(1320,t+0.3);
+            g.gain.setValueAtTime(0.12,t);g.gain.linearRampToValueAtTime(0,t+0.35);
+            o.start(t);o.stop(t+0.35);break;
+        case"gameover":
+            o.type="square";o.frequency.setValueAtTime(300,t);
+            o.frequency.linearRampToValueAtTime(80,t+0.6);
+            g.gain.setValueAtTime(0.15,t);g.gain.linearRampToValueAtTime(0,t+0.6);
+            o.start(t);o.stop(t+0.6);break;
+        case"click":
+            o.type="sine";o.frequency.setValueAtTime(600,t);
+            g.gain.setValueAtTime(0.08,t);g.gain.linearRampToValueAtTime(0,t+0.08);
+            o.start(t);o.stop(t+0.08);break;
+        case"shield":
+            o.type="sine";o.frequency.setValueAtTime(523,t);
+            o.frequency.setValueAtTime(659,t+0.1);
+            o.frequency.setValueAtTime(784,t+0.2);
+            g.gain.setValueAtTime(0.1,t);g.gain.linearRampToValueAtTime(0,t+0.35);
+            o.start(t);o.stop(t+0.35);break;
+    }
+}
+
+/* ===== Constants ===== */
+const PLAYER_W=36,PLAYER_H=20;
+const GRAVITY=0.35,FLAP_FORCE=-6.5;
+const SCROLL_SPEED_BASE=3;
+const STAR_COUNT=60;
+const CLOUD_COUNT=5;
+const OBSTACLE_INTERVAL_MIN=80;
+const OBSTACLE_INTERVAL_MAX=140;
+const COLLECTIBLE_INTERVAL_MIN=100;
+const COLLECTIBLE_INTERVAL_MAX=180;
+const POWERUP_CHANCE=0.15;
+
+/* ===== Game State ===== */
+const STATE={MENU:0,PLAYING:1,PAUSED:2,GAMEOVER:3};
+let state=STATE.MENU;
+let score=0,highScore=0,distance=0,combo=0,maxCombo=0;
+let scrollSpeed=SCROLL_SPEED_BASE;
+let frameCount=0;
+let obstacleTimer=0,collectibleTimer=0;
+let shakeTimer=0,shakeMag=0;
+let invincibleTimer=0,shieldActive=false,magnetActive=false,slowActive=false;
+let difficultyLevel=0;
+let particles=[];
+let stars=[];
+let clouds=[];
+let obstacles=[];
+let collectibles=[];
+let trails=[];
+
+/* Player */
+let player={x:0,y:0,vy:0,angle:0,alive:true,frame:0};
+
+/* Input */
+let input={up:false,click:false,touchY:0};
+
+/* ===== localStorage ===== */
+try{highScore=parseInt(localStorage.getItem("flightDodge_high"))||0;}catch(e){}
+
+function saveHigh(){
+    try{localStorage.setItem("flightDodge_high",highScore);}catch(e){}
+}
+
+/* ===== Stars / Clouds (Background) ===== */
+function initStars(){
+    stars=[];
+    for(let i=0;i<STAR_COUNT;i++){
+        stars.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.5+0.5,speed:Math.random()*0.5+0.2,brightness:Math.random()*0.5+0.5});
+    }
+}
+function initClouds(){
+    clouds=[];
+    for(let i=0;i<CLOUD_COUNT;i++){
+        clouds.push({x:Math.random()*W,y:Math.random()*H*0.6,w:Math.random()*80+40,h:Math.random()*20+10,alpha:Math.random()*0.15+0.05});
+    }
+}
+initStars();initClouds();
+
+/* ===== Particle System ===== */
+function spawnParticles(x,y,color,count,speed){
+    for(let i=0;i<count;i++){
+        const angle=Math.random()*Math.PI*2;
+        const sp=Math.random()*speed+1;
+        particles.push({x:x,y:y,vx:Math.cos(angle)*sp,vy:Math.sin(angle)*sp,
+            life:1,decay:Math.random()*0.03+0.02,r:Math.random()*3+1,color:color});
+    }
+}
+function spawnTrail(x,y){
+    trails.push({x:x,y:y,life:1,decay:0.05});
+}
+
+/* ===== Obstacle Types ===== */
+function spawnObstacle(){
+    const r=Math.random();
+    if(r<0.35){
+        // Top spike
+        const h=80+Math.random()*120;
+        obstacles.push({type:"spike",x:W+40,y:0,w:40,h:h,passed:false});
+    } else if(r<0.7){
+        // Bottom spike
+        const h=80+Math.random()*120;
+        obstacles.push({type:"spike",x:W+40,y:H-h,w:40,h:h,passed:false});
+    } else if(r<0.85){
+        // Floating rock
+        const ry=100+Math.random()*(H-200);
+        const size=30+Math.random()*30;
+        obstacles.push({type:"rock",x:W+size,y:ry,w:size,h:size,passed:false,
+            angle:0,rotSpeed:(Math.random()-0.5)*0.03});
+    } else {
+        // Moving barrier (oscillates vertically)
+        const bw=30,bh=60;
+        const by=100+Math.random()*(H-200);
+        obstacles.push({type:"barrier",x:W+bw,y:by,w:bw,h:bh,passed:false,
+            baseY:by,amplitude:40+Math.random()*60,freq:0.02+Math.random()*0.02,phase:Math.random()*Math.PI*2});
+    }
+}
+
+/* ===== Collectible Types ===== */
+function spawnCollectible(){
+    const cy=50+Math.random()*(H-100);
+    if(Math.random()<POWERUP_CHANCE){
+        const types=["shield","magnet","slow","life"];
+        const t=types[Math.floor(Math.random()*types.length)];
+        collectibles.push({type:"powerup",subType:t,x:W+20,y:cy,w:22,h:22,collected:false,glow:0});
+    } else {
+        collectibles.push({type:"coin",x:W+15,y:cy,w:16,h:16,collected:false,glow:0});
+    }
+}
+
+/* ===== Reset Game ===== */
+function resetGame(){
+    player={x:W*0.25,y:H*0.5,vy:0,angle:0,alive:true,frame:0};
+    score=0;distance=0;combo=0;maxCombo=0;
+    scrollSpeed=SCROLL_SPEED_BASE;
+    frameCount=0;
+    obstacleTimer=60;collectibleTimer=40;
+    shakeTimer=0;shakeMag=0;
+    invincibleTimer=0;shieldActive=false;magnetActive=false;slowActive=false;
+    difficultyLevel=0;
+    particles=[];obstacles=[];collectibles=[];trails=[];
+}
+
+/* ===== Input Handling ===== */
+function flap(){
+    ensureAudio();
+    if(state===STATE.MENU){
+        state=STATE.PLAYING;
+        resetGame();
+        playSound("click");
+        return;
+    }
+    if(state===STATE.GAMEOVER){
+        if(frameCount>30){
+            state=STATE.MENU;
+            playSound("click");
+        }
+        return;
+    }
+    if(state===STATE.PAUSED){
+        state=STATE.PLAYING;
+        playSound("click");
+        return;
+    }
+    if(state===STATE.PLAYING&&player.alive){
+        player.vy=FLAP_FORCE;
+        playSound("click");
+    }
+}
+
+// Keyboard
+document.addEventListener("keydown",function(e){
+    if(e.code==="Space"||e.code==="ArrowUp"||e.code==="KeyW"){
+        e.preventDefault();
+        input.up=true;
+        flap();
+    }
+    if(e.code==="Escape"||e.code==="KeyP"){
+        if(state===STATE.PLAYING){state=STATE.PAUSED;playSound("click");}
+        else if(state===STATE.PAUSED){state=STATE.PLAYING;playSound("click");}
+    }
+});
+document.addEventListener("keyup",function(e){
+    if(e.code==="Space"||e.code==="ArrowUp"||e.code==="KeyW") input.up=false;
+});
+
+// Mouse
+canvas.addEventListener("mousedown",function(e){
+    e.preventDefault();
+    input.click=true;
+    flap();
+});
+canvas.addEventListener("mouseup",function(){input.click=false;});
+
+// Touch
+canvas.addEventListener("touchstart",function(e){
+    e.preventDefault();
+    input.touchY=e.touches[0].clientY;
+    flap();
+},{passive:false});
+canvas.addEventListener("touchmove",function(e){
+    e.preventDefault();
+    input.touchY=e.touches[0].clientY;
+},{passive:false});
+canvas.addEventListener("touchend",function(e){
+    e.preventDefault();
+},{passive:false});
+
+/* ===== Collision ===== */
+function rectOverlap(a,b){
+    return a.x-a.w/2<b.x+b.w/2&&a.x+a.w/2>b.x-b.w/2&&
+           a.y-a.h/2<b.y+b.h/2&&a.y+a.h/2>b.y-b.h/2;
+}
+
+/* ===== Update ===== */
+function update(){
+    frameCount++;
+
+    // Difficulty ramp
+    difficultyLevel=Math.floor(distance/1000);
+    scrollSpeed=SCROLL_SPEED_BASE+difficultyLevel*0.3;
+    if(slowActive) scrollSpeed*=0.6;
+
+    // Player physics
+    player.vy+=GRAVITY;
+    player.y+=player.vy;
+    player.angle=Math.min(Math.max(player.vy*3,-30),60)*Math.PI/180;
+    player.frame=(player.frame+0.2)%4;
+
+    // Clamp player
+    if(player.y<PLAYER_H/2){player.y=PLAYER_H/2;player.vy=0;}
+    if(player.y>H-PLAYER_H/2){player.y=H-PLAYER_H/2;player.vy=0;die();}
+
+    // Invincibility
+    if(invincibleTimer>0) invincibleTimer--;
+
+    // Spawn obstacles
+    obstacleTimer--;
+    if(obstacleTimer<=0){
+        spawnObstacle();
+        obstacleTimer=OBSTACLE_INTERVAL_MIN+Math.random()*(OBSTACLE_INTERVAL_MAX-OBSTACLE_INTERVAL_MIN)-difficultyLevel*5;
+        if(obstacleTimer<40) obstacleTimer=40;
+    }
+
+    // Spawn collectibles
+    collectibleTimer--;
+    if(collectibleTimer<=0){
+        spawnCollectible();
+        collectibleTimer=COLLECTIBLE_INTERVAL_MIN+Math.random()*(COLLECTIBLE_INTERVAL_MAX-COLLECTIBLE_INTERVAL_MIN);
+    }
+
+    // Update obstacles
+    for(let i=obstacles.length-1;i>=0;i--){
+        const o=obstacles[i];
+        o.x-=scrollSpeed;
+        if(o.type==="rock") o.angle+=o.rotSpeed;
+        if(o.type==="barrier") o.y=o.baseY+Math.sin(frameCount*o.freq+o.phase)*o.amplitude;
+
+        // Score for passing
+        if(!o.passed&&o.x+o.w/2<player.x){
+            o.passed=true;
+            score+=1;
+            combo++;
+            if(combo>maxCombo) maxCombo=combo;
+        }
+
+        // Collision
+        if(player.alive&&invincibleTimer<=0&&!shieldActive){
+            const px={x:player.x,y:player.y,w:PLAYER_W*0.8,h:PLAYER_H*0.7};
+            const ox={x:o.x,y:o.y,w:o.w,h:o.h};
+            if(rectOverlap(px,ox)){
+                if(shieldActive){
+                    shieldActive=false;
+                    invincibleTimer=60;
+                    playSound("shield");
+                    spawnParticles(player.x,player.y,"#00ffff",10,3);
+                } else {
+                    die();
+                }
+            }
+        }
+
+        // Magnet attraction for collectibles
+        if(magnetActive){
+            for(let c of collectibles){
+                if(!c.collected){
+                    const dx=player.x-c.x,dy=player.y-c.y;
+                    const dist=Math.sqrt(dx*dx+dy*dy);
+                    if(dist<200){
+                        c.x+=dx*0.05;
+                        c.y+=dy*0.05;
+                    }
+                }
+            }
+        }
+
+        if(o.x<-100) obstacles.splice(i,1);
+    }
+
+    // Update collectibles
+    for(let i=collectibles.length-1;i>=0;i--){
+        const c=collectibles[i];
+        c.x-=scrollSpeed;
+        c.glow=(c.glow+0.1)%(Math.PI*2);
+
+        if(!c.collected){
+            const dx=player.x-c.x,dy=player.y-c.y;
+            const dist=Math.sqrt(dx*dx+dy*dy);
+            if(dist<25){
+                c.collected=true;
+                if(c.type==="coin"){
+                    score+=5+combo;
+                    spawnParticles(c.x,c.y,"#ffd700",6,2);
+                    playSound("collect");
+                } else {
+                    applyPowerup(c.subType);
+                    spawnParticles(c.x,c.y,"#ff66ff",10,3);
+                    playSound("powerup");
+                }
+            }
+        }
+
+        if(c.x<-30||c.collected) collectibles.splice(i,1);
+    }
+
+    // Update particles
+    for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.life-=p.decay;
+        p.vy+=0.05;
+        if(p.life<=0) particles.splice(i,1);
+    }
+
+    // Update trails
+    for(let i=trails.length-1;i>=0;i--){
+        trails[i].life-=trails[i].decay;
+        if(trails[i].life<=0) trails.splice(i,1);
+    }
+
+    // Player trail
+    if(player.alive&&frameCount%3===0){
+        spawnTrail(player.x-PLAYER_W/2,player.y);
+    }
+
+    // Background scroll
+    for(let s of stars){
+        s.x-=s.speed*scrollSpeed*0.5;
+        if(s.x<-5){s.x=W+5;s.y=Math.random()*H;}
+    }
+    for(let c of clouds){
+        c.x-=scrollSpeed*0.3;
+        if(c.x<-c.w){c.x=W+c.w;c.y=Math.random()*H*0.6;}
+    }
+
+    // Distance
+    distance+=scrollSpeed*0.1;
+
+    // Screen shake
+    if(shakeTimer>0) shakeTimer--;
+
+    // Combo decay (if no hit for 3 seconds)
+    if(frameCount%180===0&&combo>0) combo=0;
+}
+
+function die(){
+    player.alive=false;
+    state=STATE.GAMEOVER;
+    frameCount=0;
+    if(score>highScore){highScore=score;saveHigh();}
+    playSound("gameover");
+    spawnParticles(player.x,player.y,"#ff4444",20,5);
+    shakeTimer=15;shakeMag=8;
+}
+
+function applyPowerup(type){
+    switch(type){
+        case"shield":
+            shieldActive=true;
+            invincibleTimer=300;
+            break;
+        case"magnet":
+            magnetActive=true;
+            setTimeout(function(){magnetActive=false;},8000);
+            break;
+        case"slow":
+            slowActive=true;
+            setTimeout(function(){slowActive=false;},5000);
+            break;
+        case"life":
+            invincibleTimer=120;
+            score+=10;
+            break;
+    }
+}
+
+/* ===== Draw Functions ===== */
+function drawBackground(){
+    // Gradient sky
+    const grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,"#0a0a2e");
+    grad.addColorStop(0.5,"#1a1a4e");
+    grad.addColorStop(1,"#0d0d3d");
+    ctx.fillStyle=grad;
+    ctx.fillRect(0,0,W,H);
+
+    // Stars
+    for(const s of stars){
+        const flicker=0.7+Math.sin(frameCount*0.05+s.x)*0.3;
+        ctx.globalAlpha=s.brightness*flicker;
+        ctx.fillStyle="#ffffff";
+        ctx.beginPath();
+        ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    // Clouds
+    for(const c of clouds){
+        ctx.globalAlpha=c.alpha;
+        ctx.fillStyle="#4466aa";
+        ctx.beginPath();
+        ctx.ellipse(c.x,c.y,c.w,c.h,0,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawTrails(){
+    for(const t of trails){
+        ctx.globalAlpha=t.life*0.4;
+        ctx.fillStyle="#ff8844";
+        ctx.beginPath();
+        ctx.arc(t.x,t.y,3*t.life,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawPlayer(){
+    if(!player.alive) return;
+    ctx.save();
+    ctx.translate(player.x,player.y);
+    ctx.rotate(player.angle);
+
+    // Invincibility flash
+    if(invincibleTimer>0&&Math.floor(invincibleTimer/4)%2===0){
+        ctx.globalAlpha=0.5;
+    }
+
+    // Shield glow
+    if(shieldActive){
+        ctx.strokeStyle="#00ffff";
+        ctx.lineWidth=2;
+        ctx.globalAlpha=0.5+Math.sin(frameCount*0.1)*0.3;
+        ctx.beginPath();
+        ctx.arc(0,0,PLAYER_W*0.8,0,Math.PI*2);
+        ctx.stroke();
+        ctx.globalAlpha=1;
+    }
+
+    // Magnet indicator
+    if(magnetActive){
+        ctx.strokeStyle="#ff66ff";
+        ctx.lineWidth=1;
+        ctx.globalAlpha=0.3+Math.sin(frameCount*0.15)*0.2;
+        ctx.beginPath();
+        ctx.arc(0,0,100,0,Math.PI*2);
+        ctx.stroke();
+        ctx.globalAlpha=1;
+    }
+
+    // Slow indicator
+    if(slowActive){
+        ctx.strokeStyle="#66ff66";
+        ctx.lineWidth=1.5;
+        ctx.globalAlpha=0.4;
+        ctx.beginPath();
+        ctx.arc(0,0,PLAYER_W,0,Math.PI*2);
+        ctx.stroke();
+        ctx.globalAlpha=1;
+    }
+
+    // Aircraft body
+    const wingFlap=Math.sin(player.frame*Math.PI*2)*3;
+
+    // Main body
+    ctx.fillStyle="#e84040";
+    ctx.beginPath();
+    ctx.moveTo(PLAYER_W/2,0);
+    ctx.lineTo(-PLAYER_W/2,-PLAYER_H/2+2);
+    ctx.lineTo(-PLAYER_W/2-4,0);
+    ctx.lineTo(-PLAYER_W/2,PLAYER_H/2-2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Cockpit
+    ctx.fillStyle="#44aaff";
+    ctx.beginPath();
+    ctx.ellipse(PLAYER_W/4,0,5,4,0,0,Math.PI*2);
+    ctx.fill();
+
+    // Top wing
+    ctx.fillStyle="#cc2222";
+    ctx.beginPath();
+    ctx.moveTo(2,-PLAYER_H/2);
+    ctx.lineTo(-10,-PLAYER_H/2-8+wingFlap);
+    ctx.lineTo(-8,-PLAYER_H/2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Bottom wing
+    ctx.beginPath();
+    ctx.moveTo(2,PLAYER_H/2);
+    ctx.lineTo(-10,PLAYER_H/2+8-wingFlap);
+    ctx.lineTo(-8,PLAYER_H/2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Engine glow
+    ctx.fillStyle="#ff8800";
+    ctx.globalAlpha=0.6+Math.random()*0.4;
+    ctx.beginPath();
+    ctx.ellipse(-PLAYER_W/2-6,0,8+Math.random()*4,3,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha=1;
+
+    ctx.restore();
+}
+
+function drawObstacles(){
+    for(const o of obstacles){
+        ctx.save();
+        ctx.translate(o.x,o.y);
+        if(o.type==="spike"){
+            // Spike obstacle
+            const isTop=(o.y===0);
+            const grad=ctx.createLinearGradient(0,isTop?0:o.h,0,isTop?o.h:0);
+            grad.addColorStop(0,"#aa3333");
+            grad.addColorStop(1,"#662222");
+            ctx.fillStyle=grad;
+            if(isTop){
+                ctx.beginPath();
+                ctx.moveTo(-o.w/2,0);
+                ctx.lineTo(-o.w/2+5,o.h);
+                ctx.lineTo(o.w/2-5,o.h);
+                ctx.lineTo(o.w/2,0);
+                ctx.closePath();
+                ctx.fill();
+                // Spikes on bottom edge
+                for(let sx=-o.w/2+8;sx<o.w/2-8;sx+=12){
+                    ctx.fillStyle="#cc4444";
+                    ctx.beginPath();
+                    ctx.moveTo(sx-4,o.h);
+                    ctx.lineTo(sx,o.h-10);
+                    ctx.lineTo(sx+4,o.h);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            } else {
+                ctx.beginPath();
+                ctx.moveTo(-o.w/2,o.h);
+                ctx.lineTo(-o.w/2+5,0);
+                ctx.lineTo(o.w/2-5,0);
+                ctx.lineTo(o.w/2,o.h);
+                ctx.closePath();
+                ctx.fill();
+                // Spikes on top edge
+                for(let sx=-o.w/2+8;sx<o.w/2-8;sx+=12){
+                    ctx.fillStyle="#cc4444";
+                    ctx.beginPath();
+                    ctx.moveTo(sx-4,0);
+                    ctx.lineTo(sx,10);
+                    ctx.lineTo(sx+4,0);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+        } else if(o.type==="rock"){
+            ctx.rotate(o.angle);
+            // Rocky asteroid
+            ctx.fillStyle="#776655";
+            ctx.beginPath();
+            const sides=7;
+            for(let i=0;i<sides;i++){
+                const a=i/sides*Math.PI*2-Math.PI/2;
+                const r=o.w/2*(0.8+Math.sin(i*2.5)*0.2);
+                if(i===0) ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);
+                else ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle="#554433";
+            ctx.lineWidth=2;
+            ctx.stroke();
+            // Crater detail
+            ctx.fillStyle="#665544";
+            ctx.beginPath();
+            ctx.arc(-o.w*0.15,-o.h*0.1,o.w*0.15,0,Math.PI*2);
+            ctx.fill();
+        } else if(o.type==="barrier"){
+            // Moving barrier
+            ctx.fillStyle="#8844cc";
+            ctx.fillRect(-o.w/2,-o.h/2,o.w,o.h);
+            ctx.strokeStyle="#aa66ee";
+            ctx.lineWidth=2;
+            ctx.strokeRect(-o.w/2,-o.h/2,o.w,o.h);
+            // Electric effect
+            ctx.strokeStyle="#dd88ff";
+            ctx.lineWidth=1;
+            ctx.globalAlpha=0.5+Math.random()*0.5;
+            for(let e=0;e<3;e++){
+                const ey=-o.h/2+Math.random()*o.h;
+                ctx.beginPath();
+                ctx.moveTo(-o.w/2,ey);
+                ctx.lineTo(-o.w/2-5-Math.random()*8,ey+(Math.random()-0.5)*10);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(o.w/2,ey);
+                ctx.lineTo(o.w/2+5+Math.random()*8,ey+(Math.random()-0.5)*10);
+                ctx.stroke();
+            }
+            ctx.globalAlpha=1;
+        }
+        ctx.restore();
+    }
+}
+
+function drawCollectibles(){
+    for(const c of collectibles){
+        if(c.collected) continue;
+        ctx.save();
+        ctx.translate(c.x,c.y);
+
+        const pulse=1+Math.sin(c.glow)*0.15;
+        ctx.scale(pulse,pulse);
+
+        if(c.type==="coin"){
+            // Gold coin
+            ctx.fillStyle="#ffd700";
+            ctx.beginPath();
+            ctx.arc(0,0,c.w/2,0,Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle="#ffaa00";
+            ctx.beginPath();
+            ctx.arc(0,0,c.w/3,0,Math.PI*2);
+            ctx.fill();
+            // Shine
+            ctx.fillStyle="#fff8";
+            ctx.beginPath();
+            ctx.arc(-c.w/6,-c.w/6,c.w/6,0,Math.PI*2);
+            ctx.fill();
+        } else {
+            // Power-up
+            const colors={shield:"#00ffff",magnet:"#ff66ff",slow:"#66ff66",life:"#ff6666"};
+            const icons={shield:"S",magnet:"M",slow:"T",life:"+"};
+            ctx.fillStyle=colors[c.subType]||"#fff";
+            ctx.beginPath();
+            // Diamond shape
+            ctx.moveTo(0,-c.w/2);
+            ctx.lineTo(c.w/2,0);
+            ctx.lineTo(0,c.w/2);
+            ctx.lineTo(-c.w/2,0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle="#fff";
+            ctx.lineWidth=1;
+            ctx.stroke();
+            // Icon
+            ctx.fillStyle="#fff";
+            ctx.font="bold 12px sans-serif";
+            ctx.textAlign="center";
+            ctx.textBaseline="middle";
+            ctx.fillText(icons[c.subType]||"?",0,1);
+        }
+        ctx.restore();
+    }
+}
+
+function drawParticles(){
+    for(const p of particles){
+        ctx.globalAlpha=p.life;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.r*p.life,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawHUD(){
+    ctx.save();
+
+    // Score
+    ctx.fillStyle="#fff";
+    ctx.font="bold 22px sans-serif";
+    ctx.textAlign="left";
+    ctx.fillText("分数: "+score,15,35);
+
+    // Distance
+    ctx.font="16px sans-serif";
+    ctx.fillStyle="#aaccff";
+    ctx.fillText("距离: "+Math.floor(distance)+"m",15,58);
+
+    // Combo
+    if(combo>1){
+        ctx.fillStyle="#ffdd44";
+        ctx.font="bold 18px sans-serif";
+        ctx.fillText("连击 x"+combo,15,82);
+    }
+
+    // High score
+    ctx.textAlign="right";
+    ctx.fillStyle="#aaa";
+    ctx.font="14px sans-serif";
+    ctx.fillText("最高分: "+highScore,W-15,35);
+
+    // Power-up indicators
+    let iy=55;
+    if(shieldActive){
+        ctx.fillStyle="#00ffff";
+        ctx.font="13px sans-serif";
+        ctx.fillText("[护盾]",W-15,iy);iy+=18;
+    }
+    if(magnetActive){
+        ctx.fillStyle="#ff66ff";
+        ctx.font="13px sans-serif";
+        ctx.fillText("[磁铁]",W-15,iy);iy+=18;
+    }
+    if(slowActive){
+        ctx.fillStyle="#66ff66";
+        ctx.font="13px sans-serif";
+        ctx.fillText("[减速]",W-15,iy);iy+=18;
+    }
+
+    ctx.restore();
+}
+
+function drawMenu(){
+    drawBackground();
+
+    // Title
+    ctx.fillStyle="#fff";
+    ctx.font="bold 48px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("飞行躲避",W/2,H*0.3);
+
+    // Subtitle
+    ctx.fillStyle="#aaccff";
+    ctx.font="18px sans-serif";
+    ctx.fillText("躲避障碍 | 收集道具 | 挑战高分",W/2,H*0.3+40);
+
+    // High score
+    if(highScore>0){
+        ctx.fillStyle="#ffd700";
+        ctx.font="bold 20px sans-serif";
+        ctx.fillText("最高分: "+highScore,W/2,H*0.3+80);
+    }
+
+    // Play button
+    const btnW=200,btnH=50;
+    const bx=W/2-btnW/2,by=H*0.55;
+    const hover=false;
+    ctx.fillStyle="#e84040";
+    ctx.beginPath();
+    ctx.roundRect(bx,by,btnW,btnH,12);
+    ctx.fill();
+    ctx.fillStyle="#fff";
+    ctx.font="bold 24px sans-serif";
+    ctx.fillText("开始游戏",W/2,by+btnH/2+8);
+
+    // Instructions
+    ctx.fillStyle="#889";
+    ctx.font="14px sans-serif";
+    ctx.fillText("空格/点击/触屏 控制飞行",W/2,H*0.75);
+    ctx.fillText("ESC/P 暂停游戏",W/2,H*0.75+22);
+
+    // Animated aircraft
+    const demoY=H*0.45+Math.sin(frameCount*0.03)*15;
+    ctx.save();
+    ctx.translate(W/2-80,demoY);
+    ctx.fillStyle="#e84040";
+    ctx.beginPath();
+    ctx.moveTo(18,0);
+    ctx.lineTo(-18,-10);
+    ctx.lineTo(-22,0);
+    ctx.lineTo(-18,10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle="#44aaff";
+    ctx.beginPath();
+    ctx.ellipse(9,0,4,3,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawPaused(){
+    ctx.fillStyle="rgba(0,0,0,0.5)";
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle="#fff";
+    ctx.font="bold 36px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("已暂停",W/2,H/2-20);
+    ctx.font="18px sans-serif";
+    ctx.fillStyle="#aaa";
+    ctx.fillText("按 ESC/空格/点击 继续",W/2,H/2+20);
+}
+
+function drawGameOver(){
+    ctx.fillStyle="rgba(0,0,0,0.6)";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#ff4444";
+    ctx.font="bold 40px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("游戏结束",W/2,H*0.3);
+
+    ctx.fillStyle="#fff";
+    ctx.font="bold 28px sans-serif";
+    ctx.fillText("分数: "+score,W/2,H*0.4);
+
+    ctx.fillStyle="#aaccff";
+    ctx.font="18px sans-serif";
+    ctx.fillText("距离: "+Math.floor(distance)+"m",W/2,H*0.4+35);
+
+    if(maxCombo>1){
+        ctx.fillStyle="#ffdd44";
+        ctx.fillText("最大连击: "+maxCombo,W/2,H*0.4+60);
+    }
+
+    if(score>=highScore&&score>0){
+        ctx.fillStyle="#ffd700";
+        ctx.font="bold 20px sans-serif";
+        ctx.fillText("新纪录!",W/2,H*0.4+90);
+    } else {
+        ctx.fillStyle="#888";
+        ctx.font="16px sans-serif";
+        ctx.fillText("最高分: "+highScore,W/2,H*0.4+90);
+    }
+
+    ctx.fillStyle="#aaa";
+    ctx.font="16px sans-serif";
+    ctx.fillText("点击/空格 返回菜单",W/2,H*0.65);
+}
+
+/* ===== Main Loop ===== */
+let lastTime=0;
+const TARGET_DT=1000/60;
+let accumulator=0;
+
+function gameLoop(timestamp){
+    requestAnimationFrame(gameLoop);
+
+    if(!lastTime) lastTime=timestamp;
+    let delta=timestamp-lastTime;
+    lastTime=timestamp;
+    if(delta>100) delta=100;
+    accumulator+=delta;
+
+    while(accumulator>=TARGET_DT){
+        accumulator-=TARGET_DT;
+        if(state===STATE.PLAYING) update();
+        else if(state===STATE.MENU) frameCount++;
+        else if(state===STATE.GAMEOVER) frameCount++;
+    }
+
+    // Render
+    ctx.save();
+
+    // Screen shake
+    if(shakeTimer>0){
+        const sx=(Math.random()-0.5)*shakeMag*(shakeTimer/15);
+        const sy=(Math.random()-0.5)*shakeMag*(shakeTimer/15);
+        ctx.translate(sx,sy);
+    }
+
+    if(state===STATE.MENU){
+        drawMenu();
+    } else if(state===STATE.PLAYING||state===STATE.PAUSED){
+        drawBackground();
+        drawTrails();
+        drawObstacles();
+        drawCollectibles();
+        drawPlayer();
+        drawParticles();
+        drawHUD();
+        if(state===STATE.PAUSED) drawPaused();
+    } else if(state===STATE.GAMEOVER){
+        drawBackground();
+        drawTrails();
+        drawObstacles();
+        drawCollectibles();
+        drawParticles();
+        drawHUD();
+        drawGameOver();
+    }
+
+    ctx.restore();
+}
+
+/* ===== roundRect polyfill ===== */
+if(!ctx.roundRect){
+    CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+        if(typeof r==="number") r=[r,r,r,r];
+        this.moveTo(x+r[0],y);
+        this.lineTo(x+w-r[1],y);
+        this.quadraticCurveTo(x+w,y,x+w,y+r[1]);
+        this.lineTo(x+w,y+h-r[2]);
+        this.quadraticCurveTo(x+w,y+h,x+w-r[2],y+h);
+        this.lineTo(x+r[3],y+h);
+        this.quadraticCurveTo(x,y+h,x,y+h-r[3]);
+        this.lineTo(x,y+r[0]);
+        this.quadraticCurveTo(x,y,x+r[0],y);
+        this.closePath();
+        return this;
+    };
+}
+
+/* ===== Start ===== */
+requestAnimationFrame(gameLoop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

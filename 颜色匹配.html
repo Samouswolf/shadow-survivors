@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>颜色匹配</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Segoe UI',sans-serif}
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;cursor:pointer}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+"use strict";
+(function(){
+
+// ========== CONSTANTS ==========
+var CVS=document.getElementById("gc"),CTX=CVS.getContext("2d");
+var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+var SCORE_KEY="color_match_hi";
+var MAX_TIME=60; // seconds per round
+var COMBO_TIMEOUT=1800; // ms to keep combo alive
+
+// Color palette for the game - vibrant, distinguishable colors
+var COLORS=[
+    {name:"红",fill:"#ff4444",stroke:"#cc0000",light:"#ff8888"},
+    {name:"蓝",fill:"#4488ff",stroke:"#0044cc",light:"#88bbff"},
+    {name:"绿",fill:"#44dd44",stroke:"#228822",light:"#88ff88"},
+    {name:"黄",fill:"#ffdd44",stroke:"#ccaa00",light:"#ffee88"},
+    {name:"紫",fill:"#cc44ff",stroke:"#8800cc",light:"#dd88ff"},
+    {name:"橙",fill:"#ff8844",stroke:"#cc5500",light:"#ffbb88"},
+    {name:"粉",fill:"#ff66aa",stroke:"#cc3377",light:"#ffaacc"},
+    {name:"青",fill:"#44dddd",stroke:"#00aaaa",light:"#88ffee"}
+];
+
+// Difficulty progression
+var LEVELS=[
+    {name:"简单",colors:4,gridCols:2,gridRows:2,showTime:2000,matchTime:5000,scoreMult:1},
+    {name:"普通",colors:4,gridCols:2,gridRows:2,showTime:1500,matchTime:4000,scoreMult:1.5},
+    {name:"进阶",colors:6,gridCols:3,gridRows:2,showTime:1500,matchTime:3500,scoreMult:2},
+    {name:"困难",colors:6,gridCols:3,gridRows:2,showTime:1200,matchTime:3000,scoreMult:2.5},
+    {name:"专家",colors:8,gridCols:4,gridRows:2,showTime:1000,matchTime:2500,scoreMult:3},
+    {name:"大师",colors:8,gridCols:4,gridRows:2,showTime:800,matchTime:2000,scoreMult:4}
+];
+
+// ========== AUDIO ==========
+var audioCtx=null;
+function initAudio(){
+    if(audioCtx)return;
+    try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+    catch(e){}
+}
+function playTone(freq,dur,vol,type){
+    if(!audioCtx)return;
+    try{
+        var o=audioCtx.createOscillator();
+        var g=audioCtx.createGain();
+        o.type=type||"square";
+        o.frequency.value=freq;
+        g.gain.setValueAtTime(vol||0.08,audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxMatch(){playTone(880,0.08,0.1,"sine");setTimeout(function(){playTone(1100,0.1,0.1,"sine")},60)}
+function sfxCombo(n){var base=600+n*80;playTone(base,0.05,0.1,"sine");setTimeout(function(){playTone(base+200,0.06,0.1,"sine")},40);setTimeout(function(){playTone(base+400,0.08,0.1,"sine")},80)}
+function sfxMiss(){playTone(200,0.2,0.08,"triangle")}
+function sfxLevelUp(){playTone(523,0.1,0.1,"sine");setTimeout(function(){playTone(659,0.1,0.1,"sine")},100);setTimeout(function(){playTone(784,0.15,0.12,"sine")},200)}
+function sfxGameOver(){playTone(400,0.2,0.1,"sawtooth");setTimeout(function(){playTone(300,0.2,0.1,"sawtooth")},200);setTimeout(function(){playTone(200,0.4,0.1,"sawtooth")},400)}
+function sfxClick(){playTone(600,0.04,0.06,"sine")}
+
+// ========== GAME STATE ==========
+var STATE_MENU=0,STATE_SHOW=1,STATE_PLAY=2,STATE_PAUSE=3,STATE_OVER=4,STATE_NEXT=5;
+var G={
+    state:STATE_MENU,
+    score:0,
+    hiScore:parseInt(localStorage.getItem(SCORE_KEY))||0,
+    combo:0,
+    maxCombo:0,
+    comboTimer:0,
+    level:0,
+    round:0,
+    time:0,
+    timeLeft:0,
+    totalMatches:0,
+    totalMisses:0,
+    // Grid state
+    grid:[],
+    gridCols:0,
+    gridRows:0,
+    targetColor:0,
+    targetColorIdx:0,
+    showTimer:0,
+    matchTimer:0,
+    // Animation
+    shakeTimer:0,
+    flashTimer:0,
+    flashColor:"",
+    particles:[],
+    // Touch/Click feedback
+    ripple:null,
+    // Menu animation
+    menuAnim:0,
+    // Next level transition
+    nextTimer:0
+};
+
+function resetGame(){
+    G.score=0;G.combo=0;G.maxCombo=0;G.comboTimer=0;
+    G.level=0;G.round=0;G.time=0;G.totalMatches=0;G.totalMisses=0;
+    G.shakeTimer=0;G.flashTimer=0;G.particles=[];G.ripple=null;
+    G.menuAnim=0;G.nextTimer=0;
+    startLevel();
+}
+
+function startLevel(){
+    var lv=LEVELS[G.level];
+    G.gridCols=lv.gridCols;
+    G.gridRows=lv.gridRows;
+    G.round=0;
+    startRound();
+}
+
+function startRound(){
+    var lv=LEVELS[G.level];
+    var totalCells=G.gridCols*G.gridRows;
+
+    // Pick which color indices to use
+    var usedColors=[];
+    var avail=[];
+    for(var i=0;i<COLORS.length;i++) avail.push(i);
+    for(var i=0;i<lv.colors;i++){
+        var idx=Math.floor(Math.random()*avail.length);
+        usedColors.push(avail[idx]);
+        avail.splice(idx,1);
+    }
+
+    // Build grid - each cell gets a color from usedColors
+    G.grid=[];
+    for(var i=0;i<totalCells;i++){
+        G.grid.push({colorIdx:usedColors[i%usedColors.length],matched:false,wrong:false,wrongTimer:0,hover:false,pressAnim:0});
+    }
+    // Shuffle grid
+    for(var i=G.grid.length-1;i>0;i--){
+        var j=Math.floor(Math.random()*(i+1));
+        var tmp=G.grid[i];G.grid[i]=G.grid[j];G.grid[j]=tmp;
+    }
+
+    // Pick target color
+    G.targetColorIdx=usedColors[Math.floor(Math.random()*usedColors.length)];
+    G.targetColor=COLORS[G.targetColorIdx];
+
+    G.showTimer=lv.showTime;
+    G.matchTimer=0;
+    G.state=STATE_SHOW;
+    G.comboTimer=0;
+}
+
+function getCellRect(idx){
+    var lv=LEVELS[G.level];
+    var cols=G.gridCols, rows=G.gridRows;
+    var maxW=W*0.85, maxH=H*0.5;
+    var cellW=Math.min(maxW/cols,140);
+    var cellH=Math.min(maxH/rows,140);
+    var cellSize=Math.min(cellW,cellH);
+    var gap=cellSize*0.12;
+    var totalW=cols*cellSize+(cols-1)*gap;
+    var totalH=rows*cellSize+(rows-1)*gap;
+    var ox=(W-totalW)/2;
+    var oy=H*0.42;
+    var col=idx%cols;
+    var row=Math.floor(idx/cols);
+    return{
+        x:ox+col*(cellSize+gap),
+        y:oy+row*(cellSize+gap),
+        w:cellSize,
+        h:cellSize
+    };
+}
+
+// ========== PARTICLES ==========
+function spawnParticles(x,y,color,count){
+    for(var i=0;i<count;i++){
+        var angle=Math.random()*Math.PI*2;
+        var speed=1+Math.random()*4;
+        G.particles.push({
+            x:x,y:y,
+            vx:Math.cos(angle)*speed,
+            vy:Math.sin(angle)*speed-1,
+            life:1,
+            decay:0.015+Math.random()*0.02,
+            size:3+Math.random()*5,
+            color:color
+        });
+    }
+}
+
+function updateParticles(){
+    for(var i=G.particles.length-1;i>=0;i--){
+        var p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.vy+=0.08;
+        p.life-=p.decay;
+        if(p.life<=0) G.particles.splice(i,1);
+    }
+}
+
+function drawParticles(){
+    for(var i=0;i<G.particles.length;i++){
+        var p=G.particles[i];
+        CTX.globalAlpha=p.life;
+        CTX.fillStyle=p.color;
+        CTX.beginPath();
+        CTX.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+        CTX.fill();
+    }
+    CTX.globalAlpha=1;
+}
+
+// ========== RIPPLE EFFECT ==========
+function spawnRipple(x,y){
+    G.ripple={x:x,y:y,r:0,maxR:80,alpha:0.6};
+}
+
+// ========== INPUT ==========
+var pointerX=0,pointerY=0;
+
+function getPointerPos(e){
+    var r=CVS.getBoundingClientRect();
+    var cx,cy;
+    if(e.touches){
+        cx=e.touches[0].clientX;
+        cy=e.touches[0].clientY;
+    }else{
+        cx=e.clientX;
+        cy=e.clientY;
+    }
+    return{
+        x:(cx-r.left)/r.width*W,
+        y:(cy-r.top)/r.height*H
+    };
+}
+
+function handlePointerDown(px,py){
+    initAudio();
+
+    if(G.state===STATE_MENU){
+        // Check start button
+        var bw=220,bh=56;
+        var bx=W/2-bw/2,by=H*0.62;
+        if(px>=bx&&px<=bx+bw&&py>=by&&py<=by+bh){
+            sfxClick();
+            resetGame();
+        }
+        return;
+    }
+
+    if(G.state===STATE_OVER){
+        var bw=220,bh=56;
+        var bx=W/2-bw/2,by=H*0.72;
+        if(px>=bx&&px<=bx+bw&&py>=by&&py<=by+bh){
+            sfxClick();
+            G.state=STATE_MENU;
+        }
+        return;
+    }
+
+    if(G.state===STATE_PAUSE){
+        // Tap anywhere to resume
+        sfxClick();
+        G.state=STATE_PLAY;
+        return;
+    }
+
+    if(G.state===STATE_NEXT){
+        return; // ignore clicks during transition
+    }
+
+    if(G.state===STATE_SHOW){
+        return; // can't click during show phase
+    }
+
+    if(G.state===STATE_PLAY){
+        spawnRipple(px,py);
+        // Check which cell was clicked
+        for(var i=0;i<G.grid.length;i++){
+            var c=G.grid[i];
+            if(c.matched) continue;
+            var r=getCellRect(i);
+            if(px>=r.x&&px<=r.x+r.w&&py>=r.y&&py<=r.y+r.h){
+                c.pressAnim=1;
+                if(c.colorIdx===G.targetColorIdx){
+                    // Correct match!
+                    c.matched=true;
+                    G.combo++;
+                    G.comboTimer=COMBO_TIMEOUT;
+                    if(G.combo>G.maxCombo) G.maxCombo=G.combo;
+                    var baseScore=10*(G.level+1);
+                    var comboBonus=Math.min(G.combo-1,10)*5;
+                    var pts=(baseScore+comboBonus)*LEVELS[G.level].scoreMult;
+                    G.score+=Math.floor(pts);
+                    G.totalMatches++;
+                    sfxMatch();
+                    if(G.combo>1) sfxCombo(Math.min(G.combo,8));
+                    spawnParticles(r.x+r.w/2,r.y+r.h/2,COLORS[c.colorIdx].fill,12);
+
+                    // Check if all target colors matched
+                    var allDone=true;
+                    for(var j=0;j<G.grid.length;j++){
+                        if(!G.grid[j].matched&&G.grid[j].colorIdx===G.targetColorIdx){
+                            allDone=false;break;
+                        }
+                    }
+                    if(allDone){
+                        G.round++;
+                        // Every 3 rounds, level up (max LEVELS.length-1)
+                        if(G.round>=3&&G.level<LEVELS.length-1){
+                            G.level++;
+                            sfxLevelUp();
+                            G.flashTimer=30;
+                            G.flashColor="#ffffff";
+                            G.state=STATE_NEXT;
+                            G.nextTimer=90;
+                        }else{
+                            startRound();
+                        }
+                    }
+                }else{
+                    // Wrong!
+                    c.wrong=true;
+                    c.wrongTimer=30;
+                    G.combo=0;
+                    G.comboTimer=0;
+                    G.totalMisses++;
+                    G.score=Math.max(0,G.score-5);
+                    G.shakeTimer=10;
+                    sfxMiss();
+                    spawnParticles(r.x+r.w/2,r.y+r.h/2,"#ff0000",6);
+                }
+                return;
+            }
+        }
+    }
+}
+
+function handleKeyDown(e){
+    if(e.key==="p"||e.key==="P"||e.key==="Escape"){
+        if(G.state===STATE_PLAY){G.state=STATE_PAUSE;sfxClick()}
+        else if(G.state===STATE_PAUSE){G.state=STATE_PLAY;sfxClick()}
+        return;
+    }
+    if(G.state===STATE_MENU){
+        if(e.key==="Enter"||e.key===" "){
+            initAudio();sfxClick();resetGame();
+        }
+        return;
+    }
+    if(G.state===STATE_OVER){
+        if(e.key==="Enter"||e.key===" "){
+            sfxClick();G.state=STATE_MENU;
+        }
+        return;
+    }
+    // Number keys 1-9 to select cells
+    if(G.state===STATE_PLAY){
+        var num=parseInt(e.key);
+        if(num>=1&&num<=G.grid.length){
+            var r=getCellRect(num-1);
+            handlePointerDown(r.x+r.w/2,r.y+r.h/2);
+        }
+    }
+}
+
+// Event listeners
+CVS.addEventListener("mousedown",function(e){var p=getPointerPos(e);handlePointerDown(p.x,p.y)});
+CVS.addEventListener("mousemove",function(e){
+    var p=getPointerPos(e);pointerX=p.x;pointerY=p.y;
+    if(G.state===STATE_PLAY){
+        for(var i=0;i<G.grid.length;i++){
+            var r=getCellRect(i);
+            G.grid[i].hover=(p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h);
+        }
+    }
+});
+CVS.addEventListener("touchstart",function(e){e.preventDefault();var p=getPointerPos(e);handlePointerDown(p.x,p.y)},{passive:false});
+CVS.addEventListener("touchmove",function(e){e.preventDefault();var p=getPointerPos(e);pointerX=p.x;pointerY=p.y},{passive:false});
+document.addEventListener("keydown",handleKeyDown);
+
+// ========== RESIZE ==========
+function resize(){
+    W=window.innerWidth;H=window.innerHeight;
+    CVS.width=W*DPR;CVS.height=H*DPR;
+    CVS.style.width=W+"px";CVS.style.height=H+"px";
+    CTX.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener("resize",resize);
+resize();
+
+// ========== DRAW HELPERS ==========
+function drawRoundRect(x,y,w,h,r){
+    CTX.beginPath();
+    CTX.moveTo(x+r,y);
+    CTX.lineTo(x+w-r,y);
+    CTX.quadraticCurveTo(x+w,y,x+w,y+r);
+    CTX.lineTo(x+w,y+h-r);
+    CTX.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    CTX.lineTo(x+r,y+h);
+    CTX.quadraticCurveTo(x,y+h,x,y+h-r);
+    CTX.lineTo(x,y+r);
+    CTX.quadraticCurveTo(x,y,x+r,y);
+    CTX.closePath();
+}
+
+function drawButton(x,y,w,h,text,color,hover){
+    var hov=hover&&pointerX>=x&&pointerX<=x+w&&pointerY>=y&&pointerY<=y+h;
+    CTX.save();
+    if(hov){CTX.shadowColor=color;CTX.shadowBlur=15}
+    CTX.fillStyle=hov?color:"#2a2a4a";
+    drawRoundRect(x,y,w,h,12);
+    CTX.fill();
+    CTX.strokeStyle=color;
+    CTX.lineWidth=2;
+    drawRoundRect(x,y,w,h,12);
+    CTX.stroke();
+    CTX.fillStyle=hov?"#fff":color;
+    CTX.font="bold 20px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText(text,x+w/2,y+h/2);
+    CTX.restore();
+}
+
+// ========== RENDER ==========
+function renderMenu(){
+    // Background gradient
+    var grad=CTX.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,"#1a1a3e");
+    grad.addColorStop(1,"#0a0a2e");
+    CTX.fillStyle=grad;
+    CTX.fillRect(0,0,W,H);
+
+    // Floating color squares animation
+    G.menuAnim+=0.02;
+    for(var i=0;i<12;i++){
+        var angle=G.menuAnim+i*0.524;
+        var cx=W/2+Math.cos(angle)*Math.min(W,H)*0.32;
+        var cy=H*0.35+Math.sin(angle)*Math.min(W,H)*0.22;
+        var size=18+Math.sin(G.menuAnim*2+i)*6;
+        CTX.save();
+        CTX.globalAlpha=0.3+Math.sin(G.menuAnim+i)*0.15;
+        CTX.fillStyle=COLORS[i%COLORS.length].fill;
+        drawRoundRect(cx-size/2,cy-size/2,size,size,4);
+        CTX.fill();
+        CTX.restore();
+    }
+
+    // Title
+    CTX.save();
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(48,W*0.1)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText("颜色匹配",W/2,H*0.25);
+    CTX.fillStyle="#aaa";
+    CTX.font=Math.min(18,W*0.04)+"px 'Segoe UI',sans-serif";
+    CTX.fillText("快速找到目标颜色！连击加分！",W/2,H*0.33);
+
+    // Hi score
+    if(G.hiScore>0){
+        CTX.fillStyle="#ffdd44";
+        CTX.font="bold "+Math.min(16,W*0.035)+"px 'Segoe UI',sans-serif";
+        CTX.fillText("最高分: "+G.hiScore,W/2,H*0.40);
+    }
+
+    // Instructions
+    CTX.fillStyle="#888";
+    CTX.font=Math.min(14,W*0.03)+"px 'Segoe UI',sans-serif";
+    CTX.fillText("屏幕顶部显示目标颜色",W/2,H*0.48);
+    CTX.fillText("在网格中找出所有相同颜色的方块",W/2,H*0.52);
+    CTX.fillText("键盘: 1-9选择方块 | P暂停",W/2,H*0.56);
+    CTX.restore();
+
+    // Start button
+    drawButton(W/2-110,H*0.62,220,56,"开始游戏","#44aaff",true);
+}
+
+function renderShow(){
+    var lv=LEVELS[G.level];
+
+    // Background
+    CTX.fillStyle="#12122a";
+    CTX.fillRect(0,0,W,H);
+
+    // Level info
+    CTX.fillStyle="#aaa";
+    CTX.font=Math.min(16,W*0.035)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText("第 "+(G.level+1)+" 关 - "+lv.name,W/2,H*0.08);
+
+    // Score
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(22,W*0.05)+"px 'Segoe UI',sans-serif";
+    CTX.fillText("分数: "+G.score,W/2,H*0.14);
+
+    // Target color display - big
+    var tSize=Math.min(100,W*0.2);
+    var tx=W/2,ty=H*0.28;
+    CTX.save();
+    CTX.shadowColor=G.targetColor.fill;
+    CTX.shadowBlur=20;
+    CTX.fillStyle=G.targetColor.fill;
+    drawRoundRect(tx-tSize/2,ty-tSize/2,tSize,tSize,16);
+    CTX.fill();
+    CTX.restore();
+    CTX.strokeStyle=G.targetColor.stroke;
+    CTX.lineWidth=3;
+    drawRoundRect(tx-tSize/2,ty-tSize/2,tSize,tSize,16);
+    CTX.stroke();
+
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(24,W*0.05)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";
+    CTX.fillText("记住这个颜色！",W/2,ty+tSize/2+30);
+
+    // Show grid (all colors visible)
+    for(var i=0;i<G.grid.length;i++){
+        var c=G.grid[i];
+        var r=getCellRect(i);
+        CTX.fillStyle=COLORS[c.colorIdx].fill;
+        drawRoundRect(r.x,r.y,r.w,r.h,10);
+        CTX.fill();
+        CTX.strokeStyle=COLORS[c.colorIdx].stroke;
+        CTX.lineWidth=2;
+        drawRoundRect(r.x,r.y,r.w,r.h,10);
+        CTX.stroke();
+    }
+
+    // Countdown bar
+    var pct=G.showTimer/lv.showTime;
+    CTX.fillStyle="rgba(255,255,255,0.1)";
+    drawRoundRect(W*0.1,H*0.9,W*0.8,8,4);
+    CTX.fill();
+    CTX.fillStyle="#44aaff";
+    drawRoundRect(W*0.1,H*0.9,W*0.8*pct,8,4);
+    CTX.fill();
+}
+
+function renderPlay(){
+    var lv=LEVELS[G.level];
+
+    // Background
+    CTX.fillStyle="#12122a";
+    CTX.fillRect(0,0,W,H);
+
+    // Apply screen shake
+    if(G.shakeTimer>0){
+        var sx=(Math.random()-0.5)*G.shakeTimer*1.5;
+        var sy=(Math.random()-0.5)*G.shakeTimer*1.5;
+        CTX.save();
+        CTX.translate(sx,sy);
+    }
+
+    // Top bar info
+    CTX.fillStyle="#aaa";
+    CTX.font=Math.min(16,W*0.035)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText("第 "+(G.level+1)+" 关 - "+lv.name+" | 回合 "+(G.round+1)+"/3",W/2,H*0.06);
+
+    // Score + Combo
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(22,W*0.05)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="left";
+    CTX.fillText("分数: "+G.score,W*0.05,H*0.12);
+
+    if(G.combo>1){
+        CTX.fillStyle="#ffdd44";
+        CTX.font="bold "+Math.min(26,W*0.06)+"px 'Segoe UI',sans-serif";
+        CTX.textAlign="center";
+        CTX.fillText(G.combo+"x 连击!",W/2,H*0.12);
+    }
+
+    // Timer bar
+    var timePct=G.matchTimer/lv.matchTime;
+    CTX.fillStyle="rgba(255,255,255,0.1)";
+    drawRoundRect(W*0.05,H*0.17,W*0.9,6,3);
+    CTX.fill();
+    var timeColor=timePct>0.5?"#44dd44":timePct>0.25?"#ffaa00":"#ff4444";
+    CTX.fillStyle=timeColor;
+    drawRoundRect(W*0.05,H*0.17,W*0.9*timePct,6,3);
+    CTX.fill();
+
+    // Target color - smaller, top area
+    var tSize=Math.min(60,W*0.12);
+    var tx=W/2,ty=H*0.28;
+    CTX.save();
+    CTX.shadowColor=G.targetColor.fill;
+    CTX.shadowBlur=12;
+    CTX.fillStyle=G.targetColor.fill;
+    drawRoundRect(tx-tSize/2,ty-tSize/2,tSize,tSize,10);
+    CTX.fill();
+    CTX.restore();
+    CTX.strokeStyle="#fff";
+    CTX.lineWidth=2;
+    drawRoundRect(tx-tSize/2,ty-tSize/2,tSize,tSize,10);
+    CTX.stroke();
+
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(18,W*0.04)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";
+    CTX.fillText("找出所有这个颜色!",W/2,ty+tSize/2+22);
+
+    // Grid cells - now grayed out (colors hidden)
+    for(var i=0;i<G.grid.length;i++){
+        var c=G.grid[i];
+        var r=getCellRect(i);
+        var pressOff=c.pressAnim>0?c.pressAnim*4:0;
+
+        CTX.save();
+        if(c.matched){
+            CTX.globalAlpha=0.3;
+            CTX.fillStyle="#333";
+            drawRoundRect(r.x+pressOff,r.y+pressOff,r.w-pressOff*2,r.h-pressOff*2,10);
+            CTX.fill();
+            // Checkmark
+            CTX.strokeStyle="#44dd44";
+            CTX.lineWidth=3;
+            CTX.beginPath();
+            CTX.moveTo(r.x+r.w*0.3,r.y+r.h*0.5);
+            CTX.lineTo(r.x+r.w*0.45,r.y+r.h*0.65);
+            CTX.lineTo(r.x+r.w*0.7,r.y+r.h*0.35);
+            CTX.stroke();
+        }else if(c.wrong){
+            CTX.fillStyle="#441111";
+            drawRoundRect(r.x+pressOff,r.y+pressOff,r.w-pressOff*2,r.h-pressOff*2,10);
+            CTX.fill();
+            CTX.strokeStyle="#ff4444";
+            CTX.lineWidth=2;
+            drawRoundRect(r.x+pressOff,r.y+pressOff,r.w-pressOff*2,r.h-pressOff*2,10);
+            CTX.stroke();
+            // X mark
+            CTX.strokeStyle="#ff4444";
+            CTX.lineWidth=3;
+            var cx=r.x+r.w/2,cy=r.y+r.h/2,sz=r.w*0.2;
+            CTX.beginPath();
+            CTX.moveTo(cx-sz,cy-sz);CTX.lineTo(cx+sz,cy+sz);
+            CTX.moveTo(cx+sz,cy-sz);CTX.lineTo(cx-sz,cy+sz);
+            CTX.stroke();
+        }else{
+            // Gray mystery box
+            var bg=c.hover?"#3a3a5a":"#2a2a4a";
+            CTX.fillStyle=bg;
+            drawRoundRect(r.x+pressOff,r.y+pressOff,r.w-pressOff*2,r.h-pressOff*2,10);
+            CTX.fill();
+            CTX.strokeStyle=c.hover?"#666":"#444";
+            CTX.lineWidth=2;
+            drawRoundRect(r.x+pressOff,r.y+pressOff,r.w-pressOff*2,r.h-pressOff*2,10);
+            CTX.stroke();
+            // Question mark
+            CTX.fillStyle=c.hover?"#aaa":"#666";
+            CTX.font="bold "+Math.min(r.w*0.5,40)+"px 'Segoe UI',sans-serif";
+            CTX.textAlign="center";CTX.textBaseline="middle";
+            CTX.fillText("?",r.x+r.w/2,r.y+r.h/2);
+            // Number hint
+            CTX.fillStyle="#555";
+            CTX.font=Math.min(12,W*0.025)+"px 'Segoe UI',sans-serif";
+            CTX.textAlign="right";
+            CTX.fillText(""+(i+1),r.x+r.w-6,r.y+r.h-6);
+        }
+        CTX.restore();
+    }
+
+    // Ripple
+    if(G.ripple){
+        CTX.save();
+        CTX.globalAlpha=G.ripple.alpha;
+        CTX.strokeStyle="#fff";
+        CTX.lineWidth=2;
+        CTX.beginPath();
+        CTX.arc(G.ripple.x,G.ripple.y,G.ripple.r,0,Math.PI*2);
+        CTX.stroke();
+        CTX.restore();
+    }
+
+    // Particles
+    drawParticles();
+
+    if(G.shakeTimer>0) CTX.restore();
+
+    // Flash overlay
+    if(G.flashTimer>0){
+        CTX.save();
+        CTX.globalAlpha=G.flashTimer/30*0.3;
+        CTX.fillStyle=G.flashColor;
+        CTX.fillRect(0,0,W,H);
+        CTX.restore();
+    }
+}
+
+function renderPause(){
+    // Dim overlay
+    CTX.fillStyle="rgba(0,0,0,0.6)";
+    CTX.fillRect(0,0,W,H);
+
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(40,W*0.08)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText("暂停",W/2,H*0.4);
+
+    CTX.fillStyle="#aaa";
+    CTX.font=Math.min(18,W*0.04)+"px 'Segoe UI',sans-serif";
+    CTX.fillText("点击任意位置继续",W/2,H*0.5);
+    CTX.fillText("按 P 或 ESC 键继续",W/2,H*0.55);
+}
+
+function renderNext(){
+    // Background
+    CTX.fillStyle="#12122a";
+    CTX.fillRect(0,0,W,H);
+
+    CTX.fillStyle="#44dd44";
+    CTX.font="bold "+Math.min(36,W*0.07)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText("关卡通过!",W/2,H*0.35);
+
+    CTX.fillStyle="#fff";
+    CTX.font=Math.min(22,W*0.05)+"px 'Segoe UI',sans-serif";
+    CTX.fillText("进入第 "+(G.level+1)+" 关 - "+LEVELS[G.level].name,W/2,H*0.45);
+
+    CTX.fillStyle="#aaa";
+    CTX.font=Math.min(16,W*0.035)+"px 'Segoe UI',sans-serif";
+    CTX.fillText("分数: "+G.score,W/2,H*0.55);
+}
+
+function renderOver(){
+    // Background
+    var grad=CTX.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,"#1a1a3e");
+    grad.addColorStop(1,"#0a0a1e");
+    CTX.fillStyle=grad;
+    CTX.fillRect(0,0,W,H);
+
+    CTX.fillStyle="#ff4444";
+    CTX.font="bold "+Math.min(40,W*0.08)+"px 'Segoe UI',sans-serif";
+    CTX.textAlign="center";CTX.textBaseline="middle";
+    CTX.fillText("时间到!",W/2,H*0.2);
+
+    // Stats
+    CTX.fillStyle="#fff";
+    CTX.font="bold "+Math.min(32,W*0.07)+"px 'Segoe UI',sans-serif";
+    CTX.fillText("最终分数: "+G.score,W/2,H*0.32);
+
+    if(G.score>=G.hiScore&&G.score>0){
+        CTX.fillStyle="#ffdd44";
+        CTX.font="bold "+Math.min(22,W*0.05)+"px 'Segoe UI',sans-serif";
+        CTX.fillText("新纪录!",W/2,H*0.39);
+    }
+
+    CTX.fillStyle="#aaa";
+    CTX.font=Math.min(16,W*0.035)+"px 'Segoe UI',sans-serif";
+    var stats=[
+        "到达关卡: "+(G.level+1)+" - "+LEVELS[G.level].name,
+        "正确匹配: "+G.totalMatches,
+        "失误次数: "+G.totalMisses,
+        "最高连击: "+G.maxCombo+"x",
+        "准确率: "+(G.totalMatches+G.totalMisses>0?Math.round(G.totalMatches/(G.totalMatches+G.totalMisses)*100):0)+"%"
+    ];
+    for(var i=0;i<stats.length;i++){
+        CTX.fillText(stats[i],W/2,H*0.47+i*28);
+    }
+
+    // Restart button
+    drawButton(W/2-110,H*0.72,220,56,"返回菜单","#44aaff",true);
+}
+
+// ========== UPDATE ==========
+function update(){
+    // Update particles
+    updateParticles();
+
+    // Update ripple
+    if(G.ripple){
+        G.ripple.r+=3;
+        G.ripple.alpha-=0.025;
+        if(G.ripple.alpha<=0) G.ripple=null;
+    }
+
+    // Shake decay
+    if(G.shakeTimer>0) G.shakeTimer-=0.5;
+    if(G.flashTimer>0) G.flashTimer--;
+
+    // Cell press animation
+    for(var i=0;i<G.grid.length;i++){
+        if(G.grid[i].pressAnim>0) G.grid[i].pressAnim-=0.05;
+        if(G.grid[i].wrongTimer>0){
+            G.grid[i].wrongTimer--;
+            if(G.grid[i].wrongTimer<=0) G.grid[i].wrong=false;
+        }
+    }
+
+    if(G.state===STATE_SHOW){
+        G.showTimer-=16.67; // ~60fps
+        if(G.showTimer<=0){
+            G.state=STATE_PLAY;
+            G.matchTimer=LEVELS[G.level].matchTime;
+        }
+        return;
+    }
+
+    if(G.state===STATE_PLAY){
+        // Match timer countdown
+        G.matchTimer-=16.67;
+        if(G.matchTimer<=0){
+            // Time's up for this round - game over
+            G.state=STATE_OVER;
+            sfxGameOver();
+            if(G.score>G.hiScore){
+                G.hiScore=G.score;
+                try{localStorage.setItem(SCORE_KEY,""+G.hiScore)}catch(e){}
+            }
+            return;
+        }
+
+        // Combo timer
+        if(G.comboTimer>0){
+            G.comboTimer-=16.67;
+            if(G.comboTimer<=0){
+                G.combo=0;
+            }
+        }
+        return;
+    }
+
+    if(G.state===STATE_NEXT){
+        G.nextTimer--;
+        if(G.nextTimer<=0){
+            startLevel();
+        }
+        return;
+    }
+}
+
+// ========== GAME LOOP ==========
+var lastTime=0;
+function gameLoop(ts){
+    requestAnimationFrame(gameLoop);
+    if(!lastTime) lastTime=ts;
+    var dt=ts-lastTime;
+    if(dt<14){return} // cap at ~60fps
+    lastTime=ts;
+
+    update();
+
+    switch(G.state){
+        case STATE_MENU: renderMenu(); break;
+        case STATE_SHOW: renderShow(); break;
+        case STATE_PLAY: renderPlay(); break;
+        case STATE_PAUSE: renderPlay(); renderPause(); break;
+        case STATE_OVER: renderOver(); break;
+        case STATE_NEXT: renderNext(); break;
+    }
+}
+
+requestAnimationFrame(gameLoop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>像素画板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Segoe UI',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);touch-action:none}
+button{cursor:pointer;border:none;outline:none;font-family:inherit}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(function(){
+"use strict";
+
+/* ====== CONFIG ====== */
+const CANVAS_W = 800, CANVAS_H = 600;
+const GRID_SIZE = 32;           // 32x32 pixel grid
+const PIXEL_SIZE = 14;          // each pixel on canvas
+const GRID_OFFSET_X = 20;
+const GRID_OFFSET_Y = 60;
+const COLORS = [
+    '#000000','#ffffff','#ff0000','#00ff00','#0000ff','#ffff00',
+    '#ff00ff','#00ffff','#ff8800','#8800ff','#00ff88','#ff0088',
+    '#888888','#444444','#ff4444','#44ff44','#4444ff','#ffaa00',
+    '#aa00ff','#00aaff','#884400','#448800','#004488','#880044',
+    '#c0c0c0','#808080','#800000','#008000','#000080','#808000',
+    '#800080','#008080'
+];
+const TOOLBAR_X = 520, TOOLBAR_Y = 60;
+const TOOLBAR_W = 260, TOOLBAR_H = 520;
+const PALETTE_COLS = 4;
+
+/* ====== STATE ====== */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+cv.width = CANVAS_W; cv.height = CANVAS_H;
+
+let state = 'menu'; // menu | play | pause | over
+let grid = [];       // 32x32 array of color indices
+let selectedColor = 0;
+let selectedTool = 'pen'; // pen | eraser | fill | line
+let undoStack = [];
+let redoStack = [];
+let isDrawing = false;
+let lineStart = null;
+let linePreview = null;
+let paletteScroll = 0;
+let highScore = 0;
+let score = 0;
+let timer = 0;
+let timerInterval = null;
+let brushSize = 1;
+let hoverPixel = null;
+let lastPixel = null;
+
+/* ====== AUDIO ====== */
+let audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+}
+function sfxDraw() { playTone(800 + Math.random()*200, 0.05, 'sine', 0.08); }
+function sfxErase() { playTone(300, 0.08, 'triangle', 0.1); }
+function sfxFill() { playTone(600, 0.15, 'sine', 0.12); }
+function sfxClick() { playTone(1000, 0.06, 'square', 0.1); }
+function sfxSave() { playTone(523, 0.1, 'sine', 0.15); setTimeout(() => playTone(659, 0.1, 'sine', 0.15), 100); setTimeout(() => playTone(784, 0.15, 'sine', 0.15), 200); }
+function sfxUndo() { playTone(400, 0.08, 'triangle', 0.1); }
+function sfxNewGame() { playTone(440, 0.08, 'sine', 0.12); setTimeout(() => playTone(554, 0.08, 'sine', 0.12), 80); setTimeout(() => playTone(659, 0.12, 'sine', 0.12), 160); }
+
+/* ====== INIT ====== */
+function initGrid() {
+    grid = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+        grid[y] = [];
+        for (let x = 0; x < GRID_SIZE; x++) {
+            grid[y][x] = 1; // white
+        }
+    }
+}
+function loadHighScore() {
+    try { highScore = parseInt(localStorage.getItem('pixelart_high')) || 0; } catch(e) { highScore = 0; }
+}
+function saveHighScore() {
+    try { localStorage.setItem('pixelart_high', highScore.toString()); } catch(e) {}
+}
+
+/* ====== UNDO/REDO ====== */
+function saveState() {
+    undoStack.push(JSON.stringify(grid));
+    if (undoStack.length > 50) undoStack.shift();
+    redoStack = [];
+}
+function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(JSON.stringify(grid));
+    grid = JSON.parse(undoStack.pop());
+    sfxUndo();
+}
+function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(JSON.stringify(grid));
+    grid = JSON.parse(redoStack.pop());
+    sfxUndo();
+}
+
+/* ====== FLOOD FILL ====== */
+function floodFill(sx, sy, newColor) {
+    const targetColor = grid[sy][sx];
+    if (targetColor === newColor) return;
+    const stack = [[sx, sy]];
+    const visited = new Set();
+    while (stack.length > 0) {
+        const [x, y] = stack.pop();
+        const key = y * GRID_SIZE + x;
+        if (visited.has(key)) continue;
+        if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) continue;
+        if (grid[y][x] !== targetColor) continue;
+        visited.add(key);
+        grid[y][x] = newColor;
+        stack.push([x-1,y],[x+1,y],[x,y-1],[x,y+1]);
+    }
+}
+
+/* ====== Bresenham Line ====== */
+function getLinePixels(x0, y0, x1, y1) {
+    const pixels = [];
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+        pixels.push([x0, y0]);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx) { err += dx; y0 += sy; }
+    }
+    return pixels;
+}
+
+/* ====== SCORE ====== */
+function calcScore() {
+    let filled = 0;
+    for (let y = 0; y < GRID_SIZE; y++)
+        for (let x = 0; x < GRID_SIZE; x++)
+            if (grid[y][x] !== 1) filled++; // not white
+    score = filled;
+    if (score > highScore) { highScore = score; saveHighScore(); }
+}
+
+/* ====== TIMER ====== */
+function startTimer() {
+    timer = 0;
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => { timer++; }, 1000);
+}
+function stopTimer() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+function formatTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+/* ====== INPUT HELPERS ====== */
+function getGridPos(mx, my) {
+    const gx = Math.floor((mx - GRID_OFFSET_X) / PIXEL_SIZE);
+    const gy = Math.floor((my - GRID_OFFSET_Y) / PIXEL_SIZE);
+    if (gx >= 0 && gx < GRID_SIZE && gy >= 0 && gy < GRID_SIZE) return {x: gx, y: gy};
+    return null;
+}
+function applyTool(gx, gy) {
+    if (gx < 0 || gx >= GRID_SIZE || gy < 0 || gy >= GRID_SIZE) return;
+    if (selectedTool === 'pen') {
+        if (grid[gy][gx] !== selectedColor) {
+            grid[gy][gx] = selectedColor;
+            sfxDraw();
+        }
+    } else if (selectedTool === 'eraser') {
+        if (grid[gy][gx] !== 1) {
+            grid[gy][gx] = 1;
+            sfxErase();
+        }
+    } else if (selectedTool === 'fill') {
+        floodFill(gx, gy, selectedColor);
+        sfxFill();
+    }
+}
+function applyBrush(gx, gy) {
+    const half = Math.floor(brushSize / 2);
+    for (let dy = -half; dy <= half; dy++) {
+        for (let dx = -half; dx <= half; dx++) {
+            applyTool(gx + dx, gy + dy);
+        }
+    }
+}
+
+/* ====== BUTTONS ====== */
+const buttons = [];
+function addButton(x, y, w, h, text, action, color) {
+    buttons.push({x, y, w, h, text, action, color: color || '#4a90d9', hover: false});
+}
+function clearButtons() { buttons.length = 0; }
+
+function initMenuButtons() {
+    clearButtons();
+    const cx = CANVAS_W / 2;
+    addButton(cx - 100, 300, 200, 50, '开始创作', () => { startGame(); }, '#4a90d9');
+    addButton(cx - 100, 370, 200, 50, '清除画布', () => { initGrid(); sfxClick(); }, '#e67e22');
+}
+function initGameButtons() {
+    clearButtons();
+    const tx = TOOLBAR_X, ty = TOOLBAR_Y;
+    // Tool buttons
+    addButton(tx, ty, 60, 30, '画笔', () => { selectedTool = 'pen'; sfxClick(); }, selectedTool === 'pen' ? '#2ecc71' : '#555');
+    addButton(tx + 65, ty, 60, 30, '橡皮', () => { selectedTool = 'eraser'; sfxClick(); }, selectedTool === 'eraser' ? '#2ecc71' : '#555');
+    addButton(tx + 130, ty, 60, 30, '填充', () => { selectedTool = 'fill'; sfxClick(); }, selectedTool === 'fill' ? '#2ecc71' : '#555');
+    addButton(tx, ty + 35, 60, 30, '直线', () => { selectedTool = 'line'; sfxClick(); }, selectedTool === 'line' ? '#2ecc71' : '#555');
+    // Brush size
+    addButton(tx + 70, ty + 35, 30, 30, '1', () => { brushSize = 1; sfxClick(); }, brushSize === 1 ? '#3498db' : '#555');
+    addButton(tx + 105, ty + 35, 30, 30, '2', () => { brushSize = 2; sfxClick(); }, brushSize === 2 ? '#3498db' : '#555');
+    addButton(tx + 140, ty + 35, 30, 30, '3', () => { brushSize = 3; sfxClick(); }, brushSize === 3 ? '#3498db' : '#555');
+    // Action buttons
+    addButton(tx, ty + 420, 80, 35, '撤销', () => { undo(); }, '#e67e22');
+    addButton(tx + 85, ty + 420, 80, 35, '重做', () => { redo(); }, '#e67e22');
+    addButton(tx, ty + 460, 80, 35, '保存', () => { saveImage(); }, '#27ae60');
+    addButton(tx + 85, ty + 460, 80, 35, '清除', () => { saveState(); initGrid(); sfxClick(); }, '#e74c3c');
+    addButton(tx + 170, ty + 460, 80, 35, '暂停', () => { pauseGame(); }, '#8e44ad');
+}
+function initPauseButtons() {
+    clearButtons();
+    const cx = CANVAS_W / 2;
+    addButton(cx - 100, 300, 200, 50, '继续创作', () => { resumeGame(); }, '#2ecc71');
+    addButton(cx - 100, 370, 200, 50, '返回菜单', () => { state = 'menu'; initMenuButtons(); stopTimer(); }, '#e74c3c');
+}
+
+/* ====== SAVE IMAGE ====== */
+function saveImage() {
+    calcScore();
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = GRID_SIZE * 8;
+    tempCanvas.height = GRID_SIZE * 8;
+    const tctx = tempCanvas.getContext('2d');
+    for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            tctx.fillStyle = COLORS[grid[y][x]];
+            tctx.fillRect(x * 8, y * 8, 8, 8);
+        }
+    }
+    const link = document.createElement('a');
+    link.download = 'pixel-art-' + Date.now() + '.png';
+    link.href = tempCanvas.toDataURL('image/png');
+    link.click();
+    sfxSave();
+}
+
+/* ====== GAME FLOW ====== */
+function startGame() {
+    initAudio();
+    initGrid();
+    score = 0;
+    undoStack = [];
+    redoStack = [];
+    selectedColor = 0;
+    selectedTool = 'pen';
+    brushSize = 1;
+    lineStart = null;
+    linePreview = null;
+    state = 'play';
+    startTimer();
+    initGameButtons();
+    sfxNewGame();
+}
+function pauseGame() {
+    if (state !== 'play') return;
+    state = 'pause';
+    stopTimer();
+    initPauseButtons();
+    sfxClick();
+}
+function resumeGame() {
+    state = 'play';
+    startTimer();
+    initGameButtons();
+    sfxClick();
+}
+
+/* ====== RENDER ====== */
+function drawMenu() {
+    // Background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    // Title
+    ctx.fillStyle = '#e94560';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('像素画板', CANVAS_W / 2, 120);
+    // Subtitle
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px sans-serif';
+    ctx.fillText('32x32 像素艺术创作工具', CANVAS_W / 2, 160);
+    // Preview pixels
+    const previewColors = [0, 2, 3, 4, 5, 6, 7, 8];
+    for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = COLORS[previewColors[i]];
+        const px = CANVAS_W / 2 - 80 + i * 22;
+        ctx.fillRect(px, 200, 18, 18);
+    }
+    // High score
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('最高填充: ' + highScore + ' 像素', CANVAS_W / 2, 260);
+    // Buttons
+    drawButtons();
+}
+function drawGrid() {
+    // Grid background
+    ctx.fillStyle = '#2c2c54';
+    ctx.fillRect(GRID_OFFSET_X - 2, GRID_OFFSET_Y - 2, GRID_SIZE * PIXEL_SIZE + 4, GRID_SIZE * PIXEL_SIZE + 4);
+    // Pixels
+    for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            ctx.fillStyle = COLORS[grid[y][x]];
+            ctx.fillRect(GRID_OFFSET_X + x * PIXEL_SIZE, GRID_OFFSET_Y + y * PIXEL_SIZE, PIXEL_SIZE - 1, PIXEL_SIZE - 1);
+        }
+    }
+    // Grid lines (subtle)
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= GRID_SIZE; i++) {
+        ctx.beginPath();
+        ctx.moveTo(GRID_OFFSET_X + i * PIXEL_SIZE, GRID_OFFSET_Y);
+        ctx.lineTo(GRID_OFFSET_X + i * PIXEL_SIZE, GRID_OFFSET_Y + GRID_SIZE * PIXEL_SIZE);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(GRID_OFFSET_X, GRID_OFFSET_Y + i * PIXEL_SIZE);
+        ctx.lineTo(GRID_OFFSET_X + GRID_SIZE * PIXEL_SIZE, GRID_OFFSET_Y + i * PIXEL_SIZE);
+        ctx.stroke();
+    }
+    // Line preview
+    if (selectedTool === 'line' && lineStart && linePreview) {
+        const pixels = getLinePixels(lineStart.x, lineStart.y, linePreview.x, linePreview.y);
+        ctx.fillStyle = COLORS[selectedColor] + '80';
+        pixels.forEach(([px, py]) => {
+            ctx.fillRect(GRID_OFFSET_X + px * PIXEL_SIZE, GRID_OFFSET_Y + py * PIXEL_SIZE, PIXEL_SIZE - 1, PIXEL_SIZE - 1);
+        });
+    }
+    // Hover highlight
+    if (hoverPixel && state === 'play') {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        const half = Math.floor(brushSize / 2);
+        const hx = GRID_OFFSET_X + (hoverPixel.x - half) * PIXEL_SIZE;
+        const hy = GRID_OFFSET_Y + (hoverPixel.y - half) * PIXEL_SIZE;
+        const hs = (brushSize * PIXEL_SIZE);
+        ctx.strokeRect(hx, hy, hs, hs);
+    }
+}
+function drawToolbar() {
+    // Toolbar background
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(TOOLBAR_X - 5, TOOLBAR_Y - 5, TOOLBAR_W + 10, TOOLBAR_H + 10);
+    ctx.strokeStyle = '#0f3460';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(TOOLBAR_X - 5, TOOLBAR_Y - 5, TOOLBAR_W + 10, TOOLBAR_H + 10);
+    // Color palette
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('颜色:', TOOLBAR_X, TOOLBAR_Y + 100);
+    const palY = TOOLBAR_Y + 110;
+    const cellSize = 22;
+    const cols = PALETTE_COLS;
+    const visibleRows = 8;
+    for (let i = 0; i < COLORS.length; i++) {
+        const row = Math.floor(i / cols) - paletteScroll;
+        if (row < 0 || row >= visibleRows) continue;
+        const col = i % cols;
+        const px = TOOLBAR_X + col * (cellSize + 4);
+        const py = palY + row * (cellSize + 4);
+        // Color swatch
+        ctx.fillStyle = COLORS[i];
+        ctx.fillRect(px, py, cellSize, cellSize);
+        // Border
+        if (i === selectedColor) {
+            ctx.strokeStyle = '#f1c40f';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(px - 1, py - 1, cellSize + 2, cellSize + 2);
+        } else {
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(px, py, cellSize, cellSize);
+        }
+    }
+    // Palette scroll arrows
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    const maxScroll = Math.ceil(COLORS.length / cols) - visibleRows;
+    if (paletteScroll > 0) ctx.fillText('▲', TOOLBAR_X + 50, palY - 5);
+    if (paletteScroll < maxScroll) ctx.fillText('▼', TOOLBAR_X + 50, palY + visibleRows * (cellSize + 4) + 12);
+    // Current color display
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('当前:', TOOLBAR_X, TOOLBAR_Y + 80);
+    ctx.fillStyle = COLORS[selectedColor];
+    ctx.fillRect(TOOLBAR_X + 40, TOOLBAR_Y + 68, 24, 24);
+    ctx.strokeStyle = '#f1c40f';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(TOOLBAR_X + 40, TOOLBAR_Y + 68, 24, 24);
+    // Buttons
+    drawButtons();
+}
+function drawPlay() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    // Top bar
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(0, 0, CANVAS_W, 50);
+    ctx.fillStyle = '#e94560';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('像素画板', 15, 33);
+    // Score & timer
+    calcScore();
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('填充: ' + score + ' | 时间: ' + formatTime(timer) + ' | 最高: ' + highScore, CANVAS_W - 15, 33);
+    // Draw components
+    drawGrid();
+    drawToolbar();
+}
+function drawPause() {
+    drawPlay();
+    // Overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.fillStyle = '#e94560';
+    ctx.font = 'bold 40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('暂停', CANVAS_W / 2, 220);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('按 ESC 或 P 继续', CANVAS_W / 2, 260);
+    drawButtons();
+}
+function drawButtons() {
+    buttons.forEach(b => {
+        ctx.fillStyle = b.hover ? '#5a9de0' : b.color;
+        roundRect(ctx, b.x, b.y, b.w, b.h, 6);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(b.text, b.x + b.w / 2, b.y + b.h / 2);
+        ctx.textBaseline = 'alphabetic';
+    });
+}
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+/* ====== INPUT ====== */
+function getCanvasPos(e) {
+    const rect = cv.getBoundingClientRect();
+    const scaleX = CANVAS_W / rect.width;
+    const scaleY = CANVAS_H / rect.height;
+    let cx, cy;
+    if (e.touches) {
+        cx = (e.touches[0].clientX - rect.left) * scaleX;
+        cy = (e.touches[0].clientY - rect.top) * scaleY;
+    } else {
+        cx = (e.clientX - rect.left) * scaleX;
+        cy = (e.clientY - rect.top) * scaleY;
+    }
+    return {x: cx, y: cy};
+}
+function handleClick(cx, cy) {
+    // Check buttons
+    for (const b of buttons) {
+        if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+            b.action();
+            return;
+        }
+    }
+    // Check palette
+    if (state === 'play') {
+        const palY = TOOLBAR_Y + 110;
+        const cellSize = 22;
+        for (let i = 0; i < COLORS.length; i++) {
+            const row = Math.floor(i / PALETTE_COLS) - paletteScroll;
+            const col = i % PALETTE_COLS;
+            const px = TOOLBAR_X + col * (cellSize + 4);
+            const py = palY + row * (cellSize + 4);
+            if (cx >= px && cx <= px + cellSize && cy >= py && cy <= py + cellSize) {
+                selectedColor = i;
+                sfxClick();
+                initGameButtons();
+                return;
+            }
+        }
+        // Check palette scroll
+        const maxScroll = Math.ceil(COLORS.length / PALETTE_COLS) - 8;
+        if (cx >= TOOLBAR_X + 30 && cx <= TOOLBAR_X + 70) {
+            if (cy >= palY - 18 && cy <= palY - 2 && paletteScroll > 0) { paletteScroll--; sfxClick(); return; }
+            if (cy >= palY + 8 * (cellSize + 4) + 2 && cy <= palY + 8 * (cellSize + 4) + 18 && paletteScroll < maxScroll) { paletteScroll++; sfxClick(); return; }
+        }
+        // Check grid
+        const gp = getGridPos(cx, cy);
+        if (gp) {
+            if (selectedTool === 'line') {
+                if (!lineStart) {
+                    lineStart = gp;
+                    saveState();
+                } else {
+                    const pixels = getLinePixels(lineStart.x, lineStart.y, gp.x, gp.y);
+                    saveState();
+                    pixels.forEach(([px, py]) => { if (px >= 0 && px < GRID_SIZE && py >= 0 && py < GRID_SIZE) grid[py][px] = selectedColor; });
+                    lineStart = null;
+                    linePreview = null;
+                    sfxDraw();
+                }
+            } else if (selectedTool === 'fill') {
+                saveState();
+                applyTool(gp.x, gp.y);
+            }
+        }
+    }
+}
+function handleMouseDown(e) {
+    e.preventDefault();
+    initAudio();
+    const pos = getCanvasPos(e);
+    handleClick(pos.x, pos.y);
+    if (state === 'play' && selectedTool !== 'line' && selectedTool !== 'fill') {
+        const gp = getGridPos(pos.x, pos.y);
+        if (gp) {
+            isDrawing = true;
+            saveState();
+            applyBrush(gp.x, gp.y);
+            lastPixel = gp;
+        }
+    }
+}
+function handleMouseMove(e) {
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    // Update hover
+    buttons.forEach(b => { b.hover = pos.x >= b.x && pos.x <= b.x + b.w && pos.y >= b.y && pos.y <= b.y + b.h; });
+    if (state === 'play') {
+        const gp = getGridPos(pos.x, pos.y);
+        hoverPixel = gp;
+        if (isDrawing && gp && selectedTool !== 'line' && selectedTool !== 'fill') {
+            // Draw line from last pixel for smooth strokes
+            if (lastPixel) {
+                const pixels = getLinePixels(lastPixel.x, lastPixel.y, gp.x, gp.y);
+                pixels.forEach(([px, py]) => applyBrush(px, py));
+            } else {
+                applyBrush(gp.x, gp.y);
+            }
+            lastPixel = gp;
+        }
+        if (selectedTool === 'line' && lineStart && gp) {
+            linePreview = gp;
+        }
+    }
+}
+function handleMouseUp(e) {
+    e.preventDefault();
+    isDrawing = false;
+    lastPixel = null;
+}
+
+/* Keyboard */
+function handleKey(e) {
+    initAudio();
+    const key = e.key.toLowerCase();
+    if (state === 'menu') {
+        if (key === 'enter' || key === ' ') { startGame(); e.preventDefault(); }
+    } else if (state === 'play') {
+        if (key === 'escape' || key === 'p') { pauseGame(); e.preventDefault(); }
+        else if (key === 'z' && e.ctrlKey) { undo(); e.preventDefault(); }
+        else if (key === 'y' && e.ctrlKey) { redo(); e.preventDefault(); }
+        else if (key === 's' && e.ctrlKey) { saveImage(); e.preventDefault(); }
+        else if (key === '1') { selectedTool = 'pen'; initGameButtons(); sfxClick(); }
+        else if (key === '2') { selectedTool = 'eraser'; initGameButtons(); sfxClick(); }
+        else if (key === '3') { selectedTool = 'fill'; initGameButtons(); sfxClick(); }
+        else if (key === '4') { selectedTool = 'line'; initGameButtons(); sfxClick(); lineStart = null; linePreview = null; }
+        else if (key === '+' || key === '=') { brushSize = Math.min(3, brushSize + 1); initGameButtons(); sfxClick(); }
+        else if (key === '-') { brushSize = Math.max(1, brushSize - 1); initGameButtons(); sfxClick(); }
+    } else if (state === 'pause') {
+        if (key === 'escape' || key === 'p') { resumeGame(); e.preventDefault(); }
+    }
+}
+
+/* ====== EVENT BINDING ====== */
+cv.addEventListener('mousedown', handleMouseDown);
+cv.addEventListener('mousemove', handleMouseMove);
+cv.addEventListener('mouseup', handleMouseUp);
+cv.addEventListener('mouseleave', handleMouseUp);
+cv.addEventListener('touchstart', handleMouseDown, {passive: false});
+cv.addEventListener('touchmove', handleMouseMove, {passive: false});
+cv.addEventListener('touchend', handleMouseUp, {passive: false});
+document.addEventListener('keydown', handleKey);
+
+/* Prevent context menu */
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ====== GAME LOOP ====== */
+function resizeCanvas() {
+    const ratio = CANVAS_W / CANVAS_H;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w / h > ratio) { w = h * ratio; } else { h = w / ratio; }
+    cv.style.width = w + 'px';
+    cv.style.height = h + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+loadHighScore();
+initMenuButtons();
+
+function gameLoop() {
+    if (state === 'menu') drawMenu();
+    else if (state === 'play') drawPlay();
+    else if (state === 'pause') drawPause();
+    requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

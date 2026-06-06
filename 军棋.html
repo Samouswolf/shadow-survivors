@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>军棋</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#1a1510;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:'Microsoft YaHei',sans-serif;touch-action:none;user-select:none}
+canvas{display:block;max-width:100vw;max-height:100vh;cursor:pointer;position:relative;z-index:1}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<div id="startScreen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a12;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1000">
+  <h1 style="font-size:48px;color:#c49bff;margin-bottom:20px">军棋</h1>
+  <p style="color:#888;margin-bottom:40px">经典军棋对战，暗棋玩法，人机AI</p>
+  <button id="startBtn" style="padding:15px 60px;font-size:20px;background:linear-gradient(135deg,#8e44ad,#c49bff);color:#fff;border:none;border-radius:12px;cursor:pointer">开始游戏</button>
+</div>
+<button id="pauseBtn" style="position:fixed;top:10px;right:10px;width:44px;height:44px;font-size:20px;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:8px;z-index:20;display:none">⏸</button>
+<div id="pauseScreen" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);flex-direction:column;align-items:center;justify-content:center;z-index:999">
+  <h2 style="color:#fff;margin-bottom:30px">游戏暂停</h2>
+  <button id="resumeBtn" style="padding:12px 40px;font-size:18px;background:#c49bff;color:#fff;border:none;border-radius:8px;margin-bottom:15px">继续游戏</button>
+  <button id="restartBtn" style="padding:12px 40px;font-size:18px;background:#666;color:#fff;border:none;border-radius:8px">重新开始</button>
+</div>
+<canvas id="gc"></canvas>
+<script>
+(function(){
+'use strict';
+
+// ==================== Constants ====================
+const c = document.getElementById('gc'), ctx = c.getContext('2d');
+const ROWS = 12, COLS = 5;
+const SCREEN = {MENU:0, PLAYING:1, GAMEOVER:2};
+
+// 棋子类型和等级
+const PIECE_TYPES = {
+    '司令': {rank:9, count:1},
+    '军长': {rank:8, count:1},
+    '师长': {rank:7, count:2},
+    '旅长': {rank:6, count:2},
+    '团长': {rank:5, count:2},
+    '营长': {rank:4, count:2},
+    '连长': {rank:3, count:3},
+    '排长': {rank:2, count:3},
+    '工兵': {rank:1, count:3},
+    '地雷': {rank:10, count:2},
+    '炸弹': {rank:11, count:2},
+    '军旗': {rank:0, count:1}
+};
+
+// 行营位置（不可被攻击）
+const CAMPS = [
+    {row:2, col:1}, {row:2, col:3},
+    {row:3, col:2},
+    {row:4, col:1}, {row:4, col:3},
+    {row:7, col:1}, {row:7, col:3},
+    {row:8, col:2},
+    {row:9, col:1}, {row:9, col:3}
+];
+
+// 大本营位置
+const BASES = [
+    {row:0, col:1}, {row:0, col:3},
+    {row:11, col:1}, {row:11, col:3}
+];
+
+// 铁道线位置（可以走多格）
+const RAILS = {
+    horizontal: [
+        {row:1, startCol:0, endCol:4},
+        {row:5, startCol:0, endCol:4},
+        {row:6, startCol:0, endCol:4},
+        {row:10, startCol:0, endCol:4}
+    ],
+    vertical: [
+        {col:0, startRow:1, endRow:5},
+        {col:0, startRow:6, endRow:10},
+        {col:4, startRow:1, endRow:5},
+        {col:4, startRow:6, endRow:10}
+    ]
+};
+
+// ==================== Game State ====================
+let W, H, cellSize, boardX, boardY;
+let screen = SCREEN.MENU;
+let board = []; // 12x5 array
+let selectedPiece = null;
+let currentPlayer = 'red'; // 'red' or 'blue'
+let winner = null;
+let paused = false;
+let animatingPiece = null;
+let lastMove = null;
+let moveCount = 0;
+let scores = {win:0, lose:0};
+let difficulty = 1; // 0=easy, 1=medium
+
+// ==================== Audio ====================
+let audioCtx = null;
+function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playSound(freq, dur, type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    gain.gain.value = 0.3;
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + dur);
+}
+function playMove() { playSound(400, 0.1); }
+function playCapture() { playSound(600, 0.15, 'square'); }
+function playWin() { playSound(800, 0.3); setTimeout(()=>playSound(1000, 0.3), 200); }
+function playLose() { playSound(300, 0.3, 'sawtooth'); setTimeout(()=>playSound(200, 0.3, 'sawtooth'), 200); }
+
+// ==================== Init ====================
+function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    c.addEventListener('click', handleClick);
+    c.addEventListener('mousemove', handleMove);
+    c.addEventListener('touchstart', handleTouch, {passive:false});
+
+    document.getElementById('startBtn').addEventListener('click', function() {
+        document.getElementById('startScreen').style.display = 'none';
+        document.getElementById('pauseBtn').style.display = 'block';
+        initAudio();
+        screen = SCREEN.PLAYING;
+        resetGame();
+        render();
+    });
+
+    document.getElementById('pauseBtn').addEventListener('click', function() {
+        paused = true;
+        document.getElementById('pauseScreen').style.display = 'flex';
+    });
+
+    document.getElementById('resumeBtn').addEventListener('click', function() {
+        paused = false;
+        document.getElementById('pauseScreen').style.display = 'none';
+    });
+
+    document.getElementById('restartBtn').addEventListener('click', function() {
+        paused = false;
+        document.getElementById('pauseScreen').style.display = 'none';
+        resetGame();
+        render();
+    });
+
+    loadScores();
+    render();
+}
+
+function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    c.width = W;
+    c.height = H;
+    cellSize = Math.min((W-60)/(COLS+1), (H-120)/(ROWS+1));
+    boardX = (W - cellSize*(COLS-1))/2;
+    boardY = (H - cellSize*(ROWS-1))/2 + 20;
+}
+
+function loadScores() {
+    try {
+        const s = localStorage.getItem('junqi_scores');
+        if (s) scores = JSON.parse(s);
+    } catch(e) {}
+}
+
+function saveScores() {
+    try {
+        localStorage.setItem('junqi_scores', JSON.stringify(scores));
+    } catch(e) {}
+}
+
+// ==================== Game Logic ====================
+function resetGame() {
+    board = Array(ROWS).fill(null).map(()=>Array(COLS).fill(null));
+    selectedPiece = null;
+    currentPlayer = 'red';
+    winner = null;
+    moveCount = 0;
+
+    // 初始化棋子
+    initPieces('red');
+    initPieces('blue');
+}
+
+function initPieces(color) {
+    const pieces = [];
+    for (const [type, data] of Object.entries(PIECE_TYPES)) {
+        for (let i = 0; i < data.count; i++) {
+            pieces.push({type, rank:data.rank, color, revealed:false});
+        }
+    }
+
+    // 随机打乱
+    for (let i = pieces.length-1; i > 0; i--) {
+        const j = Math.floor(Math.random()*(i+1));
+        [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
+    }
+
+    // 放置到棋盘
+    const startRow = color === 'red' ? 6 : 0;
+    const endRow = color === 'red' ? 11 : 5;
+    let idx = 0;
+    for (let row = startRow; row <= endRow; row++) {
+        for (let col = 0; col < COLS; col++) {
+            if (idx < pieces.length) {
+                board[row][col] = pieces[idx++];
+            }
+        }
+    }
+}
+
+function isCamp(row, col) {
+    return CAMPS.some(c => c.row === row && c.col === col);
+}
+
+function isBase(row, col, color) {
+    if (color === 'red') {
+        return (row === 11 && (col === 1 || col === 3));
+    } else {
+        return (row === 0 && (col === 1 || col === 3));
+    }
+}
+
+function isRail(row, col) {
+    for (const h of RAILS.horizontal) {
+        if (row === h.row && col >= h.startCol && col <= h.endCol) return true;
+    }
+    for (const v of RAILS.vertical) {
+        if (col === v.col && row >= v.startRow && row <= v.endRow) return true;
+    }
+    return false;
+}
+
+function isValidMove(fromRow, fromCol, toRow, toCol) {
+    const piece = board[fromRow][fromCol];
+    if (!piece) return false;
+
+    // 不能移动到自己的棋子上
+    if (board[toRow][toCol] && board[toRow][toCol].color === piece.color) return false;
+
+    // 地雷和军旗不能移动
+    if (piece.type === '地雷' || piece.type === '军旗') return false;
+
+    // 行营内不能被攻击
+    if (board[toRow][toCol] && isCamp(toRow, toCol)) return false;
+
+    const dr = Math.abs(toRow - fromRow);
+    const dc = Math.abs(toCol - fromCol);
+
+    // 普通移动：上下左右一格
+    if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+        return true;
+    }
+
+    // 铁道线移动
+    if (isRail(fromRow, fromCol) && isRail(toRow, toCol)) {
+        // 工兵可以转弯
+        if (piece.type === '工兵') {
+            return canReachByRail(fromRow, fromCol, toRow, toCol);
+        }
+        // 其他棋子只能直线
+        if (fromRow === toRow) {
+            return isRailClearHorizontal(fromRow, fromCol, toCol);
+        }
+        if (fromCol === toCol) {
+            return isRailClearVertical(fromCol, fromRow, toRow);
+        }
+    }
+
+    return false;
+}
+
+function canReachByRail(fromRow, fromCol, toRow, toCol) {
+    // BFS查找路径
+    const visited = new Set();
+    const queue = [{row:fromRow, col:fromCol}];
+    visited.add(`${fromRow},${fromCol}`);
+
+    while (queue.length > 0) {
+        const {row, col} = queue.shift();
+        if (row === toRow && col === toCol) return true;
+
+        const neighbors = [
+            {row:row-1, col}, {row:row+1, col},
+            {row, col:col-1}, {row, col:col+1}
+        ];
+
+        for (const n of neighbors) {
+            if (n.row < 0 || n.row >= ROWS || n.col < 0 || n.col >= COLS) continue;
+            if (visited.has(`${n.row},${n.col}`)) continue;
+            if (!isRail(n.row, n.col)) continue;
+            if (board[n.row][n.col] && board[n.row][n.col].color !== board[fromRow][fromCol].color) continue;
+            visited.add(`${n.row},${n.col}`);
+            queue.push(n);
+        }
+    }
+    return false;
+}
+
+function isRailClearHorizontal(row, fromCol, toCol) {
+    const minCol = Math.min(fromCol, toCol);
+    const maxCol = Math.max(fromCol, toCol);
+    for (let col = minCol+1; col < maxCol; col++) {
+        if (board[row][col]) return false;
+    }
+    return true;
+}
+
+function isRailClearVertical(col, fromRow, toRow) {
+    const minRow = Math.min(fromRow, toRow);
+    const maxRow = Math.max(fromRow, toRow);
+    for (let row = minRow+1; row < maxRow; row++) {
+        if (board[row][col]) return false;
+    }
+    return true;
+}
+
+function canAttack(attacker, defender) {
+    // 炸弹与任何棋子同归于尽
+    if (attacker.type === '炸弹' || defender.type === '炸弹') return 'both';
+
+    // 工兵挖地雷
+    if (attacker.type === '工兵' && defender.type === '地雷') return 'attacker';
+    if (attacker.type === '工兵' && defender.type !== '工兵' && defender.type !== '地雷') return 'defender';
+
+    // 地雷不能被攻击（除了工兵）
+    if (defender.type === '地雷') return 'defender';
+
+    // 军旗只能被吃
+    if (defender.type === '军旗') return 'attacker';
+
+    // 等级比较
+    if (attacker.rank > defender.rank) return 'attacker';
+    if (attacker.rank < defender.rank) return 'defender';
+    return 'both'; // 同归于尽
+}
+
+function movePiece(fromRow, fromCol, toRow, toCol) {
+    const piece = board[fromRow][fromCol];
+    const target = board[toRow][toCol];
+
+    if (target && target.color !== piece.color) {
+        // 攻击
+        const result = canAttack(piece, target);
+        if (result === 'attacker') {
+            playCapture();
+            board[toRow][toCol] = piece;
+            board[fromRow][fromCol] = null;
+        } else if (result === 'defender') {
+            playCapture();
+            board[fromRow][fromCol] = null;
+        } else {
+            playCapture();
+            board[fromRow][fromCol] = null;
+            board[toRow][toCol] = null;
+        }
+    } else {
+        playMove();
+        board[toRow][toCol] = piece;
+        board[fromRow][fromCol] = null;
+    }
+
+    // 揭示棋子
+    piece.revealed = true;
+    if (target) target.revealed = true;
+
+    lastMove = {from:{row:fromRow, col:fromCol}, to:{row:toRow, col:toCol}};
+    moveCount++;
+
+    // 检查胜负
+    checkGameOver();
+
+    // 切换玩家
+    if (!winner) {
+        currentPlayer = currentPlayer === 'red' ? 'blue' : 'red';
+        if (currentPlayer === 'blue') {
+            setTimeout(aiMove, 500);
+        }
+    }
+}
+
+function checkGameOver() {
+    // 检查军旗是否被吃
+    let redFlag = false, blueFlag = false;
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            if (board[row][col]) {
+                if (board[row][col].type === '军旗' && board[row][col].color === 'red') redFlag = true;
+                if (board[row][col].type === '军旗' && board[row][col].color === 'blue') blueFlag = true;
+            }
+        }
+    }
+
+    if (!redFlag) {
+        winner = 'blue';
+        scores.lose++;
+        saveScores();
+        playLose();
+    } else if (!blueFlag) {
+        winner = 'red';
+        scores.win++;
+        saveScores();
+        playWin();
+    }
+}
+
+// ==================== AI Logic ====================
+function aiMove() {
+    if (winner || currentPlayer !== 'blue') return;
+
+    const moves = getAllPossibleMoves('blue');
+    if (moves.length === 0) return;
+
+    // 评估每个移动
+    let bestMove = null;
+    let bestScore = -Infinity;
+
+    for (const move of moves) {
+        const score = evaluateMove(move);
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = move;
+        }
+    }
+
+    if (bestMove) {
+        movePiece(bestMove.fromRow, bestMove.fromCol, bestMove.toRow, bestMove.toCol);
+    }
+}
+
+function getAllPossibleMoves(color) {
+    const moves = [];
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            if (board[row][col] && board[row][col].color === color) {
+                // 检查所有可能的目标位置
+                const targets = getValidTargets(row, col);
+                for (const target of targets) {
+                    moves.push({
+                        fromRow: row,
+                        fromCol: col,
+                        toRow: target.row,
+                        toCol: target.col
+                    });
+                }
+            }
+        }
+    }
+    return moves;
+}
+
+function getValidTargets(row, col) {
+    const targets = [];
+    const piece = board[row][col];
+
+    // 检查上下左右
+    const directions = [{dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}];
+    for (const {dr, dc} of directions) {
+        const newRow = row + dr;
+        const newCol = col + dc;
+        if (newRow >= 0 && newRow < ROWS && newCol >= 0 && newCol < COLS) {
+            if (isValidMove(row, col, newRow, newCol)) {
+                targets.push({row:newRow, col:newCol});
+            }
+        }
+    }
+
+    // 如果在铁道线上，检查铁道移动
+    if (isRail(row, col)) {
+        // 横向
+        for (let c = 0; c < COLS; c++) {
+            if (c !== col && isValidMove(row, col, row, c)) {
+                targets.push({row, col:c});
+            }
+        }
+        // 纵向
+        for (let r = 0; r < ROWS; r++) {
+            if (r !== row && isValidMove(row, col, r, col)) {
+                targets.push({row:r, col});
+            }
+        }
+    }
+
+    return targets;
+}
+
+function evaluateMove(move) {
+    const piece = board[move.fromRow][move.fromCol];
+    const target = board[move.toRow][move.toCol];
+    let score = 0;
+
+    // 基础移动分数
+    score += 10;
+
+    // 如果可以吃子
+    if (target && target.color !== piece.color) {
+        const result = canAttack(piece, target);
+        if (result === 'attacker') {
+            score += 50 + (target.rank * 10); // 吃子奖励
+        } else if (result === 'both') {
+            score += 20; // 同归于尽
+        } else {
+            score -= 30; // 被吃
+        }
+    }
+
+    // 保护军旗
+    if (piece.type === '军旗') {
+        score -= 100; // 不要移动军旗
+    }
+
+    // 优先移动高等级棋子
+    score += piece.rank * 2;
+
+    // 随机性（简单难度）
+    if (difficulty === 0) {
+        score += Math.random() * 20 - 10;
+    }
+
+    return score;
+}
+
+// ==================== Input Handling ====================
+function getBoardPos(x, y) {
+    const col = Math.round((x - boardX) / cellSize);
+    const row = Math.round((y - boardY) / cellSize);
+    if (row >= 0 && row < ROWS && col >= 0 && col < COLS) {
+        return {row, col};
+    }
+    return null;
+}
+
+function handleClick(e) {
+    if (paused || screen !== SCREEN.PLAYING) return;
+    const rect = c.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top) * (H / rect.height);
+    handleInput(x, y);
+}
+
+function handleMove(e) {
+    if (screen !== SCREEN.PLAYING) return;
+    const rect = c.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top) * (H / rect.height);
+    // 悬停效果在render中处理
+}
+
+function handleTouch(e) {
+    e.preventDefault();
+    if (paused || screen !== SCREEN.PLAYING) return;
+    const touch = e.touches[0];
+    const rect = c.getBoundingClientRect();
+    const x = (touch.clientX - rect.left) * (W / rect.width);
+    const y = (touch.clientY - rect.top) * (H / rect.height);
+    handleInput(x, y);
+}
+
+function handleInput(x, y) {
+    if (currentPlayer !== 'red') return;
+
+    const pos = getBoardPos(x, y);
+    if (!pos) return;
+
+    const {row, col} = pos;
+
+    if (selectedPiece) {
+        // 尝试移动
+        if (isValidMove(selectedPiece.row, selectedPiece.col, row, col)) {
+            movePiece(selectedPiece.row, selectedPiece.col, row, col);
+            selectedPiece = null;
+        } else if (board[row][col] && board[row][col].color === 'red') {
+            // 选择新棋子
+            selectedPiece = {row, col};
+        } else {
+            selectedPiece = null;
+        }
+    } else {
+        // 选择棋子
+        if (board[row][col] && board[row][col].color === 'red') {
+            selectedPiece = {row, col};
+        }
+    }
+
+    render();
+}
+
+// ==================== Keyboard ====================
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+        if (screen === SCREEN.PLAYING) {
+            paused = !paused;
+            document.getElementById('pauseScreen').style.display = paused ? 'flex' : 'none';
+        }
+    }
+    if (e.key === 'r' || e.key === 'R') {
+        if (screen === SCREEN.PLAYING) {
+            resetGame();
+            render();
+        }
+    }
+});
+
+// ==================== Rendering ====================
+function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    if (screen === SCREEN.MENU) {
+        renderMenu();
+    } else if (screen === SCREEN.PLAYING) {
+        renderGame();
+    } else if (screen === SCREEN.GAMEOVER) {
+        renderGameOver();
+    }
+}
+
+function renderMenu() {
+    // 已由HTML处理
+}
+
+function renderGame() {
+    // 绘制背景
+    ctx.fillStyle = '#2a2520';
+    ctx.fillRect(0, 0, W, H);
+
+    // 绘制棋盘
+    drawBoard();
+
+    // 绘制棋子
+    drawPieces();
+
+    // 绘制选中效果
+    if (selectedPiece) {
+        const x = boardX + selectedPiece.col * cellSize;
+        const y = boardY + selectedPiece.row * cellSize;
+        ctx.strokeStyle = '#ff0';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x - cellSize/2 + 2, y - cellSize/2 + 2, cellSize - 4, cellSize - 4);
+    }
+
+    // 绘制信息
+    drawInfo();
+}
+
+function drawBoard() {
+    ctx.strokeStyle = '#8b7355';
+    ctx.lineWidth = 2;
+
+    // 绘制网格
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            const x = boardX + col * cellSize;
+            const y = boardY + row * cellSize;
+
+            // 行营高亮
+            if (isCamp(row, col)) {
+                ctx.fillStyle = 'rgba(100, 150, 100, 0.3)';
+                ctx.fillRect(x - cellSize/2, y - cellSize/2, cellSize, cellSize);
+            }
+
+            // 大本营高亮
+            if (isBase(row, col, 'red') || isBase(row, col, 'blue')) {
+                ctx.fillStyle = 'rgba(150, 100, 100, 0.3)';
+                ctx.fillRect(x - cellSize/2, y - cellSize/2, cellSize, cellSize);
+            }
+
+            // 铁道线
+            if (isRail(row, col)) {
+                ctx.strokeStyle = '#a0a0a0';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x - cellSize/2, y - cellSize/2, cellSize, cellSize);
+                ctx.strokeStyle = '#8b7355';
+                ctx.lineWidth = 2;
+            }
+
+            // 单元格边框
+            ctx.strokeRect(x - cellSize/2, y - cellSize/2, cellSize, cellSize);
+        }
+    }
+
+    // 绘制楚河汉界
+    ctx.fillStyle = '#8b7355';
+    ctx.font = `${cellSize/3}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('楚 河', boardX + cellSize * 1.5, boardY + 5.5 * cellSize);
+    ctx.fillText('汉 界', boardX + cellSize * 2.5, boardY + 5.5 * cellSize);
+}
+
+function drawPieces() {
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            const piece = board[row][col];
+            if (!piece) continue;
+
+            const x = boardX + col * cellSize;
+            const y = boardY + row * cellSize;
+            const r = cellSize * 0.4;
+
+            // 棋子背景
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fillStyle = piece.color === 'red' ? '#c0392b' : '#2980b9';
+            ctx.fill();
+            ctx.strokeStyle = piece.color === 'red' ? '#922b21' : '#1f618d';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 棋子文字
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${cellSize/4}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            if (piece.revealed || piece.color === 'red') {
+                ctx.fillText(piece.type.substring(0, 1), x, y);
+            } else {
+                ctx.fillText('?', x, y);
+            }
+        }
+    }
+}
+
+function drawInfo() {
+    ctx.fillStyle = '#fff';
+    ctx.font = `${cellSize/3}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    // 当前玩家
+    const playerText = currentPlayer === 'red' ? '红方回合' : '蓝方回合';
+    ctx.fillText(playerText, 20, 20);
+
+    // 移动计数
+    ctx.fillText(`步数: ${moveCount}`, 20, 20 + cellSize/2);
+
+    // 分数
+    ctx.textAlign = 'right';
+    ctx.fillText(`胜: ${scores.win}`, W - 20, 20);
+    ctx.fillText(`负: ${scores.lose}`, W - 20, 20 + cellSize/2);
+
+    // 操作提示
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#888';
+    ctx.font = `${cellSize/4}px sans-serif`;
+    ctx.fillText('点击选择棋子，再点击目标位置移动', W/2, H - 30);
+}
+
+function renderGameOver() {
+    // 半透明背景
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    // 结果
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${cellSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(winner === 'red' ? '你赢了！' : 'AI赢了！', W/2, H/2 - 50);
+
+    // 按钮
+    const btnW = 160, btnH = 50;
+    const btnX = W/2 - btnW/2;
+    const btnY = H/2 + 50;
+
+    ctx.fillStyle = '#8e44ad';
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${cellSize/3}px sans-serif`;
+    ctx.fillText('再来一局', W/2, btnY + btnH/2);
+
+    // 点击检测
+    c.onclick = function(e) {
+        const rect = c.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (W / rect.width);
+        const y = (e.clientY - rect.top) * (H / rect.height);
+        if (x >= btnX && x <= btnX+btnW && y >= btnY && y <= btnY+btnH) {
+            screen = SCREEN.PLAYING;
+            resetGame();
+            c.onclick = handleClick;
+            render();
+        }
+    };
+}
+
+// ==================== Start ====================
+init();
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

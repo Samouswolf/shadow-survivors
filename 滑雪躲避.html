@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>滑雪躲避</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a1628;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);image-rendering:pixelated}
+#ui{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:10}
+#ui>*{pointer-events:auto}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"></div>
+<script>
+(function(){
+"use strict";
+
+/* ========== CANVAS SETUP ========== */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+let W = 480, H = 720;
+function resize() {
+    const r = Math.min(innerWidth / W, innerHeight / H);
+    canvas.width = W; canvas.height = H;
+    canvas.style.width = (W * r) + "px";
+    canvas.style.height = (H * r) + "px";
+}
+resize();
+window.addEventListener("resize", resize);
+
+/* ========== AUDIO SYSTEM ========== */
+let audioCtx = null;
+function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+}
+
+function playTone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = type || "square";
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+}
+
+function sfxCoin() { playTone(880, 0.08, "square", 0.12); setTimeout(() => playTone(1100, 0.1, "square", 0.1), 60); }
+function sfxHit() { playTone(150, 0.3, "sawtooth", 0.2); }
+function sfxGameOver() { playTone(300, 0.2, "square", 0.15); setTimeout(() => playTone(200, 0.3, "square", 0.12), 200); setTimeout(() => playTone(120, 0.5, "square", 0.1), 400); }
+
+/* ========== CONSTANTS ========== */
+const PLAYER_W = 30, PLAYER_H = 44;
+const SNOW_PARTICLE_COUNT = 80;
+const TREE_TYPES = 3;
+const ROCK_TYPES = 2;
+const BASE_SPEED = 3;
+const MAX_SPEED = 10;
+const SPEED_INCREASE_RATE = 0.0008;
+const COIN_RADIUS = 12;
+const SHIELD_DURATION = 300;
+
+/* ========== GAME STATE ========== */
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAMEOVER: 3 };
+let G = {};
+
+function resetGame() {
+    G = {
+        state: STATE.MENU,
+        score: 0,
+        highScore: parseInt(localStorage.getItem("ski_high") || "0"),
+        speed: BASE_SPEED,
+        distance: 0,
+        playerX: W / 2,
+        playerY: H * 0.75,
+        playerVX: 0,
+        tilt: 0,
+        obstacles: [],
+        coins: [],
+        particles: [],
+        snowParticles: [],
+        shakeTimer: 0,
+        shakeIntensity: 0,
+        shieldTimer: 0,
+        combo: 0,
+        comboTimer: 0,
+        spawnTimer: 0,
+        coinSpawnTimer: 0,
+        difficulty: 1,
+        lastTime: 0,
+        invincibleTimer: 0
+    };
+    // Init snow
+    for (let i = 0; i < SNOW_PARTICLE_COUNT; i++) {
+        G.snowParticles.push({
+            x: Math.random() * W,
+            y: Math.random() * H,
+            size: Math.random() * 3 + 1,
+            speedY: Math.random() * 1 + 0.5,
+            speedX: Math.random() * 0.6 - 0.3,
+            opacity: Math.random() * 0.5 + 0.3
+        });
+    }
+}
+
+/* ========== OBSTACLE GENERATION ========== */
+function spawnObstacle() {
+    const type = Math.random();
+    let w, h, color, dark, isRock;
+    if (type < 0.55) {
+        // Tree
+        isRock = false;
+        const t = Math.floor(Math.random() * TREE_TYPES);
+        w = 24 + t * 8;
+        h = 40 + t * 12;
+        color = ["#2d5a1e", "#1e4d12", "#267a1e"][t];
+        dark = ["#1a3a10", "#0f2e08", "#1a5a10"][t];
+    } else {
+        // Rock
+        isRock = true;
+        const t = Math.floor(Math.random() * ROCK_TYPES);
+        w = 30 + t * 15;
+        h = 22 + t * 10;
+        color = ["#7a7a7a", "#5a5a5a"][t];
+        dark = ["#555", "#444"][t];
+    }
+    G.obstacles.push({
+        x: Math.random() * (W - w - 40) + 20,
+        y: -h - 20,
+        w: w, h: h,
+        color: color,
+        dark: dark,
+        isRock: isRock,
+        passed: false
+    });
+}
+
+function spawnCoin() {
+    G.coins.push({
+        x: Math.random() * (W - 60) + 30,
+        y: -30,
+        r: COIN_RADIUS,
+        collected: false,
+        glow: 0
+    });
+}
+
+/* ========== PARTICLE SYSTEM ========== */
+function emitParticles(x, y, count, color, speedMul) {
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const spd = (Math.random() * 3 + 1) * (speedMul || 1);
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            life: 1,
+            decay: Math.random() * 0.03 + 0.02,
+            size: Math.random() * 4 + 2,
+            color: color || "#fff"
+        });
+    }
+}
+
+/* ========== DRAWING HELPERS ========== */
+function drawRoundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function drawTree(x, y, w, h) {
+    // Trunk
+    ctx.fillStyle = "#5a3a1a";
+    ctx.fillRect(x + w/2 - 4, y + h - 12, 8, 12);
+    // Layers
+    const layers = 3;
+    for (let i = 0; i < layers; i++) {
+        const ly = y + i * (h * 0.3);
+        const lw = w * (1 - i * 0.2);
+        const lh = h * 0.45;
+        ctx.fillStyle = i === 0 ? "#2d5a1e" : i === 1 ? "#267a1e" : "#1e4d12";
+        ctx.beginPath();
+        ctx.moveTo(x + w/2, ly);
+        ctx.lineTo(x + w/2 + lw/2, ly + lh);
+        ctx.lineTo(x + w/2 - lw/2, ly + lh);
+        ctx.closePath();
+        ctx.fill();
+        // Snow on tree
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.beginPath();
+        ctx.moveTo(x + w/2 - lw/3, ly + lh * 0.2);
+        ctx.lineTo(x + w/2, ly + lh * 0.05);
+        ctx.lineTo(x + w/2 + lw/3, ly + lh * 0.25);
+        ctx.lineTo(x + w/2 + lw/5, ly + lh * 0.3);
+        ctx.lineTo(x + w/2 - lw/5, ly + lh * 0.25);
+        ctx.closePath();
+        ctx.fill();
+    }
+}
+
+function drawRock(x, y, w, h) {
+    ctx.fillStyle = "#7a7a7a";
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.1, y + h);
+    ctx.lineTo(x, y + h * 0.5);
+    ctx.quadraticCurveTo(x + w * 0.15, y, x + w * 0.4, y + h * 0.1);
+    ctx.lineTo(x + w * 0.6, y);
+    ctx.quadraticCurveTo(x + w, y + h * 0.15, x + w, y + h * 0.6);
+    ctx.lineTo(x + w * 0.9, y + h);
+    ctx.closePath();
+    ctx.fill();
+    // Highlight
+    ctx.fillStyle = "rgba(255,255,255,0.15)";
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.2, y + h * 0.6);
+    ctx.quadraticCurveTo(x + w * 0.3, y + h * 0.2, x + w * 0.5, y + h * 0.15);
+    ctx.quadraticCurveTo(x + w * 0.55, y + h * 0.3, x + w * 0.45, y + h * 0.5);
+    ctx.closePath();
+    ctx.fill();
+}
+
+function drawPlayer(x, y, tilt) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt * 0.3);
+    // Body (jacket)
+    ctx.fillStyle = "#e63946";
+    drawRoundRect(-12, -8, 24, 28, 4);
+    ctx.fill();
+    // Head
+    ctx.fillStyle = "#ffd6a5";
+    ctx.beginPath();
+    ctx.arc(0, -16, 10, 0, Math.PI * 2);
+    ctx.fill();
+    // Goggles
+    ctx.fillStyle = "#1d3557";
+    ctx.fillRect(-8, -20, 16, 5);
+    ctx.fillStyle = "#a8dadc";
+    ctx.fillRect(-7, -19, 6, 3);
+    ctx.fillRect(1, -19, 6, 3);
+    // Helmet
+    ctx.fillStyle = "#457b9d";
+    ctx.beginPath();
+    ctx.arc(0, -20, 11, Math.PI, 0);
+    ctx.fill();
+    // Skis
+    ctx.fillStyle = "#2a9d8f";
+    ctx.fillRect(-18, 18, 10, 3);
+    ctx.fillRect(8, 18, 10, 3);
+    // Legs
+    ctx.fillStyle = "#264653";
+    ctx.fillRect(-8, 14, 6, 6);
+    ctx.fillRect(2, 14, 6, 6);
+    // Shield effect
+    if (G.shieldTimer > 0) {
+        ctx.strokeStyle = "rgba(0,200,255,0.6)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 4, 28, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(0,200,255,0.1)";
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawCoin(x, y, r, glow) {
+    const pulse = Math.sin(glow) * 2;
+    ctx.fillStyle = "#ffd700";
+    ctx.beginPath();
+    ctx.arc(x, y, r + pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffed4a";
+    ctx.beginPath();
+    ctx.arc(x - 2, y - 2, r * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    // $ symbol
+    ctx.fillStyle = "#b8860b";
+    ctx.font = "bold " + Math.round(r) + "px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("$", x, y + 1);
+}
+
+/* ========== INPUT HANDLING ========== */
+const keys = {};
+let mouseX = W / 2;
+let touchActive = false;
+let touchX = W / 2;
+
+document.addEventListener("keydown", function(e) {
+    keys[e.code] = true;
+    if (e.code === "Space" || e.code === "Escape") {
+        e.preventDefault();
+        handlePause();
+    }
+    if (e.code === "Enter" || e.code === "Space") {
+        if (G.state === STATE.MENU) startGame();
+        else if (G.state === STATE.GAMEOVER) { resetGame(); startGame(); }
+    }
+});
+
+document.addEventListener("keyup", function(e) { keys[e.code] = false; });
+
+canvas.addEventListener("mousemove", function(e) {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) / rect.width * W;
+});
+
+canvas.addEventListener("click", function(e) {
+    ensureAudio();
+    if (G.state === STATE.MENU) startGame();
+    else if (G.state === STATE.GAMEOVER) { resetGame(); startGame(); }
+});
+
+canvas.addEventListener("touchstart", function(e) {
+    e.preventDefault();
+    ensureAudio();
+    touchActive = true;
+    const rect = canvas.getBoundingClientRect();
+    touchX = (e.touches[0].clientX - rect.left) / rect.width * W;
+    if (G.state === STATE.MENU) startGame();
+    else if (G.state === STATE.GAMEOVER) { resetGame(); startGame(); }
+}, { passive: false });
+
+canvas.addEventListener("touchmove", function(e) {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    touchX = (e.touches[0].clientX - rect.left) / rect.width * W;
+}, { passive: false });
+
+canvas.addEventListener("touchend", function(e) {
+    e.preventDefault();
+    touchActive = false;
+}, { passive: false });
+
+function handlePause() {
+    if (G.state === STATE.PLAYING) {
+        G.state = STATE.PAUSED;
+    } else if (G.state === STATE.PAUSED) {
+        G.state = STATE.PLAYING;
+        G.lastTime = performance.now();
+    }
+}
+
+/* ========== GAME LOGIC ========== */
+function startGame() {
+    G.state = STATE.PLAYING;
+    G.score = 0;
+    G.speed = BASE_SPEED;
+    G.distance = 0;
+    G.playerX = W / 2;
+    G.playerVX = 0;
+    G.tilt = 0;
+    G.obstacles = [];
+    G.coins = [];
+    G.particles = [];
+    G.shakeTimer = 0;
+    G.shieldTimer = 0;
+    G.combo = 0;
+    G.comboTimer = 0;
+    G.spawnTimer = 0;
+    G.coinSpawnTimer = 0;
+    G.difficulty = 1;
+    G.invincibleTimer = 0;
+    G.lastTime = performance.now();
+}
+
+function updateGame(dt) {
+    if (G.state !== STATE.PLAYING) return;
+
+    const dtSec = dt / 1000;
+
+    // Speed increase
+    G.speed = Math.min(MAX_SPEED, BASE_SPEED + G.distance * SPEED_INCREASE_RATE);
+    G.distance += G.speed * dtSec * 10;
+    G.difficulty = 1 + Math.floor(G.distance / 500);
+
+    // Player movement
+    let moveDir = 0;
+    if (keys["ArrowLeft"] || keys["KeyA"]) moveDir = -1;
+    if (keys["ArrowRight"] || keys["KeyD"]) moveDir = 1;
+
+    if (touchActive) {
+        const dx = touchX - G.playerX;
+        if (Math.abs(dx) > 5) moveDir = dx > 0 ? 1 : -1;
+    }
+
+    // Mouse following
+    const mdx = mouseX - G.playerX;
+    if (Math.abs(mdx) > 10) {
+        moveDir = mdx > 0 ? 1 : -1;
+    }
+
+    G.playerVX += moveDir * 0.8;
+    G.playerVX *= 0.88; // friction
+    G.playerX += G.playerVX;
+    G.tilt = G.playerVX * 0.05;
+
+    // Clamp player
+    if (G.playerX < PLAYER_W/2) { G.playerX = PLAYER_W/2; G.playerVX = 0; }
+    if (G.playerX > W - PLAYER_W/2) { G.playerX = W - PLAYER_W/2; G.playerVX = 0; }
+
+    // Spawn obstacles
+    G.spawnTimer += dt;
+    const spawnInterval = Math.max(400, 1200 - G.difficulty * 80);
+    if (G.spawnTimer > spawnInterval) {
+        G.spawnTimer = 0;
+        spawnObstacle();
+        // Extra obstacles at higher difficulty
+        if (G.difficulty > 3 && Math.random() < 0.3) spawnObstacle();
+    }
+
+    // Spawn coins
+    G.coinSpawnTimer += dt;
+    if (G.coinSpawnTimer > 2000) {
+        G.coinSpawnTimer = 0;
+        spawnCoin();
+    }
+
+    // Update obstacles
+    for (let i = G.obstacles.length - 1; i >= 0; i--) {
+        const ob = G.obstacles[i];
+        ob.y += G.speed;
+        // Collision
+        if (!ob.passed && G.invincibleTimer <= 0) {
+            const px = G.playerX, py = G.playerY;
+            const pw = PLAYER_W * 0.6, ph = PLAYER_H * 0.7;
+            if (px + pw/2 > ob.x && px - pw/2 < ob.x + ob.w &&
+                py + ph/2 > ob.y && py - ph/2 < ob.y + ob.h) {
+                if (G.shieldTimer > 0) {
+                    G.shieldTimer = 0;
+                    emitParticles(G.playerX, G.playerY, 15, "#00ccff", 1.5);
+                    G.obstacles.splice(i, 1);
+                    continue;
+                } else {
+                    gameOver();
+                    return;
+                }
+            }
+        }
+        // Score for passing
+        if (!ob.passed && ob.y > G.playerY + PLAYER_H) {
+            ob.passed = true;
+            G.score += 1;
+        }
+        // Remove off screen
+        if (ob.y > H + 50) {
+            G.obstacles.splice(i, 1);
+        }
+    }
+
+    // Update coins
+    for (let i = G.coins.length - 1; i >= 0; i--) {
+        const c = G.coins[i];
+        c.y += G.speed;
+        c.glow += 0.08;
+        // Collect
+        const dx = G.playerX - c.x;
+        const dy = G.playerY - c.y;
+        if (Math.sqrt(dx*dx + dy*dy) < c.r + 20) {
+            c.collected = true;
+            G.score += 10 * (1 + G.combo * 0.5);
+            G.combo++;
+            G.comboTimer = 120;
+            sfxCoin();
+            emitParticles(c.x, c.y, 8, "#ffd700", 1);
+            G.coins.splice(i, 1);
+            continue;
+        }
+        if (c.y > H + 30) G.coins.splice(i, 1);
+    }
+
+    // Combo decay
+    if (G.comboTimer > 0) {
+        G.comboTimer -= dt / 16;
+        if (G.comboTimer <= 0) G.combo = 0;
+    }
+
+    // Shield timer
+    if (G.shieldTimer > 0) G.shieldTimer -= dt / 16;
+
+    // Invincible timer
+    if (G.invincibleTimer > 0) G.invincibleTimer -= dt / 16;
+
+    // Random shield spawn (rare)
+    if (Math.random() < 0.0003 * G.difficulty && G.shieldTimer <= 0) {
+        G.shieldTimer = SHIELD_DURATION;
+        emitParticles(G.playerX, G.playerY, 20, "#00ccff", 1.2);
+    }
+
+    // Update particles
+    for (let i = G.particles.length - 1; i >= 0; i--) {
+        const p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= p.decay;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+
+    // Update snow
+    for (const s of G.snowParticles) {
+        s.y += s.speedY + G.speed * 0.3;
+        s.x += s.speedX;
+        if (s.y > H) { s.y = -5; s.x = Math.random() * W; }
+        if (s.x < 0) s.x = W;
+        if (s.x > W) s.x = 0;
+    }
+
+    // Shake decay
+    if (G.shakeTimer > 0) G.shakeTimer -= dt / 16;
+
+    // Update score from distance
+    G.score = Math.max(G.score, Math.floor(G.distance / 10));
+}
+
+function gameOver() {
+    G.state = STATE.GAMEOVER;
+    sfxHit();
+    sfxGameOver();
+    emitParticles(G.playerX, G.playerY, 30, "#e63946", 2);
+    G.shakeTimer = 20;
+    G.shakeIntensity = 8;
+    if (G.score > G.highScore) {
+        G.highScore = G.score;
+        localStorage.setItem("ski_high", String(G.highScore));
+    }
+}
+
+/* ========== RENDERING ========== */
+function drawMountainBG() {
+    // Sky gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#1a2a4a");
+    grad.addColorStop(0.4, "#3a5a8a");
+    grad.addColorStop(0.7, "#6a8ab0");
+    grad.addColorStop(1, "#c8d8e8");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Mountains (far)
+    ctx.fillStyle = "#2a3a5a";
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.35);
+    for (let x = 0; x <= W; x += 30) {
+        ctx.lineTo(x, H * 0.35 - Math.sin(x * 0.015) * 40 - Math.cos(x * 0.025) * 20);
+    }
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fill();
+
+    // Mountains (near)
+    ctx.fillStyle = "#4a6a90";
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.45);
+    for (let x = 0; x <= W; x += 20) {
+        ctx.lineTo(x, H * 0.45 - Math.sin(x * 0.02 + 1) * 30 - Math.cos(x * 0.035) * 15);
+    }
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fill();
+
+    // Snow ground
+    ctx.fillStyle = "#e8eef4";
+    ctx.fillRect(0, H * 0.55, W, H * 0.45);
+
+    // Ski tracks
+    ctx.strokeStyle = "rgba(180,200,220,0.3)";
+    ctx.lineWidth = 2;
+    const trackOffset = (G.distance || 0) % 60;
+    for (let i = 0; i < 15; i++) {
+        const ty = (i * 60 + trackOffset) % H;
+        ctx.beginPath();
+        ctx.moveTo(W * 0.3, ty);
+        ctx.lineTo(W * 0.3 + 5, ty + 30);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(W * 0.7, ty);
+        ctx.lineTo(W * 0.7 + 5, ty + 30);
+        ctx.stroke();
+    }
+}
+
+function drawUI() {
+    // Score
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 22px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("分数: " + Math.floor(G.score), 15, 15);
+
+    // Speed
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = "#aaccff";
+    ctx.fillText("速度: " + G.speed.toFixed(1) + "x", 15, 42);
+
+    // Combo
+    if (G.combo > 1) {
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "bold 18px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("连击 x" + G.combo, W/2, 55);
+    }
+
+    // Shield indicator
+    if (G.shieldTimer > 0) {
+        ctx.fillStyle = "#00ccff";
+        ctx.font = "bold 14px sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText("护盾: " + Math.ceil(G.shieldTimer / 60) + "s", W - 15, 15);
+    }
+
+    // High score
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText("最高分: " + G.highScore, W - 15, 42);
+
+    // Pause hint
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("ESC/空格 暂停", W/2, H - 12);
+}
+
+function drawMenu() {
+    drawMountainBG();
+
+    // Snow on menu
+    for (const s of G.snowParticles) {
+        ctx.fillStyle = "rgba(255,255,255," + s.opacity + ")";
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Title
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 48px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 10;
+    ctx.fillText("滑雪躲避", W/2, H * 0.25);
+    ctx.shadowBlur = 0;
+
+    // Subtitle
+    ctx.fillStyle = "#aaccff";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("躲避树木和岩石，收集金币！", W/2, H * 0.33);
+
+    // Skier preview
+    drawPlayer(W/2, H * 0.5, Math.sin(Date.now() * 0.003) * 0.5);
+
+    // Start button
+    const btnY = H * 0.65;
+    const pulse = Math.sin(Date.now() * 0.004) * 3;
+    ctx.fillStyle = "#e63946";
+    drawRoundRect(W/2 - 90, btnY - 22 + pulse, 180, 44, 22);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText("点击开始", W/2, btnY + pulse);
+
+    // Controls
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.font = "13px sans-serif";
+    ctx.fillText("← → 或触屏控制方向", W/2, H * 0.78);
+
+    // High score
+    if (G.highScore > 0) {
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "bold 16px sans-serif";
+        ctx.fillText("最高分: " + G.highScore, W/2, H * 0.85);
+    }
+}
+
+function drawPaused() {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 36px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("暂停", W/2, H/2 - 20);
+    ctx.fillStyle = "#aaccff";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("按 ESC/空格 继续", W/2, H/2 + 25);
+}
+
+function drawGameOver() {
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = "#e63946";
+    ctx.font = "bold 40px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("游戏结束", W/2, H * 0.3);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 28px sans-serif";
+    ctx.fillText("分数: " + Math.floor(G.score), W/2, H * 0.42);
+
+    if (G.score >= G.highScore && G.highScore > 0) {
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "bold 18px sans-serif";
+        ctx.fillText("新纪录！", W/2, H * 0.5);
+    }
+
+    ctx.fillStyle = "#aaa";
+    ctx.font = "14px sans-serif";
+    ctx.fillText("最高分: " + G.highScore, W/2, H * 0.56);
+
+    // Retry button
+    const btnY = H * 0.68;
+    const pulse = Math.sin(Date.now() * 0.004) * 3;
+    ctx.fillStyle = "#2a9d8f";
+    drawRoundRect(W/2 - 80, btnY - 20 + pulse, 160, 40, 20);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillText("再来一次", W/2, btnY + pulse);
+
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.font = "12px sans-serif";
+    ctx.fillText("点击或按回车重试", W/2, H * 0.8);
+}
+
+/* ========== MAIN LOOP ========== */
+function render() {
+    ctx.save();
+
+    // Screen shake
+    if (G.shakeTimer > 0) {
+        const sx = (Math.random() - 0.5) * G.shakeIntensity * (G.shakeTimer / 20);
+        const sy = (Math.random() - 0.5) * G.shakeIntensity * (G.shakeTimer / 20);
+        ctx.translate(sx, sy);
+    }
+
+    if (G.state === STATE.MENU) {
+        drawMenu();
+    } else {
+        drawMountainBG();
+
+        // Draw obstacles
+        for (const ob of G.obstacles) {
+            if (ob.isRock) drawRock(ob.x, ob.y, ob.w, ob.h);
+            else drawTree(ob.x, ob.y, ob.w, ob.h);
+        }
+
+        // Draw coins
+        for (const c of G.coins) {
+            drawCoin(c.x, c.y, c.r, c.glow);
+        }
+
+        // Draw particles
+        for (const p of G.particles) {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        // Draw player
+        drawPlayer(G.playerX, G.playerY, G.tilt);
+
+        // Draw snow
+        for (const s of G.snowParticles) {
+            ctx.fillStyle = "rgba(255,255,255," + s.opacity + ")";
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        drawUI();
+
+        if (G.state === STATE.PAUSED) drawPaused();
+        if (G.state === STATE.GAMEOVER) drawGameOver();
+    }
+
+    ctx.restore();
+}
+
+function loop(now) {
+    requestAnimationFrame(loop);
+    const dt = Math.min(now - (G.lastTime || now), 50);
+    G.lastTime = now;
+
+    // Snow animation for menu
+    if (G.state === STATE.MENU) {
+        for (const s of G.snowParticles) {
+            s.y += s.speedY;
+            s.x += s.speedX;
+            if (s.y > H) { s.y = -5; s.x = Math.random() * W; }
+            if (s.x < 0) s.x = W;
+            if (s.x > W) s.x = 0;
+        }
+    }
+
+    updateGame(dt);
+    render();
+}
+
+/* ========== INIT ========== */
+resetGame();
+requestAnimationFrame(loop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

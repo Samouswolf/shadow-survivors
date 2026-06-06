@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>数织</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#1a1a2e;overflow:hidden;touch-action:none;user-select:none;}
+canvas{display:block;}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<script>
+// ==================== 常量 ====================
+const COLORS = {
+    bg: '#1a1a2e', panel: '#16213e', grid: '#0f3460',
+    cell: '#1a1a2e', filled: '#e94560', mark: '#533483',
+    text: '#eee', accent: '#e94560', dim: '#555',
+    hintBg: '#16213e', hintText: '#aaa', correct: '#4ecca3',
+    wrong: '#e94560', btn: '#0f3460', btnHover: '#e94560'
+};
+const DIFFICULTIES = [
+    { name: '简单', size: 5, label: '5x5', targetTime: 60000 },
+    { name: '中等', size: 10, label: '10x10', targetTime: 180000 },
+    { name: '困难', size: 15, label: '15x15', targetTime: 360000 }
+];
+
+// ==================== 音效系统 ====================
+let audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playSound(freq, dur, type) {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxFill() { playSound(440, 0.1, 'sine'); }
+function sfxMark() { playSound(330, 0.08, 'triangle'); }
+function sfxClear() { playSound(220, 0.1, 'sawtooth'); }
+function sfxWin() {
+    [523, 659, 784, 1047].forEach((f, i) => {
+        setTimeout(() => playSound(f, 0.3, 'sine'), i * 150);
+    });
+}
+function sfxClick() { playSound(600, 0.05, 'square'); }
+function sfxError() { playSound(150, 0.2, 'sawtooth'); }
+
+// ==================== 游戏状态 ====================
+let canvas, ctx, W, H, dpr;
+let state = 'menu'; // menu, playing, paused, win, help
+let difficulty = 0;
+let G = {}; // 游戏数据
+let showHelp = false;
+
+function resizeCanvas() {
+    canvas = document.getElementById('C');
+    dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+}
+
+// ==================== 数织生成 ====================
+function generatePuzzle(size) {
+    // 生成随机解
+    const solution = [];
+    for (let r = 0; r < size; r++) {
+        solution[r] = [];
+        for (let c = 0; c < size; c++) {
+            solution[r][c] = Math.random() < 0.5 ? 1 : 0;
+        }
+    }
+    // 确保每行每列至少有一个填充（避免空行/列）
+    for (let r = 0; r < size; r++) {
+        if (solution[r].every(v => v === 0)) {
+            solution[r][Math.floor(Math.random() * size)] = 1;
+        }
+    }
+    for (let c = 0; c < size; c++) {
+        let hasOne = false;
+        for (let r = 0; r < size; r++) { if (solution[r][c]) { hasOne = true; break; } }
+        if (!hasOne) solution[Math.floor(Math.random() * size)][c] = 1;
+    }
+
+    // 计算行列提示
+    const rowHints = [];
+    const colHints = [];
+    for (let r = 0; r < size; r++) {
+        const hints = [];
+        let count = 0;
+        for (let c = 0; c < size; c++) {
+            if (solution[r][c]) { count++; }
+            else if (count > 0) { hints.push(count); count = 0; }
+        }
+        if (count > 0) hints.push(count);
+        rowHints.push(hints.length ? hints : [0]);
+    }
+    for (let c = 0; c < size; c++) {
+        const hints = [];
+        let count = 0;
+        for (let r = 0; r < size; r++) {
+            if (solution[r][c]) { count++; }
+            else if (count > 0) { hints.push(count); count = 0; }
+        }
+        if (count > 0) hints.push(count);
+        colHints.push(hints.length ? hints : [0]);
+    }
+
+    return { solution, rowHints, colHints, size };
+}
+
+function initGame() {
+    const sz = DIFFICULTIES[difficulty].size;
+    const puzzle = generatePuzzle(sz);
+    G = {
+        size: sz,
+        solution: puzzle.solution,
+        rowHints: puzzle.rowHints,
+        colHints: puzzle.colHints,
+        player: [], // 0=空, 1=填充, 2=标记
+        cursorR: 0, cursorC: 0,
+        startTime: Date.now(),
+        elapsed: 0,
+        paused: false,
+        moveCount: 0,
+        markMode: false // true=标记模式
+    };
+    for (let r = 0; r < sz; r++) {
+        G.player[r] = [];
+        for (let c = 0; c < sz; c++) G.player[r][c] = 0;
+    }
+    state = 'playing';
+}
+
+// ==================== 工具函数 ====================
+function isRowComplete(r) {
+    for (let c = 0; c < G.size; c++) {
+        if (G.solution[r][c] === 1 && G.player[r][c] !== 1) return false;
+        if (G.solution[r][c] === 0 && G.player[r][c] === 1) return false;
+    }
+    return true;
+}
+
+function isColComplete(c) {
+    for (let r = 0; r < G.size; r++) {
+        if (G.solution[r][c] === 1 && G.player[r][c] !== 1) return false;
+        if (G.solution[r][c] === 0 && G.player[r][c] === 1) return false;
+    }
+    return true;
+}
+
+function getProgress() {
+    let total = 0, filled = 0;
+    for (let r = 0; r < G.size; r++) {
+        for (let c = 0; c < G.size; c++) {
+            if (G.solution[r][c] === 1) {
+                total++;
+                if (G.player[r][c] === 1) filled++;
+            }
+        }
+    }
+    return total > 0 ? filled / total : 0;
+}
+
+function autoClearMarks(r, c) {
+    // 当行/列完成时，自动清除该行/列中多余的标记
+    if (isRowComplete(r)) {
+        for (let cc = 0; cc < G.size; cc++) {
+            if (G.player[r][cc] === 2) G.player[r][cc] = 0;
+        }
+    }
+    if (isColComplete(c)) {
+        for (let rr = 0; rr < G.size; rr++) {
+            if (G.player[rr][c] === 2) G.player[rr][c] = 0;
+        }
+    }
+}
+
+// ==================== 游戏逻辑 ====================
+function toggleCell(r, c, mode) {
+    if (r < 0 || r >= G.size || c < 0 || c >= G.size) return;
+    const prev = G.player[r][c];
+    if (mode === 'fill') {
+        G.player[r][c] = prev === 1 ? 0 : 1;
+        if (prev !== 1) sfxFill(); else sfxClear();
+    } else if (mode === 'mark') {
+        G.player[r][c] = prev === 2 ? 0 : 2;
+        if (prev !== 2) sfxMark(); else sfxClear();
+    } else {
+        // 左键：填充/取消填充
+        if (G.markMode) {
+            G.player[r][c] = prev === 2 ? 0 : 2;
+            if (prev !== 2) sfxMark(); else sfxClear();
+        } else {
+            G.player[r][c] = prev === 1 ? 0 : 1;
+            if (prev !== 1) sfxFill(); else sfxClear();
+        }
+    }
+    G.moveCount++;
+    autoClearMarks(r, c);
+    checkWin();
+}
+
+function checkWin() {
+    for (let r = 0; r < G.size; r++) {
+        for (let c = 0; c < G.size; c++) {
+            if (G.solution[r][c] === 1 && G.player[r][c] !== 1) return;
+            if (G.solution[r][c] === 0 && G.player[r][c] === 1) return;
+        }
+    }
+    // 胜利
+    G.elapsed = Date.now() - G.startTime;
+    state = 'win';
+    sfxWin();
+    saveBestTime();
+}
+
+function saveBestTime() {
+    const key = 'nonogram_best_' + DIFFICULTIES[difficulty].size;
+    const prev = localStorage.getItem(key);
+    const time = G.elapsed;
+    if (!prev || time < parseInt(prev)) {
+        localStorage.setItem(key, time);
+    }
+}
+
+function getBestTime() {
+    const key = 'nonogram_best_' + DIFFICULTIES[difficulty].size;
+    return localStorage.getItem(key) || null;
+}
+
+function formatTime(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return (m > 0 ? m + '分' : '') + sec + '秒';
+}
+
+// ==================== 布局计算 ====================
+function getLayout() {
+    const sz = G.size;
+    // 提示区域大小
+    const maxRowHints = Math.max(...G.rowHints.map(h => h.length));
+    const maxColHints = Math.max(...G.colHints.map(h => h.length));
+
+    const hintCellSize = Math.max(14, Math.min(24, Math.floor(Math.min(W, H) / (sz + maxRowHints + 5) * 0.7)));
+    const cellSize = hintCellSize;
+
+    const gridW = sz * cellSize;
+    const gridH = sz * cellSize;
+    const rowHintsW = maxRowHints * hintCellSize;
+    const colHintsH = maxColHints * hintCellSize;
+
+    const totalW = rowHintsW + gridW + 20;
+    const totalH = colHintsH + gridH + 20;
+
+    const offsetX = (W - totalW) / 2;
+    const offsetY = (H - totalH) / 2 + 30; // 给顶部UI留空间
+
+    return {
+        cellSize, hintCellSize, offsetX, offsetY,
+        rowHintsW, colHintsH, gridW, gridH,
+        maxRowHints, maxColHints,
+        gridX: offsetX + rowHintsW,
+        gridY: offsetY + colHintsH
+    };
+}
+
+// ==================== 渲染 ====================
+function render() {
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    if (state === 'menu') renderMenu();
+    else if (state === 'playing' || state === 'paused') renderGame();
+    else if (state === 'win') renderWin();
+
+    // 帮助覆盖层
+    if (showHelp) renderHelp();
+}
+
+function renderMenu() {
+    // 标题
+    ctx.fillStyle = COLORS.accent;
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('数 织', W / 2, H * 0.2);
+
+    ctx.fillStyle = COLORS.dim;
+    ctx.font = '16px sans-serif';
+    ctx.fillText('Nonogram / Picross', W / 2, H * 0.2 + 40);
+
+    // 难度选择
+    const btnW = 180, btnH = 50, gap = 20;
+    const startY = H * 0.4;
+    DIFFICULTIES.forEach((d, i) => {
+        const x = W / 2 - btnW / 2;
+        const y = startY + i * (btnH + gap);
+        const best = localStorage.getItem('nonogram_best_' + d.size);
+
+        ctx.fillStyle = i === difficulty ? COLORS.accent : COLORS.btn;
+        ctx.strokeStyle = COLORS.accent;
+        ctx.lineWidth = 2;
+        roundRect(ctx, x, y, btnW, btnH, 10);
+        ctx.fill();
+        if (i === difficulty) {
+            ctx.strokeStyle = COLORS.accent;
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = COLORS.text;
+        ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(d.name + ' (' + d.label + ')', W / 2, y + 22);
+
+        if (best) {
+            ctx.fillStyle = COLORS.correct;
+            ctx.font = '12px sans-serif';
+            ctx.fillText('最佳: ' + formatTime(parseInt(best)), W / 2, y + 42);
+        }
+    });
+
+    // 开始按钮
+    const sbY = startY + DIFFICULTIES.length * (btnH + gap) + 20;
+    ctx.fillStyle = COLORS.accent;
+    roundRect(ctx, W / 2 - 100, sbY, 200, 55, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('开始游戏', W / 2, sbY + 35);
+
+    // 帮助按钮
+    ctx.fillStyle = COLORS.btn;
+    roundRect(ctx, W / 2 - 50, H * 0.82, 100, 35, 8);
+    ctx.fill();
+    ctx.fillStyle = COLORS.dim;
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('? 玩法说明', W / 2, H * 0.82 + 23);
+
+    // 操作说明
+    ctx.fillStyle = COLORS.dim;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('↑↓选择难度 | Enter/点击开始 | H帮助', W / 2, H * 0.91);
+}
+
+function getMenuHelpBtnAt(mx, my) {
+    return (mx >= W / 2 - 50 && mx <= W / 2 + 50 && my >= H * 0.82 && my <= H * 0.82 + 35);
+}
+
+function getHelpCloseBtnAt(mx, my) {
+    const boxH = Math.min(480, H - 80);
+    const boxY = (H - boxH) / 2;
+    return (mx >= W / 2 - 50 && mx <= W / 2 + 50 && my >= boxY + boxH - 50 && my <= boxY + boxH - 15);
+}
+
+function renderHelp() {
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    const boxW = Math.min(420, W - 40);
+    const boxH = Math.min(480, H - 80);
+    const boxX = (W - boxW) / 2;
+    const boxY = (H - boxH) / 2;
+
+    ctx.fillStyle = COLORS.panel;
+    roundRect(ctx, boxX, boxY, boxW, boxH, 15);
+    ctx.fill();
+    ctx.strokeStyle = COLORS.accent;
+    ctx.lineWidth = 2;
+    roundRect(ctx, boxX, boxY, boxW, boxH, 15);
+    ctx.stroke();
+
+    ctx.fillStyle = COLORS.accent;
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('数织 (Nonogram) 玩法', W / 2, boxY + 35);
+
+    const lines = [
+        '',
+        '根据行列数字提示，在网格中填充正确的格子。',
+        '数字表示该行/列中连续填充格子的长度。',
+        '',
+        '例如：提示 "3 1 2" 表示该行有3个连续格子，',
+        '然后至少1个空格，再1个格子，再至少1个空格，',
+        '最后2个连续格子。',
+        '',
+        '--- 操作 ---',
+        '鼠标左键：填充格子',
+        '鼠标右键：标记（确认不需要的格子）',
+        '触屏短按：填充 | 触屏长按：标记',
+        '方向键：移动光标',
+        '空格/Enter：填充当前格子',
+        'M键：切换填充/标记模式',
+        'P/ESC：暂停 | R：重开 | H：帮助',
+        '',
+        '--- 提示 ---',
+        '完成的行/列提示会变绿。',
+        '每5格有粗线分隔，方便计数。'
+    ];
+
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'left';
+    const startX = boxX + 25;
+    let lineY = boxY + 60;
+    lines.forEach(line => {
+        if (line.startsWith('---')) {
+            ctx.fillStyle = COLORS.accent;
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillText(line, startX, lineY);
+        } else {
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '14px sans-serif';
+            ctx.fillText(line, startX, lineY);
+        }
+        lineY += 20;
+    });
+
+    // 关闭按钮
+    ctx.fillStyle = COLORS.accent;
+    roundRect(ctx, W / 2 - 50, boxY + boxH - 50, 100, 35, 8);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('关闭 (H)', W / 2, boxY + boxH - 28);
+}
+
+function renderGame() {
+    const L = getLayout();
+    const sz = G.size;
+    const cs = L.cellSize;
+    const hcs = L.hintCellSize;
+
+    // 顶部信息栏
+    const elapsed = state === 'paused' ? G.elapsed : (Date.now() - G.startTime);
+    const progress = getProgress();
+    const targetTime = DIFFICULTIES[difficulty].targetTime;
+    const timeColor = elapsed > targetTime ? COLORS.wrong : (elapsed > targetTime * 0.8 ? '#f0a500' : COLORS.text);
+
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('时间: ' + formatTime(elapsed), 15, 25);
+    ctx.fillStyle = timeColor;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('目标: ' + formatTime(targetTime), 15, 42);
+
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('步数: ' + G.moveCount, 15, 62);
+
+    // 进度条
+    const barW = 120, barH = 12, barX = 15, barY = 70;
+    ctx.fillStyle = COLORS.grid;
+    roundRect(ctx, barX, barY, barW, barH, 6);
+    ctx.fill();
+    ctx.fillStyle = progress >= 1 ? COLORS.correct : COLORS.accent;
+    roundRect(ctx, barX, barY, barW * progress, barH, 6);
+    ctx.fill();
+    ctx.fillStyle = COLORS.dim;
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(Math.floor(progress * 100) + '%', barX + barW + 5, barY + 10);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = G.markMode ? COLORS.accent : COLORS.dim;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('模式: ' + (G.markMode ? '标记 X' : '填充 ■'), W - 15, 25);
+
+    ctx.fillStyle = COLORS.dim;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('P暂停 | M切换模式 | R重开', W - 15, 45);
+
+    // 列提示
+    for (let c = 0; c < sz; c++) {
+        const hints = G.colHints[c];
+        const x = L.gridX + c * cs;
+        const colDone = isColComplete(c);
+        for (let i = 0; i < hints.length; i++) {
+            const y = L.offsetY + i * hcs + hcs * 0.7;
+            ctx.fillStyle = colDone ? COLORS.correct : COLORS.hintText;
+            ctx.font = (hcs > 18 ? 'bold ' : '') + Math.max(10, hcs - 4) + 'px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(hints[i], x + cs / 2, y);
+        }
+        // 完成的列添加底色
+        if (colDone) {
+            ctx.fillStyle = 'rgba(78, 204, 163, 0.08)';
+            ctx.fillRect(x, L.offsetY, cs, L.colHintsH);
+        }
+    }
+
+    // 行提示
+    for (let r = 0; r < sz; r++) {
+        const hints = G.rowHints[r];
+        const y = L.gridY + r * cs;
+        const rowDone = isRowComplete(r);
+        for (let i = 0; i < hints.length; i++) {
+            const x = L.offsetX + i * hcs;
+            ctx.fillStyle = rowDone ? COLORS.correct : COLORS.hintText;
+            ctx.font = (hcs > 18 ? 'bold ' : '') + Math.max(10, hcs - 4) + 'px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(hints[i], x + hcs - 2, y + cs * 0.7);
+        }
+        // 完成的行添加底色
+        if (rowDone) {
+            ctx.fillStyle = 'rgba(78, 204, 163, 0.08)';
+            ctx.fillRect(L.offsetX, y, L.rowHintsW, cs);
+        }
+    }
+
+    // 网格
+    for (let r = 0; r < sz; r++) {
+        for (let c = 0; c < sz; c++) {
+            const x = L.gridX + c * cs;
+            const y = L.gridY + r * cs;
+            const val = G.player[r][c];
+
+            // 单元格背景
+            ctx.fillStyle = val === 1 ? COLORS.filled : (val === 2 ? COLORS.mark : COLORS.cell);
+            ctx.fillRect(x, y, cs, cs);
+
+            // 标记X
+            if (val === 2) {
+                ctx.strokeStyle = COLORS.text;
+                ctx.lineWidth = 2;
+                const pad = cs * 0.25;
+                ctx.beginPath();
+                ctx.moveTo(x + pad, y + pad); ctx.lineTo(x + cs - pad, y + cs - pad);
+                ctx.moveTo(x + cs - pad, y + pad); ctx.lineTo(x + pad, y + cs - pad);
+                ctx.stroke();
+            }
+
+            // 光标
+            if (r === G.cursorR && c === G.cursorC && state === 'playing') {
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x + 1, y + 1, cs - 2, cs - 2);
+            }
+        }
+    }
+
+    // 网格线
+    ctx.strokeStyle = COLORS.grid;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= sz; i++) {
+        ctx.beginPath();
+        ctx.moveTo(L.gridX + i * cs, L.gridY);
+        ctx.lineTo(L.gridX + i * cs, L.gridY + sz * cs);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(L.gridX, L.gridY + i * cs);
+        ctx.lineTo(L.gridX + sz * cs, L.gridY + i * cs);
+        ctx.stroke();
+    }
+
+    // 粗线（每5格）
+    ctx.strokeStyle = COLORS.text;
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= sz; i += 5) {
+        ctx.beginPath();
+        ctx.moveTo(L.gridX + i * cs, L.gridY);
+        ctx.lineTo(L.gridX + i * cs, L.gridY + sz * cs);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(L.gridX, L.gridY + i * cs);
+        ctx.lineTo(L.gridX + sz * cs, L.gridY + i * cs);
+        ctx.stroke();
+    }
+
+    // 暂停覆盖层
+    if (state === 'paused') {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = COLORS.text;
+        ctx.font = 'bold 36px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('已暂停', W / 2, H / 2 - 20);
+        ctx.font = '18px sans-serif';
+        ctx.fillText('按 P 或点击继续', W / 2, H / 2 + 20);
+    }
+}
+
+function renderWin() {
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = COLORS.correct;
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('恭喜完成!', W / 2, H * 0.25);
+
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '22px sans-serif';
+    ctx.fillText('难度: ' + DIFFICULTIES[difficulty].name + ' (' + DIFFICULTIES[difficulty].label + ')', W / 2, H * 0.38);
+    ctx.fillText('用时: ' + formatTime(G.elapsed), W / 2, H * 0.45);
+    ctx.fillText('步数: ' + G.moveCount, W / 2, H * 0.52);
+
+    const best = getBestTime();
+    if (best) {
+        ctx.fillStyle = COLORS.accent;
+        ctx.font = '16px sans-serif';
+        ctx.fillText('最佳记录: ' + formatTime(parseInt(best)), W / 2, H * 0.6);
+    }
+
+    // 显示完成的图案（缩小版）
+    const previewSize = Math.min(W * 0.4, H * 0.25);
+    const cellP = previewSize / G.size;
+    const px = W / 2 - previewSize / 2;
+    const py = H * 0.65;
+    for (let r = 0; r < G.size; r++) {
+        for (let c = 0; c < G.size; c++) {
+            ctx.fillStyle = G.solution[r][c] ? COLORS.filled : COLORS.cell;
+            ctx.fillRect(px + c * cellP, py + r * cellP, cellP - 1, cellP - 1);
+        }
+    }
+
+    // 按钮
+    const btnY = H * 0.88;
+    ctx.fillStyle = COLORS.accent;
+    roundRect(ctx, W / 2 - 120, btnY, 100, 45, 8);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('再来一局', W / 2 - 70, btnY + 28);
+
+    ctx.fillStyle = COLORS.btn;
+    roundRect(ctx, W / 2 + 20, btnY, 100, 45, 8);
+    ctx.fill();
+    ctx.fillStyle = COLORS.text;
+    ctx.fillText('返回菜单', W / 2 + 70, btnY + 28);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// ==================== 输入处理 ====================
+function getMenuBtnAt(mx, my) {
+    const btnW = 180, btnH = 50, gap = 20;
+    const startY = H * 0.4;
+    for (let i = 0; i < DIFFICULTIES.length; i++) {
+        const x = W / 2 - btnW / 2;
+        const y = startY + i * (btnH + gap);
+        if (mx >= x && mx <= x + btnW && my >= y && my <= y + btnH) return 'diff_' + i;
+    }
+    const sbY = startY + DIFFICULTIES.length * (btnH + gap) + 20;
+    if (mx >= W / 2 - 100 && mx <= W / 2 + 100 && my >= sbY && my <= sbY + 55) return 'start';
+    return null;
+}
+
+function getCellAt(mx, my) {
+    const L = getLayout();
+    const c = Math.floor((mx - L.gridX) / L.cellSize);
+    const r = Math.floor((my - L.gridY) / L.cellSize);
+    if (r >= 0 && r < G.size && c >= 0 && c < G.size) return { r, c };
+    return null;
+}
+
+function getWinBtnAt(mx, my) {
+    const btnY = H * 0.88;
+    if (mx >= W / 2 - 120 && mx <= W / 2 - 20 && my >= btnY && my <= btnY + 45) return 'replay';
+    if (mx >= W / 2 + 20 && mx <= W / 2 + 120 && my >= btnY && my <= btnY + 45) return 'menu';
+    return null;
+}
+
+// 鼠标/触摸事件
+let lastTouchCell = null;
+let touchTimer = null;
+let touchStartPos = null;
+const LONG_PRESS_MS = 400;
+
+function startTouchTimer(x, y) {
+    touchStartPos = { x, y };
+    touchTimer = setTimeout(() => {
+        // 长按触发标记模式
+        if (state === 'playing') {
+            const cell = getCellAt(x, y);
+            if (cell) {
+                G.cursorR = cell.r;
+                G.cursorC = cell.c;
+                toggleCell(cell.r, cell.c, 'mark');
+            }
+        }
+        touchTimer = null;
+    }, LONG_PRESS_MS);
+}
+
+function cancelTouchTimer() {
+    if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+    touchStartPos = null;
+}
+
+canvas.addEventListener('mousedown', (e) => {
+    initAudio();
+    const mx = e.clientX, my = e.clientY;
+    handleClick(mx, my, e.button === 2 ? 'mark' : 'click');
+});
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    initAudio();
+    const t = e.touches[0];
+    if (state === 'playing') {
+        startTouchTimer(t.clientX, t.clientY);
+    }
+    handleClick(t.clientX, t.clientY, 'click');
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    // 检查是否移动太远（取消长按）
+    if (touchStartPos) {
+        const t = e.touches[0];
+        const dx = t.clientX - touchStartPos.x;
+        const dy = t.clientY - touchStartPos.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 15) cancelTouchTimer();
+    }
+    if (state !== 'playing') return;
+    const t = e.touches[0];
+    const cell = getCellAt(t.clientX, t.clientY);
+    if (cell && (!lastTouchCell || cell.r !== lastTouchCell.r || cell.c !== lastTouchCell.c)) {
+        lastTouchCell = cell;
+        G.cursorR = cell.r;
+        G.cursorC = cell.c;
+        toggleCell(cell.r, cell.c, 'click');
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => { lastTouchCell = null; cancelTouchTimer(); });
+
+function handleClick(mx, my, btn) {
+    if (showHelp) {
+        if (getHelpCloseBtnAt(mx, my) || true) {
+            showHelp = false;
+            sfxClick();
+        }
+        return;
+    }
+    if (state === 'menu') {
+        const hit = getMenuBtnAt(mx, my);
+        if (hit === 'start') { sfxClick(); initGame(); }
+        else if (hit && hit.startsWith('diff_')) {
+            sfxClick();
+            difficulty = parseInt(hit.split('_')[1]);
+        } else if (getMenuHelpBtnAt(mx, my)) {
+            sfxClick();
+            showHelp = true;
+        }
+    } else if (state === 'playing') {
+        const cell = getCellAt(mx, my);
+        if (cell) {
+            G.cursorR = cell.r;
+            G.cursorC = cell.c;
+            toggleCell(cell.r, cell.c, btn === 'mark' ? 'mark' : 'click');
+        }
+    } else if (state === 'paused') {
+        state = 'playing';
+        G.startTime = Date.now() - G.elapsed;
+    } else if (state === 'win') {
+        const hit = getWinBtnAt(mx, my);
+        if (hit === 'replay') { sfxClick(); initGame(); }
+        else if (hit === 'menu') { sfxClick(); state = 'menu'; }
+    }
+}
+
+// 键盘事件
+document.addEventListener('keydown', (e) => {
+    initAudio();
+    if (showHelp) {
+        if (e.key === 'h' || e.key === 'H' || e.key === 'Escape' || e.key === ' ') {
+            showHelp = false;
+            sfxClick();
+        }
+        return;
+    }
+    if (state === 'menu') {
+        if (e.key === 'ArrowUp') { difficulty = (difficulty - 1 + 3) % 3; sfxClick(); }
+        else if (e.key === 'ArrowDown') { difficulty = (difficulty + 1) % 3; sfxClick(); }
+        else if (e.key === 'Enter' || e.key === ' ') { sfxClick(); initGame(); }
+        else if (e.key === 'h' || e.key === 'H') { sfxClick(); showHelp = true; }
+    } else if (state === 'playing') {
+        switch (e.key) {
+            case 'ArrowUp': G.cursorR = Math.max(0, G.cursorR - 1); sfxClick(); break;
+            case 'ArrowDown': G.cursorR = Math.min(G.size - 1, G.cursorR + 1); sfxClick(); break;
+            case 'ArrowLeft': G.cursorC = Math.max(0, G.cursorC - 1); sfxClick(); break;
+            case 'ArrowRight': G.cursorC = Math.min(G.size - 1, G.cursorC + 1); sfxClick(); break;
+            case ' ':
+            case 'Enter':
+                e.preventDefault();
+                toggleCell(G.cursorR, G.cursorC, G.markMode ? 'mark' : 'fill');
+                break;
+            case 'm': case 'M':
+                G.markMode = !G.markMode;
+                sfxClick();
+                break;
+            case 'p': case 'P':
+                G.elapsed = Date.now() - G.startTime;
+                state = 'paused';
+                sfxClick();
+                break;
+            case 'r': case 'R':
+                sfxClick();
+                initGame();
+                break;
+            case 'Escape':
+                G.elapsed = Date.now() - G.startTime;
+                state = 'paused';
+                sfxClick();
+                break;
+        }
+    } else if (state === 'paused') {
+        if (e.key === 'p' || e.key === 'P' || e.key === 'Escape' || e.key === ' ') {
+            state = 'playing';
+            G.startTime = Date.now() - G.elapsed;
+            sfxClick();
+        }
+    } else if (state === 'win') {
+        if (e.key === 'Enter' || e.key === ' ') { sfxClick(); initGame(); }
+        else if (e.key === 'Escape') { sfxClick(); state = 'menu'; }
+    }
+});
+
+// ==================== 游戏循环 ====================
+function gameLoop() {
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ==================== 启动 ====================
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+gameLoop();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

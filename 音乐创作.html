@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>音乐创作</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Segoe UI',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function(){
+"use strict";
+var canvas=document.getElementById("c"),ctx=canvas.getContext("2d");
+var W=800,H=600;
+function resize(){
+    var s=Math.min(innerWidth/W,innerHeight/H);
+    canvas.width=W*s;canvas.height=H*s;
+    canvas.style.width=W*s+"px";canvas.style.height=H*s+"px";
+    ctx.setScale(s,s);
+}
+window.addEventListener("resize",resize);
+resize();
+
+/* ── Audio Engine ── */
+var audioCtx=null;
+function ensureAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function playNote(freq,duration,type,vol){
+    ensureAudio();
+    var o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type=type||"sine";o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.3,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+duration);
+    o.connect(g);g.connect(audioCtx.destination);
+    o.start();o.stop(audioCtx.currentTime+duration);
+}
+function playUIClick(){playNote(800,0.08,"sine",0.15)}
+
+/* ── Note Definitions ── */
+var NOTES=[
+    {name:"C4",freq:261.63,key:"a",label:"C"},
+    {name:"D4",freq:293.66,key:"s",label:"D"},
+    {name:"E4",freq:329.63,key:"d",label:"E"},
+    {name:"F4",freq:349.23,key:"f",label:"F"},
+    {name:"G4",freq:392.00,key:"g",label:"G"},
+    {name:"A4",freq:440.00,key:"h",label:"A"},
+    {name:"B4",freq:493.88,key:"j",label:"B"},
+    {name:"C5",freq:523.25,key:"k",label:"C5"}
+];
+var INSTRUMENTS=[
+    {name:"钢琴",type:"triangle",icon:"🎹"},
+    {name:"吉他",type:"sawtooth",icon:"🎸"},
+    {name:"长笛",type:"sine",icon:"🎵"},
+    {name:"合成器",type:"square",icon:"🎹"}
+];
+
+/* ── Game State ── */
+var G={
+    state:"menu",  // menu,play,pause,end
+    score:0,
+    highScore:parseInt(localStorage.getItem("musicCreate_high")||"0"),
+    instrument:0,
+    tempo:120,     // BPM
+    track:[],      // recorded notes [{noteIdx,time,duration}]
+    isRecording:false,
+    recordStart:0,
+    playCursor:0,
+    isPlaying:false,
+    playStart:0,
+    selectNote:-1, // which note is selected (for duration)
+    noteDuration:0.5, // seconds
+    particles:[],
+    gridScroll:0,
+    time:0,
+    menuAnim:0,
+    endAnim:0,
+    combo:0,
+    maxCombo:0,
+    totalNotes:0,
+    paused:false
+};
+
+/* ── Utils ── */
+function lerp(a,b,t){return a+(b-a)*t}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
+function dist(x1,y1,x2,y2){return Math.sqrt((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2))}
+function rnd(a,b){return a+Math.random()*(b-a)}
+
+/* ── Particles ── */
+function spawnParticles(x,y,color,count){
+    for(var i=0;i<(count||8);i++){
+        G.particles.push({x:x,y:y,vx:rnd(-3,3),vy:rnd(-4,1),life:1,color:color||"#fff",size:rnd(2,5)});
+    }
+}
+function updateParticles(){
+    for(var i=G.particles.length-1;i>=0;i--){
+        var p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.1;p.life-=0.025;
+        if(p.life<=0)G.particles.splice(i,1);
+    }
+}
+function drawParticles(){
+    for(var i=0;i<G.particles.length;i++){
+        var p=G.particles[i];
+        ctx.globalAlpha=p.life;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+/* ── Input ── */
+var keys={},mouseDown=false,mouseX=0,mouseY=0,touchActive=false;
+
+function getPos(e){
+    var r=canvas.getBoundingClientRect();
+    var cx=(e.clientX||e.touches[0].clientX)-r.left;
+    var cy=(e.clientY||e.touches[0].clientY)-r.top;
+    var s=W/r.width;
+    return {x:cx*s,y:cy*s};
+}
+
+canvas.addEventListener("mousedown",function(e){
+    var p=getPos(e);mouseX=p.x;mouseY=p.y;mouseDown=true;
+    handleClick(p.x,p.y);
+});
+canvas.addEventListener("mousemove",function(e){
+    var p=getPos(e);mouseX=p.x;mouseY=p.y;
+});
+canvas.addEventListener("mouseup",function(){mouseDown=false});
+
+canvas.addEventListener("touchstart",function(e){
+    e.preventDefault();touchActive=true;
+    var p=getPos(e);mouseX=p.x;mouseY=p.y;
+    handleClick(p.x,p.y);
+},{passive:false});
+canvas.addEventListener("touchmove",function(e){
+    e.preventDefault();
+    var p=getPos(e);mouseX=p.x;mouseY=p.y;
+},{passive:false});
+canvas.addEventListener("touchend",function(e){
+    e.preventDefault();touchActive=false;
+},{passive:false});
+
+document.addEventListener("keydown",function(e){
+    keys[e.key]=true;
+    if(G.state==="play")handleKeyNote(e.key);
+    if(e.key===" "||e.key==="Escape"){
+        e.preventDefault();
+        if(G.state==="play")togglePause();
+        else if(G.state==="pause")togglePause();
+    }
+});
+document.addEventListener("keyup",function(e){keys[e.key]=false});
+
+function handleKeyNote(k){
+    for(var i=0;i<NOTES.length;i++){
+        if(NOTES[i].key===k){
+            playNoteAt(i);
+            return;
+        }
+    }
+}
+
+/* ── Button System ── */
+function btn(x,y,w,h,label,hover,active){
+    var mx=mouseX,my=mouseY;
+    var isHov=mx>x&&mx<x+w&&my>y&&my<y+h;
+    var r=8;
+    // shadow
+    ctx.fillStyle="rgba(0,0,0,0.3)";
+    roundRect(x+2,y+2,w,h,r);ctx.fill();
+    // bg
+    var grad=ctx.createLinearGradient(x,y,x,y+h);
+    if(active){
+        grad.addColorStop(0,"#e94560");grad.addColorStop(1,"#c23152");
+    }else if(isHov){
+        grad.addColorStop(0,"#4a90d9");grad.addColorStop(1,"#357abd");
+    }else{
+        grad.addColorStop(0,"#2d3561");grad.addColorStop(1,"#1e2749");
+    }
+    ctx.fillStyle=grad;
+    roundRect(x,y,w,h,r);ctx.fill();
+    ctx.strokeStyle=isHov?"#4a90d9":"#3d4f7c";
+    ctx.lineWidth=1.5;
+    roundRect(x,y,w,h,r);ctx.stroke();
+    // text
+    ctx.fillStyle="#fff";
+    ctx.font="bold "+Math.min(h*0.45,18)+"px 'Segoe UI',sans-serif";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(label,x+w/2,y+h/2+1);
+    return isHov;
+}
+
+function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+
+/* ── Click Handler ── */
+function handleClick(x,y){
+    ensureAudio();
+    if(G.state==="menu"){
+        // Play button
+        if(x>280&&x<520&&y>280&&y<340){
+            playUIClick();startGame();
+        }
+        // Instrument select
+        for(var i=0;i<4;i++){
+            var ix=200+i*110,iy=370;
+            if(x>ix&&x<ix+90&&y>iy&&y<iy+60){
+                G.instrument=i;playUIClick();
+            }
+        }
+    }else if(G.state==="play"){
+        // Piano keys
+        var keyW=75,keyH=220,keyX=50,keyY=H-keyH-20;
+        for(var i=0;i<NOTES.length;i++){
+            var kx=keyX+i*keyW+4;
+            if(x>kx&&x<kx+keyW-8&&y>keyY&&y<keyY+keyH){
+                playNoteAt(i);
+                return;
+            }
+        }
+        // Record button
+        if(x>680&&x<770&&y>20&&y<60){
+            playUIClick();toggleRecord();
+        }
+        // Play track button
+        if(x>680&&x<770&&y>70&&y<110){
+            playUIClick();playTrack();
+        }
+        // Clear button
+        if(x>680&&x<770&&y>120&&y<160){
+            playUIClick();G.track=[];G.score=0;G.combo=0;
+        }
+        // Tempo +/-
+        if(x>680&&x<720&&y>170&&y<200){
+            G.tempo=clamp(G.tempo-10,40,240);playUIClick();
+        }
+        if(x>730&&x<770&&y>170&&y<200){
+            G.tempo=clamp(G.tempo+10,40,240);playUIClick();
+        }
+        // Duration buttons
+        for(var d=0;d<4;d++){
+            var dx=680,dy=210+d*45;
+            if(x>dx&&x<dx+90&&y>dy&&y<dy+38){
+                G.noteDuration=[0.25,0.5,1.0,2.0][d];playUIClick();
+            }
+        }
+        // Instrument switch
+        if(x>50&&x<640&&y>20&&y<55){
+            var ci=Math.floor((x-50)/155);
+            if(ci>=0&&ci<4){G.instrument=ci;playUIClick();}
+        }
+        // Back to menu
+        if(x>680&&x<770&&y>410&&y<450){
+            playUIClick();G.state="menu";
+        }
+    }else if(G.state==="pause"){
+        if(x>300&&x<500&&y>280&&y<330){
+            playUIClick();togglePause();
+        }
+        if(x>300&&x<500&&y>350&&y<400){
+            playUIClick();G.state="menu";
+        }
+    }else if(G.state==="end"){
+        if(x>250&&x<550&&y>380&&y<430){
+            playUIClick();startGame();
+        }
+        if(x>250&&x<550&&y>450&&y<500){
+            playUIClick();G.state="menu";
+        }
+    }
+}
+
+/* ── Game Logic ── */
+function startGame(){
+    G.state="play";G.score=0;G.track=[];G.combo=0;G.maxCombo=0;G.totalNotes=0;
+    G.isRecording=false;G.isPlaying=false;G.paused=false;
+    G.particles=[];G.time=0;
+}
+
+function togglePause(){
+    if(G.state==="play"){G.state="pause";G.paused=true;}
+    else if(G.state==="pause"){G.state="play";G.paused=false;}
+}
+
+function playNoteAt(idx){
+    var inst=INSTRUMENTS[G.instrument];
+    playNote(NOTES[idx].freq,G.noteDuration,inst.type,0.35);
+    spawnParticles(50+idx*75+33,H-220-20,["#e94560","#f5a623","#50e3c2","#4a90d9"][idx%4],10);
+    G.selectNote=idx;
+    if(G.isRecording){
+        var t=(Date.now()-G.recordStart)/1000;
+        G.track.push({noteIdx:idx,time:t,duration:G.noteDuration});
+        G.totalNotes++;
+        G.combo++;
+        if(G.combo>G.maxCombo)G.maxCombo=G.combo;
+        G.score+=10*G.combo;
+    }
+}
+
+function toggleRecord(){
+    if(G.isRecording){
+        G.isRecording=false;
+    }else{
+        G.isRecording=true;G.isPlaying=false;
+        G.recordStart=Date.now();G.track=[];G.combo=0;
+    }
+}
+
+function playTrack(){
+    if(G.track.length===0)return;
+    G.isPlaying=true;G.playStart=Date.now();G.playCursor=0;
+}
+
+function updatePlayback(){
+    if(!G.isPlaying)return;
+    var elapsed=(Date.now()-G.playStart)/1000;
+    while(G.playCursor<G.track.length){
+        var n=G.track[G.playCursor];
+        if(elapsed>=n.time){
+            playNote(NOTES[n.noteIdx].freq,n.duration,INSTRUMENTS[G.instrument].type,0.35);
+            spawnParticles(50+n.noteIdx*75+33,H-220-20,"#f5a623",12);
+            G.playCursor++;
+        }else break;
+    }
+    if(G.playCursor>=G.track.length){
+        G.isPlaying=false;
+        if(G.track.length>=8&&G.score>G.highScore){
+            G.highScore=G.score;
+            localStorage.setItem("musicCreate_high",G.highScore.toString());
+        }
+        if(G.track.length>=8)G.state="end";
+    }
+}
+
+/* ── Render ── */
+function drawBg(){
+    var grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,"#0f0c29");grad.addColorStop(0.5,"#302b63");grad.addColorStop(1,"#24243e");
+    ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+    // grid lines
+    ctx.strokeStyle="rgba(255,255,255,0.03)";ctx.lineWidth=1;
+    for(var i=0;i<W;i+=40){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,H);ctx.stroke();}
+    for(var j=0;j<H;j+=40){ctx.beginPath();ctx.moveTo(0,j);ctx.lineTo(W,j);ctx.stroke();}
+}
+
+function drawMenu(){
+    G.menuAnim+=0.02;
+    drawBg();
+    // Title
+    ctx.save();
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.font="bold 52px 'Segoe UI',sans-serif";
+    ctx.fillStyle="#e94560";
+    ctx.shadowColor="#e94560";ctx.shadowBlur=20;
+    ctx.fillText("🎵 音乐创作",W/2,120);
+    ctx.shadowBlur=0;
+    ctx.font="20px 'Segoe UI',sans-serif";
+    ctx.fillStyle="#a0a0c0";
+    ctx.fillText("创作你的旋律，演奏你的音乐",W/2,175);
+    // Play button
+    btn(280,280,240,60,"开始创作",true,false);
+    // Instrument selection
+    ctx.font="16px 'Segoe UI',sans-serif";ctx.fillStyle="#8888aa";
+    ctx.fillText("选择乐器",W/2,355);
+    for(var i=0;i<4;i++){
+        var ix=200+i*110,iy=370;
+        var sel=G.instrument===i;
+        btn(ix,iy,90,60,INSTRUMENTS[i].icon+INSTRUMENTS[i].name,true,sel);
+    }
+    // High score
+    ctx.font="16px 'Segoe UI',sans-serif";ctx.fillStyle="#8888aa";
+    ctx.fillText("最高分: "+G.highScore,W/2,470);
+    // Controls hint
+    ctx.font="14px 'Segoe UI',sans-serif";ctx.fillStyle="#666680";
+    ctx.fillText("键盘: A S D F G H J K 对应音符 | 空格暂停",W/2,520);
+    ctx.restore();
+}
+
+function drawPlay(){
+    drawBg();
+    // Header bar
+    ctx.fillStyle="rgba(0,0,0,0.4)";
+    ctx.fillRect(0,0,W,60);
+    ctx.fillStyle="#fff";ctx.font="bold 18px 'Segoe UI',sans-serif";
+    ctx.textAlign="left";ctx.textBaseline="middle";
+    ctx.fillText("分数: "+G.score,600,30);
+
+    // Instrument tabs
+    for(var i=0;i<4;i++){
+        var tx=50+i*155,sel=G.instrument===i;
+        ctx.fillStyle=sel?"#e94560":"#2d3561";
+        roundRect(tx,12,140,36,6);ctx.fill();
+        ctx.fillStyle=sel?"#fff":"#888";
+        ctx.font="15px 'Segoe UI',sans-serif";ctx.textAlign="center";
+        ctx.fillText(INSTRUMENTS[i].icon+" "+INSTRUMENTS[i].name,tx+70,30);
+    }
+
+    // Right panel
+    ctx.fillStyle="rgba(0,0,0,0.35)";
+    roundRect(670,10,120,450,10);ctx.fill();
+
+    // Record button
+    var recCol=G.isRecording?"#e94560":"#3d4f7c";
+    ctx.fillStyle=recCol;roundRect(680,20,90,35,6);ctx.fill();
+    ctx.fillStyle="#fff";ctx.font="bold 14px 'Segoe UI',sans-serif";ctx.textAlign="center";
+    ctx.fillText(G.isRecording?"停止录制":"开始录制",725,38);
+
+    // Play track
+    btn(680,70,90,35,"播放旋律",true,G.isPlaying);
+    btn(680,120,90,35,"清除",true,false);
+
+    // Tempo
+    ctx.fillStyle="#888";ctx.font="13px 'Segoe UI',sans-serif";
+    ctx.fillText("速度",725,165);
+    btn(680,175,35,25,"-",true,false);
+    ctx.fillStyle="#fff";ctx.font="bold 14px 'Segoe UI',sans-serif";
+    ctx.fillText(G.tempo,725,188);
+    btn(730,175,35,25,"+",true,false);
+
+    // Duration selector
+    ctx.fillStyle="#888";ctx.font="13px 'Segoe UI',sans-serif";
+    ctx.fillText("音长",725,208);
+    var durs=[{v:0.25,l:"1/4"},{v:0.5,l:"1/2"},{v:1.0,l:"1"},{v:2.0,l:"2"}];
+    for(var d=0;d<4;d++){
+        var dy=215+d*42;
+        var act=Math.abs(G.noteDuration-durs[d].v)<0.01;
+        btn(680,dy,90,35,durs[d].l+"拍",true,act);
+    }
+
+    // Back button
+    btn(680,415,90,35,"返回菜单",true,false);
+
+    // Track visualization
+    drawTrackVis();
+
+    // Piano keys
+    drawPiano();
+
+    // Recording indicator
+    if(G.isRecording){
+        var blink=Math.sin(G.time*8)>0;
+        if(blink){
+            ctx.fillStyle="#e94560";ctx.beginPath();ctx.arc(770,30,5,0,Math.PI*2);ctx.fill();
+        }
+        ctx.fillStyle="#e94560";ctx.font="12px 'Segoe UI',sans-serif";ctx.textAlign="left";
+        ctx.fillText("REC",738,30);
+    }
+
+    // Combo display
+    if(G.combo>1){
+        ctx.fillStyle="#f5a623";ctx.font="bold 24px 'Segoe UI',sans-serif";ctx.textAlign="center";
+        ctx.fillText(G.combo+"x COMBO",W/2,90);
+    }
+}
+
+function drawTrackVis(){
+    if(G.track.length===0){
+        ctx.fillStyle="#444";ctx.font="14px 'Segoe UI',sans-serif";ctx.textAlign="center";
+        ctx.fillText("录制旋律后在此显示",400,200);
+        return;
+    }
+    var vx=100,vy=80,vw=540,vh=120;
+    ctx.fillStyle="rgba(0,0,0,0.25)";roundRect(vx,vy,vw,vh,8);ctx.fill();
+    // draw notes as colored bars
+    var maxT=0;
+    for(var i=0;i<G.track.length;i++){
+        var nt=G.track[i].time+G.track[i].duration;
+        if(nt>maxT)maxT=nt;
+    }
+    if(maxT===0)maxT=1;
+    var colors=["#e94560","#f5a623","#50e3c2","#4a90d9","#7b68ee","#ff6b9d","#98d8c8","#c9b1ff"];
+    for(var i=0;i<G.track.length;i++){
+        var n=G.track[i];
+        var nx=vx+10+(n.time/maxT)*(vw-20);
+        var nw=Math.max(4,(n.duration/maxT)*(vw-20));
+        var nh=vh/NOTES.length;
+        var ny=vy+vh-(n.noteIdx+1)*nh;
+        ctx.fillStyle=colors[n.noteIdx%colors.length];
+        roundRect(nx,ny,nw,nh-2,3);ctx.fill();
+    }
+    // playback cursor
+    if(G.isPlaying){
+        var elapsed=(Date.now()-G.playStart)/1000;
+        var cx=vx+10+(elapsed/maxT)*(vw-20);
+        ctx.strokeStyle="#fff";ctx.lineWidth=2;
+        ctx.beginPath();ctx.moveTo(cx,vy);ctx.lineTo(cx,vy+vh);ctx.stroke();
+    }
+}
+
+function drawPiano(){
+    var keyW=75,keyH=220,keyX=50,keyY=keyH+20;
+    keyY=H-keyH-20;
+    var colors=["#fff","#fff","#fff","#fff","#fff","#fff","#fff","#fff"];
+    var pressed=G.selectNote;
+    for(var i=0;i<NOTES.length;i++){
+        var kx=keyX+i*keyW+4,kw=keyW-8;
+        var isP=pressed===i;
+        // key shadow
+        ctx.fillStyle="rgba(0,0,0,0.3)";
+        roundRect(kx+2,keyY+2,kw,keyH,6);ctx.fill();
+        // key body
+        var grad=ctx.createLinearGradient(kx,keyY,kx,keyY+keyH);
+        if(isP){
+            grad.addColorStop(0,"#e94560");grad.addColorStop(1,"#c23152");
+        }else{
+            grad.addColorStop(0,"#ffffff");grad.addColorStop(1,"#e0e0e0");
+        }
+        ctx.fillStyle=grad;
+        roundRect(kx,keyY,kw,keyH,6);ctx.fill();
+        ctx.strokeStyle="#ccc";ctx.lineWidth=1;
+        roundRect(kx,keyY,kw,keyH,6);ctx.stroke();
+        // label
+        ctx.fillStyle=isP?"#fff":"#333";
+        ctx.font="bold 16px 'Segoe UI',sans-serif";
+        ctx.textAlign="center";ctx.textBaseline="bottom";
+        ctx.fillText(NOTES[i].label,kx+kw/2,keyY+keyH-15);
+        ctx.font="12px 'Segoe UI',sans-serif";
+        ctx.fillStyle=isP?"#ffa":"#999";
+        ctx.fillText(NOTES[i].key.toUpperCase(),kx+kw/2,keyY+keyH-35);
+    }
+    // key highlight feedback
+    if(G.selectNote>=0&&G.selectNote<NOTES.length){
+        var si=G.selectNote;
+        var sx=keyX+si*keyW+4;
+        var pulse=Math.sin(G.time*15)*0.3+0.7;
+        ctx.strokeStyle="rgba(233,69,96,"+pulse+")";ctx.lineWidth=3;
+        roundRect(sx,keyY,keyW-8,keyH,6);ctx.stroke();
+    }
+}
+
+function drawPause(){
+    drawBg();
+    ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,W,H);
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.font="bold 48px 'Segoe UI',sans-serif";ctx.fillStyle="#fff";
+    ctx.fillText("暂停",W/2,200);
+    btn(300,280,200,50,"继续创作",true,false);
+    btn(300,350,200,50,"返回菜单",true,false);
+    ctx.font="16px 'Segoe UI',sans-serif";ctx.fillStyle="#888";
+    ctx.fillText("按空格键继续",W/2,430);
+}
+
+function drawEnd(){
+    G.endAnim+=0.03;
+    drawBg();
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    // Title
+    ctx.font="bold 42px 'Segoe UI',sans-serif";
+    ctx.fillStyle="#f5a623";
+    ctx.shadowColor="#f5a623";ctx.shadowBlur=15;
+    ctx.fillText("演奏完成!",W/2,120);
+    ctx.shadowBlur=0;
+    // Stats
+    ctx.font="22px 'Segoe UI',sans-serif";ctx.fillStyle="#fff";
+    ctx.fillText("最终得分: "+G.score,W/2,200);
+    ctx.fillText("音符数量: "+G.totalNotes,W/2,240);
+    ctx.fillText("最大连击: "+G.maxCombo,W/2,280);
+    // High score
+    if(G.score>=G.highScore){
+        ctx.fillStyle="#e94560";ctx.font="bold 20px 'Segoe UI',sans-serif";
+        ctx.fillText("新纪录!",W/2,330);
+    }else{
+        ctx.fillStyle="#888";ctx.font="18px 'Segoe UI',sans-serif";
+        ctx.fillText("最高分: "+G.highScore,W/2,330);
+    }
+    // Buttons
+    btn(250,380,300,50,"再来一次",true,false);
+    btn(250,450,300,50,"返回菜单",true,false);
+}
+
+/* ── Main Loop ── */
+var lastTime=0;
+function gameLoop(ts){
+    requestAnimationFrame(gameLoop);
+    var dt=Math.min((ts-lastTime)/1000,0.05);
+    lastTime=ts;
+    G.time+=dt;
+
+    // Reset select note
+    if(G.selectNote>=0){
+        G.selectNoteTimer=(G.selectNoteTimer||0)+dt;
+        if(G.selectNoteTimer>0.3){G.selectNote=-1;G.selectNoteTimer=0;}
+    }
+
+    updateParticles();
+    updatePlayback();
+
+    // Render
+    ctx.save();
+    switch(G.state){
+        case "menu":drawMenu();break;
+        case "play":drawPlay();break;
+        case "pause":drawPause();break;
+        case "end":drawEnd();break;
+    }
+    drawParticles();
+    ctx.restore();
+}
+
+requestAnimationFrame(gameLoop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

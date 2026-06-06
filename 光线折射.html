@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>光线折射</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    background: #0a0a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+#gameCanvas {
+    background: #0f0f3a;
+    border: 2px solid #1a1a5a;
+    border-radius: 10px;
+    image-rendering: pixelated;
+}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ============ 画布尺寸 ============
+const BASE_WIDTH = 480;
+const BASE_HEIGHT = 700;
+canvas.width = BASE_WIDTH;
+canvas.height = BASE_HEIGHT;
+
+// ============ 游戏状态 ============
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, LEVEL_COMPLETE: 3, GAME_OVER: 4 };
+
+// ============ 配置常量 ============
+const MIRROR_WIDTH = 60;
+const MIRROR_HEIGHT = 8;
+const TARGET_RADIUS = 20;
+const LIGHT_SOURCE_RADIUS = 15;
+const MAX_BOUNCES = 10;
+const COLORS = {
+    light: '#ffe066',
+    lightGlow: 'rgba(255,224,102,0.3)',
+    mirror: '#a0c4ff',
+    mirrorBorder: '#6090d0',
+    target: '#ff6b6b',
+    targetGlow: 'rgba(255,107,107,0.4)',
+    wall: '#4a4a8a',
+    ui: '#e0e0ff',
+    accent: '#80ffdb',
+    dark: '#0f0f3a',
+    panel: 'rgba(15,15,58,0.9)'
+};
+
+// ============ 关卡数据 ============
+const LEVELS = [
+    {
+        name: "初识光线",
+        desc: "旋转镜子，将光线导向目标",
+        mirrors: [{x:240, y:350, angle: Math.PI/4}],
+        sources: [{x:100, y:150, angle: Math.PI/4}],
+        targets: [{x:380, y:550}],
+        walls: [],
+        maxSteps: 2,
+        starSteps: [1, 2, 3]
+    },
+    {
+        name: "双镜之舞",
+        desc: "使用两面镜子完成折射",
+        mirrors: [{x:150, y:250, angle:0}, {x:330, y:450, angle: Math.PI/4}],
+        sources: [{x:60, y:100, angle: Math.PI/6}],
+        targets: [{x:420, y:600}],
+        walls: [{x:240, y:200, w:10, h:200}],
+        maxSteps: 3,
+        starSteps: [2, 3, 4]
+    },
+    {
+        name: "迷宫之光",
+        desc: "绕过障碍，精准折射",
+        mirrors: [{x:120, y:300, angle:-Math.PI/6}, {x:360, y:200, angle:Math.PI/3}, {x:240, y:500, angle:0}],
+        sources: [{x:60, y:80, angle: Math.PI/4}],
+        targets: [{x:400, y:620}],
+        walls: [{x:200, y:150, w:10, h:180}, {x:300, y:350, w:10, h:150}],
+        maxSteps: 4,
+        starSteps: [3, 4, 5]
+    },
+    {
+        name: "双目标",
+        desc: "同时命中两个目标",
+        mirrors: [{x:150, y:200, angle:0}, {x:330, y:350, angle:Math.PI/4}, {x:150, y:500, angle:-Math.PI/4}],
+        sources: [{x:60, y:100, angle: Math.PI/3}],
+        targets: [{x:400, y:200}, {x:400, y:580}],
+        walls: [{x:240, y:100, w:10, h:250}],
+        maxSteps: 5,
+        starSteps: [3, 4, 6]
+    },
+    {
+        name: "光之迷阵",
+        desc: "复杂的折射挑战",
+        mirrors: [{x:100, y:200, angle:Math.PI/6}, {x:300, y:150, angle:-Math.PI/4}, {x:200, y:400, angle:Math.PI/3}, {x:380, y:500, angle:0}],
+        sources: [{x:60, y:60, angle: Math.PI/5}],
+        targets: [{x:420, y:640}],
+        walls: [{x:160, y:100, w:10, h:200}, {x:320, y:250, w:10, h:200}, {x:240, y:450, w:80, h:10}],
+        maxSteps: 5,
+        starSteps: [4, 5, 6]
+    },
+    {
+        name: "终极考验",
+        desc: "所有技巧的综合运用",
+        mirrors: [{x:120, y:180, angle:Math.PI/4}, {x:350, y:120, angle:-Math.PI/6}, {x:100, y:400, angle:Math.PI/3}, {x:380, y:350, angle:-Math.PI/4}, {x:240, y:550, angle:0}],
+        sources: [{x:60, y:60, angle: Math.PI/4}],
+        targets: [{x:420, y:620}, {x:60, y:620}],
+        walls: [{x:200, y:80, w:10, h:200}, {x:300, y:280, w:10, h:180}, {x:150, y:480, w:100, h:10}],
+        maxSteps: 6,
+        starSteps: [5, 6, 7]
+    }
+];
+
+// ============ 游戏变量 ============
+let gameState = STATE.MENU;
+let currentLevel = 0;
+let mirrors = [];
+let sources = [];
+let targets = [];
+let walls = [];
+let lightPaths = [];
+let selectedMirror = -1;
+let isDragging = false;
+let dragStartAngle = 0;
+let steps = 0;
+let maxSteps = 0;
+let levelScore = 0;
+let totalScore = 0;
+let highScore = parseInt(localStorage.getItem('lightref_highScore')) || 0;
+let particles = [];
+let hitTargets = new Set();
+let animTimer = 0;
+let menuAnim = 0;
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let touchId = null;
+
+// ============ 音效系统 ============
+let audioCtx = null;
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+}
+
+function playTone(freq, duration, type, volume) {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(volume || 0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+}
+
+function playRotate() { playTone(600, 0.1, 'sine', 0.1); }
+function playHit() { playTone(880, 0.3, 'sine', 0.2); setTimeout(() => playTone(1100, 0.2, 'sine', 0.15), 100); }
+function playComplete() { playTone(523, 0.2, 'sine', 0.2); setTimeout(() => playTone(659, 0.2, 'sine', 0.2), 150); setTimeout(() => playTone(784, 0.3, 'sine', 0.25), 300); }
+function playFail() { playTone(300, 0.3, 'sawtooth', 0.1); setTimeout(() => playTone(200, 0.4, 'sawtooth', 0.1), 200); }
+function playClick() { playTone(500, 0.08, 'square', 0.08); }
+
+// ============ 粒子系统 ============
+function addParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 3;
+        particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay: 0.02 + Math.random() * 0.03,
+            size: 2 + Math.random() * 4,
+            color: color
+        });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= p.decay;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ============ 关卡初始化 ============
+function initLevel(idx) {
+    const level = LEVELS[idx];
+    mirrors = level.mirrors.map(m => ({...m, originalAngle: m.angle}));
+    sources = level.sources.map(s => ({...s}));
+    targets = level.targets.map(t => ({...t, hit: false}));
+    walls = level.walls.map(w => ({...w}));
+    maxSteps = level.maxSteps;
+    steps = 0;
+    levelScore = 0;
+    hitTargets = new Set();
+    selectedMirror = -1;
+    lightPaths = [];
+    calculateLightPaths();
+}
+
+function calculateLightPaths() {
+    lightPaths = [];
+    hitTargets = new Set();
+
+    sources.forEach(source => {
+        let paths = [];
+        let ox = source.x;
+        let oy = source.y;
+        let dx = Math.cos(source.angle);
+        let dy = Math.sin(source.angle);
+        let bounces = 0;
+        let alive = true;
+
+        paths.push({x: ox, y: oy});
+
+        while (alive && bounces < MAX_BOUNCES) {
+            let closestDist = Infinity;
+            let closestPoint = null;
+            let closestMirror = -1;
+            let hitType = '';
+
+            // 检查镜子碰撞
+            mirrors.forEach((m, i) => {
+                const result = lineSegmentIntersect(ox, oy, ox + dx * 2000, oy + dy * 2000,
+                    m.x - Math.cos(m.angle) * MIRROR_WIDTH/2,
+                    m.y - Math.sin(m.angle) * MIRROR_WIDTH/2,
+                    m.x + Math.cos(m.angle) * MIRROR_WIDTH/2,
+                    m.y + Math.sin(m.angle) * MIRROR_WIDTH/2);
+                if (result) {
+                    const dist = Math.hypot(result.x - ox, result.y - oy);
+                    if (dist > 2 && dist < closestDist) {
+                        closestDist = dist;
+                        closestPoint = result;
+                        closestMirror = i;
+                        hitType = 'mirror';
+                    }
+                }
+            });
+
+            // 检查墙壁碰撞
+            walls.forEach(w => {
+                const edges = [
+                    {x1:w.x, y1:w.y, x2:w.x+w.w, y2:w.y},
+                    {x1:w.x+w.w, y1:w.y, x2:w.x+w.w, y2:w.y+w.h},
+                    {x1:w.x+w.w, y1:w.y+w.h, x2:w.x, y2:w.y+w.h},
+                    {x1:w.x, y1:w.y+w.h, x2:w.x, y2:w.y}
+                ];
+                edges.forEach(e => {
+                    const result = lineSegmentIntersect(ox, oy, ox + dx * 2000, oy + dy * 2000,
+                        e.x1, e.y1, e.x2, e.y2);
+                    if (result) {
+                        const dist = Math.hypot(result.x - ox, result.y - oy);
+                        if (dist > 2 && dist < closestDist) {
+                            closestDist = dist;
+                            closestPoint = result;
+                            closestMirror = -1;
+                            hitType = 'wall';
+                        }
+                    }
+                });
+            });
+
+            // 检查边界
+            const borderDist = 2000;
+            const borders = [
+                {x1:0, y1:0, x2:BASE_WIDTH, y2:0},
+                {x1:BASE_WIDTH, y1:0, x2:BASE_WIDTH, y2:BASE_HEIGHT},
+                {x1:BASE_WIDTH, y1:BASE_HEIGHT, x2:0, y2:BASE_HEIGHT},
+                {x1:0, y1:BASE_HEIGHT, x2:0, y2:0}
+            ];
+            borders.forEach(e => {
+                const result = lineSegmentIntersect(ox, oy, ox + dx * 2000, oy + dy * 2000,
+                    e.x1, e.y1, e.x2, e.y2);
+                if (result) {
+                    const dist = Math.hypot(result.x - ox, result.y - oy);
+                    if (dist > 2 && dist < closestDist) {
+                        closestDist = dist;
+                        closestPoint = result;
+                        hitType = 'border';
+                    }
+                }
+            });
+
+            if (closestPoint) {
+                paths.push({x: closestPoint.x, y: closestPoint.y});
+
+                // 检查是否命中目标
+                targets.forEach((t, ti) => {
+                    if (!t.hit) {
+                        const dist = pointToSegmentDist(t.x, t.y, ox, oy, closestPoint.x, closestPoint.y);
+                        if (dist < TARGET_RADIUS) {
+                            t.hit = true;
+                            hitTargets.add(ti);
+                            addParticles(t.x, t.y, COLORS.target, 15);
+                            playHit();
+                        }
+                    }
+                });
+
+                if (hitType === 'mirror' && closestMirror >= 0) {
+                    const m = mirrors[closestMirror];
+                    const normal = m.angle + Math.PI / 2;
+                    const nx = Math.cos(normal);
+                    const ny = Math.sin(normal);
+                    const dot = dx * nx + dy * ny;
+                    dx = dx - 2 * dot * nx;
+                    dy = dy - 2 * dot * ny;
+                    ox = closestPoint.x + dx * 2;
+                    oy = closestPoint.y + dy * 2;
+                    bounces++;
+                } else {
+                    alive = false;
+                }
+            } else {
+                alive = false;
+            }
+        }
+
+        if (paths.length > 1) {
+            lightPaths.push(paths);
+        }
+    });
+}
+
+function lineSegmentIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+    const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denom) < 0.0001) return null;
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+    const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+    }
+    return null;
+}
+
+function pointToSegmentDist(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+// ============ 绘制函数 ============
+function drawBackground() {
+    // 网格背景
+    ctx.strokeStyle = 'rgba(100,100,200,0.08)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < BASE_WIDTH; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, BASE_HEIGHT);
+        ctx.stroke();
+    }
+    for (let y = 0; y < BASE_HEIGHT; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(BASE_WIDTH, y);
+        ctx.stroke();
+    }
+}
+
+function drawLightSources() {
+    sources.forEach(s => {
+        // 光源光晕
+        const gradient = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, LIGHT_SOURCE_RADIUS * 2);
+        gradient.addColorStop(0, COLORS.lightGlow);
+        gradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, LIGHT_SOURCE_RADIUS * 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 光源本体
+        ctx.fillStyle = COLORS.light;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, LIGHT_SOURCE_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 方向指示
+        ctx.strokeStyle = COLORS.light;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x + Math.cos(s.angle) * 30, s.y + Math.sin(s.angle) * 30);
+        ctx.stroke();
+
+        // 标签
+        ctx.fillStyle = COLORS.dark;
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('光源', s.x, s.y + 4);
+    });
+}
+
+function drawTargets() {
+    targets.forEach((t, i) => {
+        const pulse = Math.sin(animTimer * 0.05 + i) * 0.3 + 0.7;
+
+        // 光晕
+        if (t.hit) {
+            const gradient = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, TARGET_RADIUS * 2);
+            gradient.addColorStop(0, 'rgba(100,255,100,0.4)');
+            gradient.addColorStop(1, 'transparent');
+            ctx.fillStyle = gradient;
+        } else {
+            const gradient = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, TARGET_RADIUS * 1.5);
+            gradient.addColorStop(0, COLORS.targetGlow);
+            gradient.addColorStop(1, 'transparent');
+            ctx.fillStyle = gradient;
+        }
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, TARGET_RADIUS * 1.5 * pulse, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 目标本体
+        ctx.fillStyle = t.hit ? '#66ff66' : COLORS.target;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, TARGET_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 靶心
+        ctx.fillStyle = t.hit ? '#aaffaa' : '#ff9999';
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, TARGET_RADIUS * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 标签
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(t.hit ? '✓' : '目标', t.x, t.y + 4);
+    });
+}
+
+function drawMirrors() {
+    mirrors.forEach((m, i) => {
+        const isSelected = i === selectedMirror;
+        const hw = MIRROR_WIDTH / 2;
+        const hh = MIRROR_HEIGHT / 2;
+
+        ctx.save();
+        ctx.translate(m.x, m.y);
+        ctx.rotate(m.angle);
+
+        // 选中高亮
+        if (isSelected) {
+            ctx.shadowColor = COLORS.accent;
+            ctx.shadowBlur = 15;
+        }
+
+        // 镜子本体
+        const gradient = ctx.createLinearGradient(-hw, -hh, hw, hh);
+        gradient.addColorStop(0, COLORS.mirror);
+        gradient.addColorStop(0.5, '#ffffff');
+        gradient.addColorStop(1, COLORS.mirror);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(-hw, -hh, MIRROR_WIDTH, MIRROR_HEIGHT);
+
+        // 边框
+        ctx.strokeStyle = isSelected ? COLORS.accent : COLORS.mirrorBorder;
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.strokeRect(-hw, -hh, MIRROR_WIDTH, MIRROR_HEIGHT);
+
+        ctx.shadowBlur = 0;
+
+        // 旋转手柄
+        if (isSelected) {
+            ctx.fillStyle = COLORS.accent;
+            ctx.beginPath();
+            ctx.arc(0, -hh - 10, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = COLORS.dark;
+            ctx.font = '8px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('↻', 0, -hh - 7);
+        }
+
+        ctx.restore();
+
+        // 镜子编号
+        ctx.fillStyle = COLORS.ui;
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('#' + (i + 1), m.x, m.y + MIRROR_HEIGHT + 15);
+    });
+}
+
+function drawWalls() {
+    walls.forEach(w => {
+        ctx.fillStyle = COLORS.wall;
+        ctx.fillRect(w.x, w.y, w.w, w.h);
+        ctx.strokeStyle = '#6a6aaa';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(w.x, w.y, w.w, w.h);
+    });
+}
+
+function drawLightPaths() {
+    lightPaths.forEach(path => {
+        if (path.length < 2) return;
+
+        // 光线光晕
+        ctx.strokeStyle = COLORS.lightGlow;
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(path[0].x, path[0].y);
+        for (let i = 1; i < path.length; i++) {
+            ctx.lineTo(path[i].x, path[i].y);
+        }
+        ctx.stroke();
+
+        // 光线主体
+        ctx.strokeStyle = COLORS.light;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(path[0].x, path[0].y);
+        for (let i = 1; i < path.length; i++) {
+            ctx.lineTo(path[i].x, path[i].y);
+        }
+        ctx.stroke();
+
+        // 反射点
+        for (let i = 1; i < path.length - 1; i++) {
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(path[i].x, path[i].y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+}
+
+function drawUI() {
+    // 顶部信息栏
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(0, 0, BASE_WIDTH, 50);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('关卡 ' + (currentLevel + 1) + ': ' + LEVELS[currentLevel].name, 10, 20);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillText('旋转次数: ' + steps + '/' + maxSteps, BASE_WIDTH / 2, 20);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = COLORS.light;
+    ctx.fillText('命中: ' + hitTargets.size + '/' + targets.length, BASE_WIDTH - 10, 20);
+
+    // 提示
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(LEVELS[currentLevel].desc, BASE_WIDTH / 2, 42);
+
+    // 底部操作栏
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(0, BASE_HEIGHT - 60, BASE_WIDTH, 60);
+
+    // 重置按钮
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillRect(10, BASE_HEIGHT - 50, 80, 35);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('重置', 50, BASE_HEIGHT - 28);
+
+    // 提交按钮
+    const allHit = hitTargets.size === targets.length;
+    ctx.fillStyle = allHit ? '#66ff66' : '#4a4a8a';
+    ctx.fillRect(BASE_WIDTH - 90, BASE_HEIGHT - 50, 80, 35);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('提交', BASE_WIDTH - 50, BASE_HEIGHT - 28);
+
+    // 星级提示
+    const level = LEVELS[currentLevel];
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('星级: ' + level.starSteps.join('/') + ' 步', BASE_WIDTH / 2, BASE_HEIGHT - 28);
+}
+
+function drawMenu() {
+    menuAnim += 0.02;
+
+    // 背景
+    ctx.fillStyle = COLORS.dark;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+    drawBackground();
+
+    // 标题
+    ctx.fillStyle = COLORS.light;
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('光线折射', BASE_WIDTH / 2, 180 + Math.sin(menuAnim) * 10);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '16px Arial';
+    ctx.fillText('物理解谜 · 调整镜子角度', BASE_WIDTH / 2, 220);
+    ctx.fillText('折射光线命中目标', BASE_WIDTH / 2, 245);
+
+    // 开始按钮
+    const btnY = 340;
+    const pulse = Math.sin(menuAnim * 3) * 5;
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH / 2 - 80, btnY - 20 + pulse, 160, 45);
+    ctx.fillStyle = COLORS.dark;
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText('开始游戏', BASE_WIDTH / 2, btnY + 8 + pulse);
+
+    // 最高分
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '14px Arial';
+    ctx.fillText('最高分: ' + highScore, BASE_WIDTH / 2, 430);
+
+    // 关卡选择
+    ctx.fillStyle = COLORS.mirror;
+    ctx.font = '14px Arial';
+    ctx.fillText('选择关卡', BASE_WIDTH / 2, 480);
+
+    for (let i = 0; i < LEVELS.length; i++) {
+        const x = BASE_WIDTH / 2 - 120 + (i % 3) * 80;
+        const y = 510 + Math.floor(i / 3) * 50;
+        const hovered = false;
+        ctx.fillStyle = hovered ? COLORS.accent : COLORS.wall;
+        ctx.fillRect(x - 30, y - 15, 60, 30);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px Arial';
+        ctx.fillText('' + (i + 1), x, y + 5);
+    }
+
+    // 操作说明
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '12px Arial';
+    ctx.fillText('点击镜子选中 · 拖动旋转 · 键盘↑↓微调', BASE_WIDTH / 2, BASE_HEIGHT - 30);
+}
+
+function drawLevelComplete() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(BASE_WIDTH / 2 - 160, 200, 320, 300);
+
+    ctx.fillStyle = COLORS.accent;
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('关卡完成!', BASE_WIDTH / 2, 260);
+
+    // 星级
+    const stars = calculateStars();
+    ctx.font = '40px Arial';
+    let starText = '';
+    for (let i = 0; i < 3; i++) {
+        starText += i < stars ? '★' : '☆';
+    }
+    ctx.fillStyle = COLORS.light;
+    ctx.fillText(starText, BASE_WIDTH / 2, 320);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '16px Arial';
+    ctx.fillText('旋转次数: ' + steps, BASE_WIDTH / 2, 360);
+    ctx.fillText('得分: ' + levelScore, BASE_WIDTH / 2, 390);
+
+    // 继续按钮
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH / 2 - 60, 420, 120, 40);
+    ctx.fillStyle = COLORS.dark;
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText('继续', BASE_WIDTH / 2, 445);
+}
+
+function drawPaused() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.fillStyle = COLORS.panel;
+    ctx.fillRect(BASE_WIDTH / 2 - 120, 250, 240, 160);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('暂停', BASE_WIDTH / 2, 310);
+
+    ctx.fillStyle = COLORS.accent;
+    ctx.fillRect(BASE_WIDTH / 2 - 50, 340, 100, 35);
+    ctx.fillStyle = COLORS.dark;
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText('继续', BASE_WIDTH / 2, 362);
+
+    ctx.fillStyle = COLORS.ui;
+    ctx.font = '12px Arial';
+    ctx.fillText('按 P 或 ESC 继续', BASE_WIDTH / 2, 400);
+}
+
+function calculateStars() {
+    const level = LEVELS[currentLevel];
+    if (steps <= level.starSteps[0]) return 3;
+    if (steps <= level.starSteps[1]) return 2;
+    if (steps <= level.starSteps[2]) return 1;
+    return 0;
+}
+
+// ============ 交互处理 ============
+function getMirrorAtPos(x, y) {
+    for (let i = mirrors.length - 1; i >= 0; i--) {
+        const m = mirrors[i];
+        const dist = Math.hypot(x - m.x, y - m.y);
+        if (dist < MIRROR_WIDTH / 2 + 10) return i;
+    }
+    return -1;
+}
+
+function handleTap(x, y) {
+    initAudio();
+    playClick();
+
+    if (gameState === STATE.MENU) {
+        // 检查开始按钮
+        if (x > BASE_WIDTH / 2 - 80 && x < BASE_WIDTH / 2 + 80 && y > 320 && y < 385) {
+            gameState = STATE.PLAYING;
+            currentLevel = 0;
+            totalScore = 0;
+            initLevel(0);
+            return;
+        }
+        // 检查关卡选择
+        for (let i = 0; i < LEVELS.length; i++) {
+            const lx = BASE_WIDTH / 2 - 120 + (i % 3) * 80;
+            const ly = 510 + Math.floor(i / 3) * 50;
+            if (x > lx - 30 && x < lx + 30 && y > ly - 15 && y < ly + 15) {
+                gameState = STATE.PLAYING;
+                currentLevel = i;
+                totalScore = 0;
+                initLevel(i);
+                return;
+            }
+        }
+        return;
+    }
+
+    if (gameState === STATE.PAUSED) {
+        if (x > BASE_WIDTH / 2 - 50 && x < BASE_WIDTH / 2 + 50 && y > 340 && y < 375) {
+            gameState = STATE.PLAYING;
+        }
+        return;
+    }
+
+    if (gameState === STATE.LEVEL_COMPLETE) {
+        if (x > BASE_WIDTH / 2 - 60 && x < BASE_WIDTH / 2 + 60 && y > 420 && y < 460) {
+            if (currentLevel < LEVELS.length - 1) {
+                currentLevel++;
+                initLevel(currentLevel);
+                gameState = STATE.PLAYING;
+            } else {
+                gameState = STATE.MENU;
+                if (totalScore > highScore) {
+                    highScore = totalScore;
+                    localStorage.setItem('lightref_highScore', highScore);
+                }
+            }
+        }
+        return;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+
+    // 检查重置按钮
+    if (x > 10 && x < 90 && y > BASE_HEIGHT - 50 && y < BASE_HEIGHT - 15) {
+        initLevel(currentLevel);
+        playClick();
+        return;
+    }
+
+    // 检查提交按钮
+    if (x > BASE_WIDTH - 90 && x < BASE_WIDTH - 10 && y > BASE_HEIGHT - 50 && y < BASE_HEIGHT - 15) {
+        if (hitTargets.size === targets.length) {
+            const stars = calculateStars();
+            levelScore = stars * 100 + (maxSteps - steps) * 20;
+            totalScore += levelScore;
+            gameState = STATE.LEVEL_COMPLETE;
+            playComplete();
+            addParticles(BASE_WIDTH / 2, 300, COLORS.light, 30);
+        } else {
+            playFail();
+            shakeTimer = 10;
+            shakeIntensity = 5;
+        }
+        return;
+    }
+
+    // 检查镜子点击
+    const mirrorIdx = getMirrorAtPos(x, y);
+    if (mirrorIdx >= 0) {
+        selectedMirror = mirrorIdx;
+        isDragging = true;
+        dragStartAngle = Math.atan2(y - mirrors[mirrorIdx].y, x - mirrors[mirrorIdx].x);
+    } else {
+        selectedMirror = -1;
+    }
+}
+
+function handleMove(x, y) {
+    if (gameState !== STATE.PLAYING || !isDragging || selectedMirror < 0) return;
+
+    const m = mirrors[selectedMirror];
+    const newAngle = Math.atan2(y - m.y, x - m.x);
+    const diff = newAngle - dragStartAngle;
+
+    m.angle += diff;
+    dragStartAngle = newAngle;
+
+    calculateLightPaths();
+    playRotate();
+}
+
+function handleRelease() {
+    if (isDragging && selectedMirror >= 0) {
+        steps++;
+        isDragging = false;
+
+        // 检查是否所有目标都命中
+        if (hitTargets.size === targets.length) {
+            playHit();
+        }
+    }
+}
+
+// ============ 事件监听 ============
+canvas.addEventListener('mousedown', e => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = BASE_WIDTH / rect.width;
+    const scaleY = BASE_HEIGHT / rect.height;
+    handleTap((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
+});
+
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = BASE_WIDTH / rect.width;
+    const scaleY = BASE_HEIGHT / rect.height;
+    handleMove((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
+});
+
+canvas.addEventListener('mouseup', handleRelease);
+
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = BASE_WIDTH / rect.width;
+    const scaleY = BASE_HEIGHT / rect.height;
+    touchId = touch.identifier;
+    handleTap((touch.clientX - rect.left) * scaleX, (touch.clientY - rect.top) * scaleY);
+});
+
+canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (let touch of e.touches) {
+        if (touch.identifier === touchId) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = BASE_WIDTH / rect.width;
+            const scaleY = BASE_HEIGHT / rect.height;
+            handleMove((touch.clientX - rect.left) * scaleX, (touch.clientY - rect.top) * scaleY);
+        }
+    }
+});
+
+canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    for (let touch of e.changedTouches) {
+        if (touch.identifier === touchId) {
+            handleRelease();
+            touchId = null;
+        }
+    }
+});
+
+document.addEventListener('keydown', e => {
+    if (gameState === STATE.PLAYING && selectedMirror >= 0) {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            mirrors[selectedMirror].angle -= 0.05;
+            steps++;
+            calculateLightPaths();
+            playRotate();
+        } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            mirrors[selectedMirror].angle += 0.05;
+            steps++;
+            calculateLightPaths();
+            playRotate();
+        }
+    }
+
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        if (gameState === STATE.PLAYING) {
+            gameState = STATE.PAUSED;
+        } else if (gameState === STATE.PAUSED) {
+            gameState = STATE.PLAYING;
+        }
+    }
+
+    if (e.key === 'r' || e.key === 'R') {
+        if (gameState === STATE.PLAYING) {
+            initLevel(currentLevel);
+        }
+    }
+});
+
+// ============ 响应式 ============
+function resize() {
+    const maxW = window.innerWidth;
+    const maxH = window.innerHeight;
+    const scale = Math.min(maxW / BASE_WIDTH, maxH / BASE_HEIGHT, 1);
+    canvas.style.width = (BASE_WIDTH * scale) + 'px';
+    canvas.style.height = (BASE_HEIGHT * scale) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============ 游戏循环 ============
+function gameLoop() {
+    animTimer++;
+
+    // 屏幕震动
+    if (shakeTimer > 0) {
+        shakeTimer--;
+        ctx.save();
+        ctx.translate(
+            (Math.random() - 0.5) * shakeIntensity,
+            (Math.random() - 0.5) * shakeIntensity
+        );
+    }
+
+    // 清屏
+    ctx.fillStyle = COLORS.dark;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    if (gameState === STATE.MENU) {
+        drawMenu();
+    } else {
+        drawBackground();
+        drawWalls();
+        drawLightPaths();
+        drawLightSources();
+        drawTargets();
+        drawMirrors();
+        drawParticles();
+        updateParticles();
+
+        if (gameState === STATE.PLAYING) {
+            drawUI();
+        } else if (gameState === STATE.PAUSED) {
+            drawUI();
+            drawPaused();
+        } else if (gameState === STATE.LEVEL_COMPLETE) {
+            drawUI();
+            drawLevelComplete();
+        }
+    }
+
+    if (shakeTimer > 0) {
+        ctx.restore();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ============ 启动 ============
+gameLoop();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

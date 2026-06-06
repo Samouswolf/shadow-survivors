@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>切割大师</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    background: #1a1a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+canvas {
+    background: #16213e;
+    border: 2px solid #2a2a4a;
+    border-radius: 10px;
+    touch-action: none;
+}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ============ 画布设置 ============
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const BASE_WIDTH = 400;
+const BASE_HEIGHT = 600;
+canvas.width = BASE_WIDTH;
+canvas.height = BASE_HEIGHT;
+
+// ============ 音效系统 ============
+let audioCtx;
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+}
+
+function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    switch(type) {
+        case 'cut':
+            osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+            break;
+        case 'success':
+            osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+            osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.3);
+            break;
+        case 'fail':
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.3);
+            break;
+        case 'levelup':
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.2);
+            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.4);
+            break;
+        case 'click':
+            osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.05);
+            break;
+    }
+}
+
+// ============ 游戏状态 ============
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAME_OVER: 3, LEVEL_COMPLETE: 4 };
+
+// ============ 配置常量 ============
+const CUT_WIDTH = 4;
+const SLICE_LIFETIME = 300;
+const OBJECT_SPEED = 1.5;
+const SPAWN_INTERVAL = 120;
+const MAX_LIVES = 3;
+
+// ============ 游戏数据 ============
+let G = {
+    state: STATE.MENU,
+    score: 0,
+    highScore: parseInt(localStorage.getItem('sliceMasterHighScore') || '0'),
+    level: 1,
+    cuts: 0,
+    targetCuts: 10,
+    combo: 0,
+    maxCombo: 0,
+    lives: MAX_LIVES,
+    objects: [],
+    slices: [],
+    particles: [],
+    spawnTimer: 0,
+    frameCount: 0,
+    cutStart: null,
+    cutEnd: null,
+    isCutting: false,
+    bestCombo: 0,
+    perfectCuts: 0
+};
+
+// ============ 物体形状定义 ============
+const SHAPES = [
+    { name: 'circle', color: '#e74c3c', points: null },
+    { name: 'square', color: '#3498db', points: null },
+    { name: 'triangle', color: '#2ecc71', points: null },
+    { name: 'star', color: '#f39c12', points: null },
+    { name: 'hexagon', color: '#9b59b6', points: null },
+    { name: 'diamond', color: '#1abc9c', points: null }
+];
+
+// ============ 关卡配置 ============
+const LEVELS = [
+    { target: 10, spawnInterval: 150, speed: 1.2, name: '新手入门' },
+    { target: 15, spawnInterval: 130, speed: 1.5, name: '初级切割' },
+    { target: 20, spawnInterval: 120, speed: 1.8, name: '中级挑战' },
+    { target: 25, spawnInterval: 110, speed: 2.0, name: '高级技巧' },
+    { target: 30, spawnInterval: 100, speed: 2.2, name: '大师之路' },
+    { target: 40, spawnInterval: 90, speed: 2.5, name: '宗师境界' },
+    { target: 50, spawnInterval: 80, speed: 2.8, name: '传奇大师' },
+    { target: 60, spawnInterval: 70, speed: 3.0, name: '至尊传说' }
+];
+
+// ============ 粒子系统 ============
+class Particle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 6;
+        this.vy = (Math.random() - 0.5) * 6;
+        this.size = Math.random() * 4 + 2;
+        this.color = color;
+        this.life = 1;
+        this.decay = Math.random() * 0.02 + 0.02;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= this.decay;
+        this.size *= 0.98;
+    }
+
+    draw() {
+        ctx.globalAlpha = this.life;
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
+        ctx.globalAlpha = 1;
+    }
+}
+
+// ============ 物体类 ============
+class GameObject {
+    constructor(x, y, shape, size) {
+        this.x = x;
+        this.y = y;
+        this.shape = shape;
+        this.size = size || 40;
+        this.rotation = 0;
+        this.rotSpeed = (Math.random() - 0.5) * 0.05;
+        this.points = [];
+        this.generatePoints();
+    }
+
+    generatePoints() {
+        const s = this.size;
+        this.points = [];
+
+        switch(this.shape.name) {
+            case 'circle':
+                for (let i = 0; i < 12; i++) {
+                    const angle = (i / 12) * Math.PI * 2;
+                    this.points.push({
+                        x: Math.cos(angle) * s,
+                        y: Math.sin(angle) * s
+                    });
+                }
+                break;
+            case 'square':
+                this.points = [
+                    { x: -s, y: -s },
+                    { x: s, y: -s },
+                    { x: s, y: s },
+                    { x: -s, y: s }
+                ];
+                break;
+            case 'triangle':
+                this.points = [
+                    { x: 0, y: -s },
+                    { x: s, y: s },
+                    { x: -s, y: s }
+                ];
+                break;
+            case 'star':
+                for (let i = 0; i < 10; i++) {
+                    const angle = (i / 10) * Math.PI * 2 - Math.PI / 2;
+                    const r = i % 2 === 0 ? s : s * 0.5;
+                    this.points.push({
+                        x: Math.cos(angle) * r,
+                        y: Math.sin(angle) * r
+                    });
+                }
+                break;
+            case 'hexagon':
+                for (let i = 0; i < 6; i++) {
+                    const angle = (i / 6) * Math.PI * 2;
+                    this.points.push({
+                        x: Math.cos(angle) * s,
+                        y: Math.sin(angle) * s
+                    });
+                }
+                break;
+            case 'diamond':
+                this.points = [
+                    { x: 0, y: -s },
+                    { x: s * 0.7, y: 0 },
+                    { x: 0, y: s },
+                    { x: -s * 0.7, y: 0 }
+                ];
+                break;
+        }
+    }
+
+    update() {
+        this.y += OBJECT_SPEED * LEVELS[Math.min(G.level - 1, LEVELS.length - 1)].speed;
+        this.rotation += this.rotSpeed;
+        return this.y < canvas.height + this.size;
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+
+        // 绘制填充
+        ctx.fillStyle = this.shape.color;
+        ctx.beginPath();
+        ctx.moveTo(this.points[0].x, this.points[0].y);
+        for (let i = 1; i < this.points.length; i++) {
+            ctx.lineTo(this.points[i].x, this.points[i].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // 绘制边框
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // 绘制光泽
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        ctx.arc(-this.size * 0.3, -this.size * 0.3, this.size * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    containsPoint(px, py) {
+        const dx = px - this.x;
+        const dy = py - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        return dist < this.size;
+    }
+
+    getRotatedPoints() {
+        return this.points.map(p => ({
+            x: this.x + p.x * Math.cos(this.rotation) - p.y * Math.sin(this.rotation),
+            y: this.y + p.x * Math.sin(this.rotation) + p.y * Math.cos(this.rotation)
+        }));
+    }
+}
+
+// ============ 切割线条 ============
+class Slice {
+    constructor(x1, y1, x2, y2) {
+        this.x1 = x1;
+        this.y1 = y1;
+        this.x2 = x2;
+        this.y2 = y2;
+        this.life = 1;
+    }
+
+    update() {
+        this.life -= 1 / SLICE_LIFETIME;
+        return this.life > 0;
+    }
+
+    draw() {
+        ctx.globalAlpha = this.life;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = CUT_WIDTH * this.life;
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur = 10 * this.life;
+        ctx.beginPath();
+        ctx.moveTo(this.x1, this.y1);
+        ctx.lineTo(this.x2, this.y2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+    }
+}
+
+// ============ 初始化游戏 ============
+function initGame() {
+    G.state = STATE.PLAYING;
+    G.score = 0;
+    G.level = 1;
+    G.cuts = 0;
+    G.combo = 0;
+    G.maxCombo = 0;
+    G.lives = MAX_LIVES;
+    G.objects = [];
+    G.slices = [];
+    G.particles = [];
+    G.spawnTimer = 0;
+    G.frameCount = 0;
+    G.perfectCuts = 0;
+    updateTarget();
+}
+
+function updateTarget() {
+    const lvl = LEVELS[Math.min(G.level - 1, LEVELS.length - 1)];
+    G.targetCuts = lvl.target;
+    G.cuts = 0;
+    G.combo = 0;
+}
+
+// ============ 生成物体 ============
+function spawnObject() {
+    const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+    const size = 30 + Math.random() * 20;
+    const x = size + Math.random() * (canvas.width - size * 2);
+    G.objects.push(new GameObject(x, -size, shape, size));
+}
+
+// ============ 切割检测 ============
+function checkCut(x1, y1, x2, y2) {
+    let hit = false;
+
+    for (let i = G.objects.length - 1; i >= 0; i--) {
+        const obj = G.objects[i];
+
+        // 简单的线段-圆碰撞检测
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const fx = x1 - obj.x;
+        const fy = y1 - obj.y;
+
+        const a = dx * dx + dy * dy;
+        const b = 2 * (fx * dx + fy * dy);
+        const c = fx * fx + fy * fy - obj.size * obj.size;
+
+        let discriminant = b * b - 4 * a * c;
+        if (discriminant < 0) continue;
+
+        discriminant = Math.sqrt(discriminant);
+        const t1 = (-b - discriminant) / (2 * a);
+        const t2 = (-b + discriminant) / (2 * a);
+
+        if ((t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1)) {
+            // 命中物体
+            hit = true;
+
+            // 生成粒子
+            for (let j = 0; j < 15; j++) {
+                G.particles.push(new Particle(obj.x, obj.y, obj.shape.color));
+            }
+
+            // 计算切割精度（是否切中中心）
+            const distToCenter = Math.sqrt(
+                Math.pow((x1 + x2) / 2 - obj.x, 2) +
+                Math.pow((y1 + y2) / 2 - obj.y, 2)
+            );
+            const accuracy = Math.max(0, 1 - distToCenter / obj.size);
+
+            // 更新分数
+            let points = 10;
+            if (accuracy > 0.8) {
+                points = 25;
+                G.perfectCuts++;
+            }
+            points *= (1 + G.combo * 0.5);
+
+            G.score += Math.floor(points);
+            G.cuts++;
+            G.combo++;
+            G.maxCombo = Math.max(G.maxCombo, G.combo);
+
+            // 移除物体
+            G.objects.splice(i, 1);
+
+            // 检查关卡完成
+            if (G.cuts >= G.targetCuts) {
+                G.state = STATE.LEVEL_COMPLETE;
+                playSound('levelup');
+            }
+
+            playSound('cut');
+        }
+    }
+
+    return hit;
+}
+
+// ============ 更新游戏状态 ============
+function update() {
+    if (G.state !== STATE.PLAYING) return;
+
+    G.frameCount++;
+
+    // 生成物体
+    G.spawnTimer++;
+    const spawnInterval = LEVELS[Math.min(G.level - 1, LEVELS.length - 1)].spawnInterval;
+    if (G.spawnTimer >= spawnInterval) {
+        G.spawnTimer = 0;
+        spawnObject();
+    }
+
+    // 更新物体
+    for (let i = G.objects.length - 1; i >= 0; i--) {
+        if (!G.objects[i].update()) {
+            // 物体逃走，扣除生命
+            G.lives--;
+            G.combo = 0;
+            playSound('fail');
+
+            if (G.lives <= 0) {
+                G.state = STATE.GAME_OVER;
+                if (G.score > G.highScore) {
+                    G.highScore = G.score;
+                    localStorage.setItem('sliceMasterHighScore', G.highScore.toString());
+                }
+            }
+
+            G.objects.splice(i, 1);
+        }
+    }
+
+    // 更新切割效果
+    for (let i = G.slices.length - 1; i >= 0; i--) {
+        if (!G.slices[i].update()) {
+            G.slices.splice(i, 1);
+        }
+    }
+
+    // 更新粒子
+    for (let i = G.particles.length - 1; i >= 0; i--) {
+        G.particles[i].update();
+        if (G.particles[i].life <= 0) {
+            G.particles.splice(i, 1);
+        }
+    }
+}
+
+// ============ 绘制函数 ============
+function drawBackground() {
+    // 网格背景
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    const gridSize = 40;
+    for (let x = 0; x < canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+}
+
+function drawHUD() {
+    // 顶部信息栏
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, 60);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`分数: ${G.score}`, 10, 20);
+    ctx.fillText(`关卡: ${G.level}`, 10, 45);
+    ctx.textAlign = 'right';
+    ctx.fillText(`最高: ${G.highScore}`, canvas.width - 10, 20);
+    ctx.fillText(`连击: ${G.combo}x`, canvas.width - 10, 45);
+
+    // 进度条
+    const progress = G.cuts / G.targetCuts;
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(80, 25, canvas.width - 160, 12);
+    ctx.fillStyle = '#2ecc71';
+    ctx.fillRect(80, 25, (canvas.width - 160) * Math.min(progress, 1), 12);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(80, 25, canvas.width - 160, 12);
+
+    // 生命值
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'center';
+    for (let i = 0; i < MAX_LIVES; i++) {
+        ctx.fillStyle = i < G.lives ? '#e74c3c' : '#555';
+        ctx.fillText('♥', canvas.width / 2 - 30 + i * 30, 55);
+    }
+
+    // 关卡目标
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`目标: ${G.cuts}/${G.targetCuts}`, canvas.width / 2, 15);
+}
+
+function drawMenu() {
+    // 标题
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('切割大师', canvas.width / 2, 150);
+
+    ctx.font = '18px Arial';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('划线切割物体，挑战你的反应力！', canvas.width / 2, 190);
+
+    // 按钮
+    drawButton(canvas.width / 2 - 80, 280, 160, 50, '开始游戏', '#2ecc71');
+    drawButton(canvas.width / 2 - 80, 350, 160, 50, '游戏说明', '#3498db');
+
+    // 最高分
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = '20px Arial';
+    ctx.fillText(`最高分: ${G.highScore}`, canvas.width / 2, 440);
+
+    // 版本
+    ctx.fillStyle = '#666';
+    ctx.font = '12px Arial';
+    ctx.fillText('v1.0 | 按空格键暂停', canvas.width / 2, canvas.height - 20);
+}
+
+function drawButton(x, y, w, h, text, color) {
+    // 按钮背景
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 10);
+    ctx.fill();
+
+    // 按钮文字
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + w / 2, y + h / 2);
+    ctx.textBaseline = 'alphabetic';
+}
+
+function drawPause() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏暂停', canvas.width / 2, canvas.height / 2 - 30);
+
+    ctx.font = '18px Arial';
+    ctx.fillText('按空格键继续', canvas.width / 2, canvas.height / 2 + 20);
+}
+
+function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = 'bold 42px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', canvas.width / 2, 180);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '24px Arial';
+    ctx.fillText(`最终得分: ${G.score}`, canvas.width / 2, 240);
+    ctx.fillText(`最高连击: ${G.maxCombo}x`, canvas.width / 2, 280);
+    ctx.fillText(`完美切割: ${G.perfectCuts}`, canvas.width / 2, 320);
+    ctx.fillText(`达到关卡: ${G.level}`, canvas.width / 2, 360);
+
+    if (G.score >= G.highScore) {
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 20px Arial';
+        ctx.fillText('新纪录！', canvas.width / 2, 400);
+    }
+
+    drawButton(canvas.width / 2 - 80, 430, 160, 50, '重新开始', '#2ecc71');
+    drawButton(canvas.width / 2 - 80, 500, 160, 50, '返回菜单', '#3498db');
+}
+
+function drawLevelComplete() {
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#2ecc71';
+    ctx.font = 'bold 42px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('关卡完成！', canvas.width / 2, 180);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '24px Arial';
+    ctx.fillText(`关卡 ${G.level} - ${LEVELS[Math.min(G.level - 1, LEVELS.length - 1)].name}`, canvas.width / 2, 240);
+    ctx.fillText(`得分: ${G.score}`, canvas.width / 2, 290);
+    ctx.fillText(`连击: ${G.maxCombo}x`, canvas.width / 2, 330);
+
+    drawButton(canvas.width / 2 - 80, 400, 160, 50, '下一关', '#2ecc71');
+}
+
+function drawGame() {
+    drawBackground();
+
+    // 绘制物体
+    for (const obj of G.objects) {
+        obj.draw();
+    }
+
+    // 绘制切割效果
+    for (const slice of G.slices) {
+        slice.draw();
+    }
+
+    // 绘制粒子
+    for (const particle of G.particles) {
+        particle.draw();
+    }
+
+    // 绘制当前切割线
+    if (G.isCutting && G.cutStart && G.cutEnd) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(G.cutStart.x, G.cutStart.y);
+        ctx.lineTo(G.cutEnd.x, G.cutEnd.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    drawHUD();
+}
+
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    switch(G.state) {
+        case STATE.MENU:
+            drawBackground();
+            drawMenu();
+            break;
+        case STATE.PLAYING:
+            drawGame();
+            break;
+        case STATE.PAUSED:
+            drawGame();
+            drawPause();
+            break;
+        case STATE.GAME_OVER:
+            drawGameOver();
+            break;
+        case STATE.LEVEL_COMPLETE:
+            drawLevelComplete();
+            break;
+    }
+}
+
+// ============ 输入处理 ============
+let touchId = null;
+
+function getPosFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    if (e.touches) {
+        const touch = e.touches[0] || e.changedTouches[0];
+        return {
+            x: (touch.clientX - rect.left) * scaleX,
+            y: (touch.clientY - rect.top) * scaleY
+        };
+    }
+
+    return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+    };
+}
+
+function isInButton(x, y, bx, by, bw, bh) {
+    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+}
+
+function handleClick(x, y) {
+    switch(G.state) {
+        case STATE.MENU:
+            if (isInButton(x, y, canvas.width / 2 - 80, 280, 160, 50)) {
+                playSound('click');
+                initAudio();
+                initGame();
+            }
+            if (isInButton(x, y, canvas.width / 2 - 80, 350, 160, 50)) {
+                playSound('click');
+                alert('游戏说明：\n1. 划线切割掉落的物体\n2. 切中物体得分\n3. 连续切割获得连击加分\n4. 切中中心获得完美加分\n5. 物体掉落底部会失去生命\n6. 达到目标切割数过关');
+            }
+            break;
+        case STATE.GAME_OVER:
+            if (isInButton(x, y, canvas.width / 2 - 80, 430, 160, 50)) {
+                playSound('click');
+                initGame();
+            }
+            if (isInButton(x, y, canvas.width / 2 - 80, 500, 160, 50)) {
+                playSound('click');
+                G.state = STATE.MENU;
+            }
+            break;
+        case STATE.LEVEL_COMPLETE:
+            if (isInButton(x, y, canvas.width / 2 - 80, 400, 160, 50)) {
+                playSound('click');
+                G.level++;
+                updateTarget();
+                G.state = STATE.PLAYING;
+            }
+            break;
+    }
+}
+
+// 鼠标事件
+canvas.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const pos = getPosFromEvent(e);
+
+    if (G.state === STATE.PLAYING) {
+        G.cutStart = pos;
+        G.cutEnd = pos;
+        G.isCutting = true;
+    }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    e.preventDefault();
+    const pos = getPosFromEvent(e);
+
+    if (G.isCutting) {
+        G.cutEnd = pos;
+    }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+    e.preventDefault();
+    const pos = getPosFromEvent(e);
+
+    if (G.isCutting) {
+        G.cutEnd = pos;
+        G.slices.push(new Slice(G.cutStart.x, G.cutStart.y, G.cutEnd.x, G.cutEnd.y));
+        checkCut(G.cutStart.x, G.cutStart.y, G.cutEnd.x, G.cutEnd.y);
+        G.isCutting = false;
+        G.cutStart = null;
+        G.cutEnd = null;
+    } else {
+        handleClick(pos.x, pos.y);
+    }
+});
+
+// 触摸事件
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    initAudio();
+    const pos = getPosFromEvent(e);
+
+    if (G.state === STATE.PLAYING) {
+        touchId = e.touches[0].identifier;
+        G.cutStart = pos;
+        G.cutEnd = pos;
+        G.isCutting = true;
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const pos = getPosFromEvent(e);
+
+    if (G.isCutting) {
+        G.cutEnd = pos;
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    const pos = getPosFromEvent(e);
+
+    if (G.isCutting) {
+        G.cutEnd = pos;
+        G.slices.push(new Slice(G.cutStart.x, G.cutStart.y, G.cutEnd.x, G.cutEnd.y));
+        checkCut(G.cutStart.x, G.cutStart.y, G.cutEnd.x, G.cutEnd.y);
+        G.isCutting = false;
+        G.cutStart = null;
+        G.cutEnd = null;
+        touchId = null;
+    } else {
+        handleClick(pos.x, pos.y);
+    }
+}, { passive: false });
+
+// 键盘事件
+document.addEventListener('keydown', (e) => {
+    switch(e.code) {
+        case 'Space':
+            e.preventDefault();
+            if (G.state === STATE.PLAYING) {
+                G.state = STATE.PAUSED;
+            } else if (G.state === STATE.PAUSED) {
+                G.state = STATE.PLAYING;
+            }
+            break;
+        case 'Enter':
+            if (G.state === STATE.MENU) {
+                initAudio();
+                initGame();
+            } else if (G.state === STATE.GAME_OVER) {
+                initGame();
+            } else if (G.state === STATE.LEVEL_COMPLETE) {
+                G.level++;
+                updateTarget();
+                G.state = STATE.PLAYING;
+            }
+            break;
+        case 'Escape':
+            if (G.state !== STATE.MENU) {
+                G.state = STATE.MENU;
+            }
+            break;
+    }
+});
+
+// ============ 游戏循环 ============
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ============ 启动游戏 ============
+gameLoop();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

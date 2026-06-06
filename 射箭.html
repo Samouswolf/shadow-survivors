@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>射箭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(function(){
+"use strict";
+
+/* ===== Canvas Setup ===== */
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=800,H=600;
+function resize(){
+    var s=Math.min(innerWidth/W,innerHeight/H);
+    cv.width=W;cv.height=H;
+    cv.style.width=W*s+"px";cv.style.height=H*s+"px";
+}
+resize();addEventListener("resize",resize);
+
+/* ===== Audio ===== */
+var audioCtx=null;
+function ensureAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function playTone(freq,dur,vol,type){
+    if(!audioCtx)return;
+    var o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type=type||"sine";o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.15,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+    o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);
+}
+function sfxShoot(){playTone(800,0.08,0.2,"square");playTone(400,0.12,0.1,"sawtooth")}
+function sfxHit(){playTone(600,0.05,0.25,"sine");playTone(900,0.15,0.15,"sine")}
+function sfxBullseye(){playTone(800,0.1,0.2,"sine");playTone(1000,0.1,0.2,"sine");setTimeout(function(){playTone(1200,0.2,0.2,"sine")},100)}
+function sfxMiss(){playTone(150,0.3,0.15,"sawtooth")}
+function sfxWind(){playTone(100+Math.random()*80,0.5,0.04,"sawtooth")}
+function sfxGameOver(){playTone(400,0.2,0.15,"square");setTimeout(function(){playTone(300,0.2,0.15,"square")},200);setTimeout(function(){playTone(200,0.4,0.15,"square")},400)}
+function sfxNewRecord(){playTone(600,0.1,0.2,"sine");setTimeout(function(){playTone(800,0.1,0.2,"sine")},100);setTimeout(function(){playTone(1000,0.3,0.2,"sine")},200)}
+
+/* ===== Constants ===== */
+var STATE_MENU=0,STATE_PLAY=1,STATE_PAUSE=2,STATE_OVER=3;
+var TOTAL_ROUNDS=12;
+var TARGET_X=650,TARGET_Y=300;
+var TARGET_RINGS=[{r:70,score:10},{r:55,score:20},{r:40,score:30},{r:25,score:50},{r:12,score:100}];
+var BOW_X=120,BOW_Y=300;
+var ARROW_SPEED=18;
+var GRAVITY=0.12;
+var MAX_PULL=80;
+var WIND_CHANGE_INTERVAL=3; // rounds
+
+/* ===== Game State ===== */
+var G={
+    state:STATE_MENU,
+    score:0,
+    round:0,
+    arrows:[],
+    currentArrow:null,
+    pulling:false,
+    pullDist:0,
+    aimAngle:-0.1,
+    wind:0,
+    windTarget:0,
+    shake:0,
+    hitFlash:0,
+    lastHitScore:0,
+    lastHitX:0,
+    lastHitY:0,
+    combo:0,
+    bestScore:parseInt(localStorage.getItem("archery_best"))||0,
+    particles:[],
+    targetAnim:1,
+    arrowStuck:[],
+    time:0
+};
+
+/* ===== Helper ===== */
+function rand(a,b){return a+Math.random()*(b-a)}
+function dist(x1,y1,x2,y2){var dx=x2-x1,dy=y2-y1;return Math.sqrt(dx*dx+dy*dy)}
+function lerp(a,b,t){return a+(b-a)*t}
+function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v}
+
+/* ===== Particles ===== */
+function spawnParticles(x,y,color,count,speed){
+    for(var i=0;i<count;i++){
+        var a=rand(0,Math.PI*2),s=rand(1,speed||4);
+        G.particles.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,color:color,size:rand(2,5)});
+    }
+}
+
+/* ===== Wind ===== */
+function generateWind(){
+    var level=Math.floor(G.round/WIND_CHANGE_INTERVAL);
+    var maxWind=2+level*1.5;
+    G.windTarget=rand(-maxWind,maxWind);
+}
+
+/* ===== Arrow ===== */
+function createArrow(){
+    return {
+        x:BOW_X+30,
+        y:BOW_Y,
+        vx:0,
+        vy:0,
+        angle:G.aimAngle,
+        active:true,
+        scored:false,
+        stuck:false,
+        stuckX:0,
+        stuckY:0,
+        trail:[]
+    };
+}
+
+/* ===== Hit Detection ===== */
+function checkHit(ax,ay){
+    var d=dist(ax,ay,TARGET_X,TARGET_Y);
+    for(var i=TARGET_RINGS.length-1;i>=0;i--){
+        if(d<=TARGET_RINGS[i].r){
+            return {score:TARGET_RINGS[i].score,ring:i,dist:d};
+        }
+    }
+    return null;
+}
+
+/* ===== Game Logic ===== */
+function startGame(){
+    ensureAudio();
+    G.state=STATE_PLAY;
+    G.score=0;
+    G.round=0;
+    G.arrows=[];
+    G.currentArrow=null;
+    G.pulling=false;
+    G.pullDist=0;
+    G.aimAngle=-0.1;
+    G.wind=0;
+    G.windTarget=0;
+    G.combo=0;
+    G.particles=[];
+    G.arrowStuck=[];
+    G.hitFlash=0;
+    G.lastHitScore=0;
+    G.time=0;
+    generateWind();
+    G.currentArrow=createArrow();
+}
+
+function shootArrow(){
+    if(!G.currentArrow||!G.pulling)return;
+    var power=(G.pullDist/MAX_PULL)*ARROW_SPEED;
+    var a=G.currentArrow;
+    a.vx=Math.cos(G.aimAngle)*power;
+    a.vy=Math.sin(G.aimAngle)*power;
+    a.active=true;
+    G.arrows.push(a);
+    G.currentArrow=null;
+    G.pulling=false;
+    G.pullDist=0;
+    G.round++;
+    sfxShoot();
+
+    if(G.round%WIND_CHANGE_INTERVAL===0){
+        generateWind();
+    }
+
+    if(G.round>=TOTAL_ROUNDS){
+        // arrows will settle, then game over
+    }
+}
+
+function nextArrow(){
+    if(G.round>=TOTAL_ROUNDS)return;
+    G.currentArrow=createArrow();
+}
+
+function gameOver(){
+    if(G.state===STATE_OVER)return; // guard against multiple calls
+    G.state=STATE_OVER;
+    sfxGameOver();
+    if(G.score>G.bestScore){
+        G.bestScore=G.score;
+        localStorage.setItem("archery_best",G.bestScore);
+        sfxNewRecord();
+    }
+}
+
+/* ===== Update ===== */
+function update(){
+    G.time++;
+
+    // Wind interpolation
+    G.wind=lerp(G.wind,G.windTarget,0.01);
+
+    // Shake decay
+    G.shake*=0.9;
+    G.hitFlash*=0.92;
+
+    // Target animation
+    G.targetAnim=1+Math.sin(G.time*0.03)*0.02;
+
+    // Wind sfx
+    if(G.state===STATE_PLAY&&G.time%120===0&&Math.abs(G.wind)>1){
+        sfxWind();
+    }
+
+    // Update particles
+    for(var i=G.particles.length-1;i>=0;i--){
+        var p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.vy+=0.05;
+        p.life-=0.02;
+        if(p.life<=0)G.particles.splice(i,1);
+    }
+
+    if(G.state!==STATE_PLAY)return;
+
+    // Update arrows
+    var allSettled=true;
+    for(var i=G.arrows.length-1;i>=0;i--){
+        var a=G.arrows[i];
+        if(!a.active)continue;
+        allSettled=false;
+
+        // Store trail
+        a.trail.push({x:a.x,y:a.y});
+        if(a.trail.length>15)a.trail.shift();
+
+        // Physics
+        a.vx+=G.wind*0.008;
+        a.vy+=GRAVITY;
+        a.x+=a.vx;
+        a.y+=a.vy;
+        a.angle=Math.atan2(a.vy,a.vx);
+
+        // Hit target
+        if(!a.scored){
+            var hit=checkHit(a.x,a.y);
+            if(hit){
+                a.scored=true;
+                a.stuck=true;
+                a.stuckX=a.x;
+                a.stuckY=a.y;
+                a.active=false;
+                G.arrowStuck.push({x:a.x,y:a.y,angle:a.angle});
+
+                var bonus=0;
+                if(hit.ring===0){ // bullseye
+                    bonus=50;
+                    G.combo++;
+                    sfxBullseye();
+                    spawnParticles(a.x,a.y,"#FFD700",20,6);
+                }else if(hit.ring<=1){
+                    G.combo++;
+                    sfxHit();
+                    spawnParticles(a.x,a.y,"#FF6B6B",12,4);
+                }else{
+                    G.combo=0;
+                    sfxHit();
+                    spawnParticles(a.x,a.y,"#4ECDC4",8,3);
+                }
+
+                var comboMult=1+G.combo*0.5;
+                var totalScore=Math.floor((hit.score+bonus)*comboMult);
+                G.score+=totalScore;
+                G.lastHitScore=totalScore;
+                G.lastHitX=a.x;
+                G.lastHitY=a.y;
+                G.hitFlash=1;
+                G.shake=hit.ring===0?8:4;
+            }
+        }
+
+        // Miss (off screen)
+        if(a.x>W+50||a.y>H+50||a.y<-100){
+            a.active=false;
+            a.scored=false;
+            G.combo=0;
+            sfxMiss();
+        }
+    }
+
+    // Next arrow or game over
+    if(G.currentArrow===null&&G.arrows.length>0){
+        var lastArrow=G.arrows[G.arrows.length-1];
+        if(!lastArrow.active){
+            if(G.round>=TOTAL_ROUNDS){
+                var allDone=true;
+                for(var j=0;j<G.arrows.length;j++){
+                    if(G.arrows[j].active){allDone=false;break;}
+                }
+                if(allDone)setTimeout(gameOver,800);
+            }else{
+                setTimeout(nextArrow,400);
+                G.currentArrow="waiting";
+            }
+        }
+    }
+
+    // Pull animation
+    if(G.pulling&&G.currentArrow&&G.currentArrow!=="waiting"){
+        G.pullDist=Math.min(G.pullDist+1.5,MAX_PULL);
+    }
+}
+
+/* ===== Draw Functions ===== */
+function drawSky(){
+    // Gradient sky
+    var grd=ctx.createLinearGradient(0,0,0,H);
+    grd.addColorStop(0,"#87CEEB");
+    grd.addColorStop(0.5,"#98D8EF");
+    grd.addColorStop(1,"#7BC67E");
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,0,W,H);
+
+    // Clouds
+    ctx.fillStyle="rgba(255,255,255,0.6)";
+    drawCloud(100,80,60);
+    drawCloud(350,50,45);
+    drawCloud(550,100,55);
+    drawCloud(700,60,40);
+}
+
+function drawCloud(x,y,s){
+    ctx.beginPath();
+    ctx.arc(x,y,s,0,Math.PI*2);
+    ctx.arc(x+s*0.6,y-s*0.2,s*0.7,0,Math.PI*2);
+    ctx.arc(x-s*0.5,y+s*0.1,s*0.6,0,Math.PI*2);
+    ctx.fill();
+}
+
+function drawGround(){
+    var grd=ctx.createLinearGradient(0,H-80,0,H);
+    grd.addColorStop(0,"#5D8C3E");
+    grd.addColorStop(1,"#4A7A2E");
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,H-80,W,80);
+
+    // Grass tufts
+    ctx.strokeStyle="#6B9E4A";
+    ctx.lineWidth=2;
+    for(var i=0;i<W;i+=20){
+        var gx=i+Math.sin(i*0.1+G.time*0.02)*3;
+        ctx.beginPath();
+        ctx.moveTo(gx,H-80);
+        ctx.lineTo(gx-3,H-90-Math.sin(G.time*0.05+i)*2);
+        ctx.moveTo(gx,H-80);
+        ctx.lineTo(gx+3,H-88-Math.cos(G.time*0.04+i)*2);
+        ctx.stroke();
+    }
+}
+
+function drawTarget(){
+    ctx.save();
+    ctx.translate(TARGET_X,TARGET_Y);
+    ctx.scale(G.targetAnim,G.targetAnim);
+
+    // Target stand
+    ctx.fillStyle="#8B6914";
+    ctx.fillRect(-5,60,10,80);
+    ctx.fillRect(-30,120,60,8);
+
+    // Rings (outside in)
+    var colors=["#FFFFFF","#333333","#4CAF50","#FF5722","#FFD700"];
+    var ringScores=[10,20,30,50,100];
+    for(var i=0;i<TARGET_RINGS.length;i++){
+        ctx.beginPath();
+        ctx.arc(0,0,TARGET_RINGS[i].r,0,Math.PI*2);
+        ctx.fillStyle=colors[i];
+        ctx.fill();
+        ctx.strokeStyle="#222";
+        ctx.lineWidth=1.5;
+        ctx.stroke();
+    }
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(0,0,4,0,Math.PI*2);
+    ctx.fillStyle="#FF0000";
+    ctx.fill();
+
+    // Score labels
+    ctx.fillStyle="#FFF";
+    ctx.font="bold 10px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("10",0,-58);
+    ctx.fillText("50",0,-20);
+
+    ctx.restore();
+
+    // Stuck arrows
+    for(var i=0;i<G.arrowStuck.length;i++){
+        var sa=G.arrowStuck[i];
+        drawArrowShape(sa.x,sa.y,sa.angle,1.0);
+    }
+}
+
+function drawArrowShape(x,y,angle,alpha){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(angle);
+    ctx.globalAlpha=alpha;
+
+    // Shaft
+    ctx.strokeStyle="#8B6914";
+    ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(-30,0);
+    ctx.lineTo(10,0);
+    ctx.stroke();
+
+    // Arrowhead
+    ctx.fillStyle="#555";
+    ctx.beginPath();
+    ctx.moveTo(15,0);
+    ctx.lineTo(8,-4);
+    ctx.lineTo(8,4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Fletching
+    ctx.fillStyle="#CC3333";
+    ctx.beginPath();
+    ctx.moveTo(-28,0);
+    ctx.lineTo(-35,-5);
+    ctx.lineTo(-30,0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-28,0);
+    ctx.lineTo(-35,5);
+    ctx.lineTo(-30,0);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function drawBow(){
+    ctx.save();
+    ctx.translate(BOW_X,BOW_Y);
+
+    // Bow body
+    var pullOffset=G.pulling?G.pullDist*0.3:0;
+    ctx.strokeStyle="#5D3A1A";
+    ctx.lineWidth=5;
+    ctx.beginPath();
+    ctx.arc(-pullOffset*0.2,0,50,-Math.PI*0.4,Math.PI*0.4);
+    ctx.stroke();
+
+    // Bowstring
+    ctx.strokeStyle="#AAA";
+    ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(-pullOffset*0.2+Math.cos(-Math.PI*0.4)*50,Math.sin(-Math.PI*0.4)*50);
+    ctx.lineTo(pullOffset,0);
+    ctx.lineTo(-pullOffset*0.2+Math.cos(Math.PI*0.4)*50,Math.sin(Math.PI*0.4)*50);
+    ctx.stroke();
+
+    // Current arrow on bow
+    if(G.currentArrow&&G.currentArrow!=="waiting"){
+        var ax=pullOffset-10;
+        ctx.save();
+        ctx.rotate(G.aimAngle);
+        // Arrow on string
+        ctx.strokeStyle="#8B6914";
+        ctx.lineWidth=3;
+        ctx.beginPath();
+        ctx.moveTo(ax-30,0);
+        ctx.lineTo(ax+10,0);
+        ctx.stroke();
+        ctx.fillStyle="#555";
+        ctx.beginPath();
+        ctx.moveTo(ax+15,0);
+        ctx.lineTo(ax+8,-4);
+        ctx.lineTo(ax+8,4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle="#CC3333";
+        ctx.beginPath();
+        ctx.moveTo(ax-28,0);
+        ctx.lineTo(ax-35,-5);
+        ctx.lineTo(ax-30,0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Aim guide (when pulling)
+    if(G.pulling&&G.pullDist>10){
+        ctx.strokeStyle="rgba(255,255,255,0.3)";
+        ctx.lineWidth=1;
+        ctx.setLineDash([5,5]);
+        ctx.beginPath();
+        var gx=Math.cos(G.aimAngle)*200;
+        var gy=Math.sin(G.aimAngle)*200;
+        ctx.moveTo(0,0);
+        ctx.lineTo(gx,gy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+}
+
+function drawFlyingArrows(){
+    for(var i=0;i<G.arrows.length;i++){
+        var a=G.arrows[i];
+        if(!a.active)continue;
+
+        // Trail
+        if(a.trail.length>1){
+            ctx.strokeStyle="rgba(139,105,20,0.3)";
+            ctx.lineWidth=2;
+            ctx.beginPath();
+            ctx.moveTo(a.trail[0].x,a.trail[0].y);
+            for(var t=1;t<a.trail.length;t++){
+                ctx.lineTo(a.trail[t].x,a.trail[t].y);
+            }
+            ctx.stroke();
+        }
+
+        drawArrowShape(a.x,a.y,a.angle,1.0);
+    }
+}
+
+function drawWind(){
+    // Wind indicator
+    ctx.save();
+    ctx.translate(400,30);
+
+    // Background
+    ctx.fillStyle="rgba(0,0,0,0.4)";
+    roundRect(ctx,-80,-15,160,30,10);
+    ctx.fill();
+
+    ctx.fillStyle="#FFF";
+    ctx.font="bold 14px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("风力",0,-2);
+
+    // Wind arrow
+    var windStrength=G.wind*15;
+    ctx.strokeStyle=Math.abs(G.wind)>3?"#FF6B6B":"#FFF";
+    ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(0,10);
+    ctx.lineTo(windStrength,10);
+    ctx.stroke();
+
+    // Arrow tip
+    if(Math.abs(windStrength)>2){
+        var tipDir=windStrength>0?1:-1;
+        ctx.beginPath();
+        ctx.moveTo(windStrength,10);
+        ctx.lineTo(windStrength-tipDir*8,5);
+        ctx.moveTo(windStrength,10);
+        ctx.lineTo(windStrength-tipDir*8,15);
+        ctx.stroke();
+    }
+
+    // Wind value text
+    ctx.fillStyle="#FFF";
+    ctx.font="11px sans-serif";
+    ctx.fillText((G.wind>0?"+":"")+G.wind.toFixed(1),0,22);
+
+    ctx.restore();
+}
+
+function drawHUD(){
+    // Score
+    ctx.fillStyle="rgba(0,0,0,0.5)";
+    roundRect(ctx,10,10,160,50,10);
+    ctx.fill();
+    ctx.fillStyle="#FFD700";
+    ctx.font="bold 16px sans-serif";
+    ctx.textAlign="left";
+    ctx.fillText("得分",20,32);
+    ctx.fillStyle="#FFF";
+    ctx.font="bold 22px sans-serif";
+    ctx.fillText(G.score,20,54);
+
+    // Round
+    ctx.fillStyle="rgba(0,0,0,0.5)";
+    roundRect(ctx,W-170,10,160,50,10);
+    ctx.fill();
+    ctx.fillStyle="#4ECDC4";
+    ctx.font="bold 16px sans-serif";
+    ctx.textAlign="right";
+    ctx.fillText("箭数",W-20,32);
+    ctx.fillStyle="#FFF";
+    ctx.font="bold 22px sans-serif";
+    ctx.fillText(G.round+"/"+TOTAL_ROUNDS,W-20,54);
+
+    // Combo
+    if(G.combo>1){
+        ctx.fillStyle="#FF6B6B";
+        ctx.font="bold 24px sans-serif";
+        ctx.textAlign="center";
+        ctx.fillText("连击 x"+G.combo,400,80);
+    }
+
+    // Hit score popup
+    if(G.hitFlash>0.1){
+        ctx.save();
+        ctx.globalAlpha=G.hitFlash;
+        ctx.fillStyle="#FFD700";
+        ctx.font="bold "+(24+G.hitFlash*16)+"px sans-serif";
+        ctx.textAlign="center";
+        ctx.fillText("+"+G.lastHitScore,G.lastHitX,G.lastHitY-30-G.hitFlash*40);
+        ctx.restore();
+    }
+
+    // Best score
+    ctx.fillStyle="rgba(0,0,0,0.3)";
+    roundRect(ctx,W/2-60,H-35,120,25,8);
+    ctx.fill();
+    ctx.fillStyle="#AAA";
+    ctx.font="13px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("最高分: "+G.bestScore,W/2,H-17);
+
+    // Pause hint
+    ctx.fillStyle="rgba(255,255,255,0.3)";
+    ctx.font="12px sans-serif";
+    ctx.textAlign="left";
+    ctx.fillText("P/ESC 暂停",15,H-15);
+}
+
+function drawParticles(){
+    for(var i=0;i<G.particles.length;i++){
+        var p=G.particles[i];
+        ctx.save();
+        ctx.globalAlpha=p.life;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+function drawMenu(){
+    // Background
+    drawSky();
+    drawGround();
+
+    // Title
+    ctx.save();
+    ctx.translate(W/2,180);
+
+    // Glow effect
+    ctx.shadowColor="#FFD700";
+    ctx.shadowBlur=20;
+    ctx.fillStyle="#FFD700";
+    ctx.font="bold 64px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("射箭",0,0);
+    ctx.shadowBlur=0;
+
+    ctx.fillStyle="#FFF";
+    ctx.font="20px sans-serif";
+    ctx.fillText("瞄准射箭命中靶心",0,45);
+
+    // Decorative target
+    ctx.translate(0,100);
+    var colors2=["#FFFFFF","#333333","#4CAF50","#FF5722","#FFD700"];
+    for(var i=0;i<5;i++){
+        ctx.beginPath();
+        ctx.arc(0,0,50-i*10,0,Math.PI*2);
+        ctx.fillStyle=colors2[i];
+        ctx.fill();
+        ctx.strokeStyle="#222";
+        ctx.lineWidth=1;
+        ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // Start button
+    var btnY=420;
+    ctx.fillStyle="rgba(255,215,0,0.2)";
+    roundRect(ctx,W/2-100,btnY,200,50,25);
+    ctx.fill();
+    ctx.strokeStyle="#FFD700";
+    ctx.lineWidth=2;
+    roundRect(ctx,W/2-100,btnY,200,50,25);
+    ctx.stroke();
+    ctx.fillStyle="#FFD700";
+    ctx.font="bold 24px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("开始游戏",W/2,btnY+33);
+
+    // Controls hint
+    ctx.fillStyle="#AAA";
+    ctx.font="14px sans-serif";
+    ctx.fillText("鼠标/触摸 拖拽瞄准 | 方向键 微调角度",W/2,500);
+    ctx.fillText("空格 拉弓/射击 | P/ESC 暂停",W/2,525);
+
+    // Best score
+    if(G.bestScore>0){
+        ctx.fillStyle="#FFD700";
+        ctx.font="bold 16px sans-serif";
+        ctx.fillText("最高分: "+G.bestScore,W/2,560);
+    }
+}
+
+function drawPause(){
+    ctx.fillStyle="rgba(0,0,0,0.6)";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#FFF";
+    ctx.font="bold 48px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("暂停",W/2,H/2-20);
+
+    ctx.font="20px sans-serif";
+    ctx.fillText("按 P / ESC / 空格 继续",W/2,H/2+30);
+}
+
+function drawGameOver(){
+    ctx.fillStyle="rgba(0,0,0,0.7)";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#FFD700";
+    ctx.font="bold 48px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("游戏结束",W/2,H/2-80);
+
+    ctx.fillStyle="#FFF";
+    ctx.font="bold 32px sans-serif";
+    ctx.fillText("得分: "+G.score,W/2,H/2-20);
+
+    if(G.score>=G.bestScore&&G.score>0){
+        ctx.fillStyle="#FF6B6B";
+        ctx.font="bold 24px sans-serif";
+        ctx.fillText("新纪录!",W/2,H/2+20);
+    }
+
+    ctx.fillStyle="#AAA";
+    ctx.font="18px sans-serif";
+    ctx.fillText("最高分: "+G.bestScore,W/2,H/2+55);
+
+    // Restart button
+    var btnY=H/2+80;
+    ctx.fillStyle="rgba(255,215,0,0.2)";
+    roundRect(ctx,W/2-100,btnY,200,50,25);
+    ctx.fill();
+    ctx.strokeStyle="#FFD700";
+    ctx.lineWidth=2;
+    roundRect(ctx,W/2-100,btnY,200,50,25);
+    ctx.stroke();
+    ctx.fillStyle="#FFD700";
+    ctx.font="bold 24px sans-serif";
+    ctx.fillText("再来一局",W/2,btnY+33);
+}
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+/* ===== Main Render ===== */
+function render(){
+    ctx.clearRect(0,0,W,H);
+
+    if(G.state===STATE_MENU){
+        drawMenu();
+        return;
+    }
+
+    // Apply screen shake
+    ctx.save();
+    if(G.shake>0.5){
+        ctx.translate(rand(-G.shake,G.shake),rand(-G.shake,G.shake));
+    }
+
+    drawSky();
+    drawGround();
+    drawTarget();
+    drawFlyingArrows();
+    drawBow();
+    drawParticles();
+    drawWind();
+    drawHUD();
+
+    ctx.restore();
+
+    if(G.state===STATE_PAUSE)drawPause();
+    if(G.state===STATE_OVER)drawGameOver();
+}
+
+/* ===== Game Loop ===== */
+var lastTime=0,accumulator=0,dt=1000/60;
+function gameLoop(ts){
+    if(!lastTime)lastTime=ts;
+    var delta=ts-lastTime;
+    lastTime=ts;
+    if(delta>200)delta=200;
+    accumulator+=delta;
+    while(accumulator>=dt){
+        update();
+        accumulator-=dt;
+    }
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+/* ===== Input ===== */
+var keys={};
+var mouseX=0,mouseY=0;
+var mouseDown=false;
+var touchAiming=false;
+
+function getCanvasPos(ex,ey){
+    var rect=cv.getBoundingClientRect();
+    return {
+        x:(ex-rect.left)/rect.width*W,
+        y:(ey-rect.top)/rect.height*H
+    };
+}
+
+function startPull(){
+    if(G.state!==STATE_PLAY)return;
+    if(!G.currentArrow||G.currentArrow==="waiting")return;
+    G.pulling=true;
+    G.pullDist=0;
+}
+
+function updateAim(cx,cy){
+    if(G.state!==STATE_PLAY)return;
+    if(!G.currentArrow||G.currentArrow==="waiting")return;
+    var dx=cx-BOW_X,dy=cy-BOW_Y;
+    G.aimAngle=Math.atan2(dy,dx);
+    G.aimAngle=clamp(G.aimAngle,-Math.PI*0.4,Math.PI*0.3);
+}
+
+function releaseShoot(){
+    if(G.state!==STATE_PLAY)return;
+    if(G.pulling&&G.pullDist>10){
+        shootArrow();
+    }else{
+        G.pulling=false;
+        G.pullDist=0;
+    }
+}
+
+// Keyboard
+addEventListener("keydown",function(e){
+    keys[e.code]=true;
+
+    if(G.state===STATE_MENU){
+        if(e.code==="Space"||e.code==="Enter"){
+            e.preventDefault();
+            startGame();
+            return;
+        }
+    }
+
+    if(G.state===STATE_OVER){
+        if(e.code==="Space"||e.code==="Enter"){
+            e.preventDefault();
+            startGame();
+            return;
+        }
+    }
+
+    if(G.state===STATE_PAUSE){
+        if(e.code==="KeyP"||e.code==="Escape"||e.code==="Space"){
+            e.preventDefault();
+            G.state=STATE_PLAY;
+            return;
+        }
+    }
+
+    if(G.state===STATE_PLAY){
+        if(e.code==="KeyP"||e.code==="Escape"){
+            e.preventDefault();
+            G.state=STATE_PAUSE;
+            return;
+        }
+        if(e.code==="Space"){
+            e.preventDefault();
+            if(!G.pulling){
+                startPull();
+            }
+        }
+    }
+});
+
+addEventListener("keyup",function(e){
+    keys[e.code]=false;
+
+    if(e.code==="Space"&&G.state===STATE_PLAY){
+        releaseShoot();
+    }
+});
+
+// Aim with arrow keys
+function handleKeyAim(){
+    if(G.state!==STATE_PLAY)return;
+    if(keys["ArrowUp"])G.aimAngle-=0.015;
+    if(keys["ArrowDown"])G.aimAngle+=0.015;
+    G.aimAngle=clamp(G.aimAngle,-Math.PI*0.4,Math.PI*0.3);
+}
+setInterval(handleKeyAim,16);
+
+// Mouse
+cv.addEventListener("mousedown",function(e){
+    e.preventDefault();
+    ensureAudio();
+    var p=getCanvasPos(e.clientX,e.clientY);
+
+    if(G.state===STATE_MENU){
+        if(p.x>W/2-100&&p.x<W/2+100&&p.y>420&&p.y<470){
+            startGame();
+        }
+        return;
+    }
+
+    if(G.state===STATE_OVER){
+        if(p.x>W/2-100&&p.x<W/2+100&&p.y>H/2+80&&p.y<H/2+130){
+            startGame();
+        }
+        return;
+    }
+
+    if(G.state===STATE_PLAY){
+        mouseDown=true;
+        startPull();
+        updateAim(p.x,p.y);
+    }
+});
+
+cv.addEventListener("mousemove",function(e){
+    e.preventDefault();
+    var p=getCanvasPos(e.clientX,e.clientY);
+    mouseX=p.x;mouseY=p.y;
+    if(G.state===STATE_PLAY){
+        updateAim(p.x,p.y);
+    }
+});
+
+cv.addEventListener("mouseup",function(e){
+    e.preventDefault();
+    mouseDown=false;
+    if(G.state===STATE_PLAY){
+        releaseShoot();
+    }
+});
+
+// Touch
+cv.addEventListener("touchstart",function(e){
+    e.preventDefault();
+    ensureAudio();
+    var t=e.touches[0];
+    var p=getCanvasPos(t.clientX,t.clientY);
+
+    if(G.state===STATE_MENU){
+        if(p.x>W/2-100&&p.x<W/2+100&&p.y>420&&p.y<470){
+            startGame();
+        }
+        return;
+    }
+
+    if(G.state===STATE_OVER){
+        if(p.x>W/2-100&&p.x<W/2+100&&p.y>H/2+80&&p.y<H/2+130){
+            startGame();
+        }
+        return;
+    }
+
+    if(G.state===STATE_PLAY){
+        touchAiming=true;
+        startPull();
+        updateAim(p.x,p.y);
+    }
+},{passive:false});
+
+cv.addEventListener("touchmove",function(e){
+    e.preventDefault();
+    if(!touchAiming)return;
+    var t=e.touches[0];
+    var p=getCanvasPos(t.clientX,t.clientY);
+    updateAim(p.x,p.y);
+},{passive:false});
+
+cv.addEventListener("touchend",function(e){
+    e.preventDefault();
+    touchAiming=false;
+    if(G.state===STATE_PLAY){
+        releaseShoot();
+    }
+},{passive:false});
+
+/* ===== Init ===== */
+G.state=STATE_MENU;
+requestAnimationFrame(gameLoop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

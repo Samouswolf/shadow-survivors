@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>贪食蛇变体</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; overflow:hidden; background:#0a0a1a; touch-action:none; user-select:none; -webkit-user-select:none; }
+canvas { display:block; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); image-rendering:pixelated; }
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(function(){
+"use strict";
+
+/* ═══════════════════════ 常量 ═══════════════════════ */
+var COLS=30, ROWS=20, CELL=24;
+var W=COLS*CELL, H=ROWS*CELL;
+var canvas=document.getElementById("cv");
+var ctx=canvas.getContext("2d");
+canvas.width=W; canvas.height=H;
+
+// 自适应缩放
+function resize(){
+    var s=Math.min(window.innerWidth/W, window.innerHeight/H);
+    canvas.style.width=(W*s)+"px";
+    canvas.style.height=(H*s)+"px";
+}
+resize(); window.addEventListener("resize",resize);
+
+/* ═══════════════════════ 音效 ═══════════════════════ */
+var audioCtx=null;
+function initAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }
+
+function playTone(freq,dur,type){
+    if(!audioCtx) return;
+    try{
+        var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+        o.type=type||"square"; o.frequency.value=freq;
+        g.gain.setValueAtTime(0.15,audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxEat(){ playTone(600,0.1,"sine"); playTone(900,0.08,"sine"); }
+function sfxPower(){ playTone(400,0.15,"sine"); playTone(600,0.12,"sine"); playTone(800,0.1,"sine"); }
+function sfxDie(){ playTone(200,0.3,"sawtooth"); playTone(100,0.4,"sawtooth"); }
+function sfxClick(){ playTone(500,0.05,"square"); }
+
+/* ═══════════════════════ 颜色 ═══════════════════════ */
+var COL_BG="#0a0a1a", COL_GRID="#151530", COL_SNAKE="#00e676", COL_SNAKE_HEAD="#76ff03";
+var COL_FOOD="#ff5252", COL_GOLD="#ffd740", COL_WALL="#455a64";
+var COL_POWERUP=[null,"#00e5ff","#e040fb","#ff6e40","#76ff03"]; // 1=加速 2=穿墙 3=磁铁 4=双倍
+var COL_UI="#e0e0e0", COL_ACCENT="#7c4dff";
+
+/* ═══════════════════════ 道具系统 ═══════════════════════ */
+var POWERUP_TYPES=[
+    null,
+    {id:1,name:"加速",dur:300,color:"#00e5ff",desc:"速度+50%"},
+    {id:2,name:"穿墙",dur:400,color:"#e040fb",desc:"可穿越墙壁"},
+    {id:3,name:"磁铁",dur:350,color:"#ff6e40",desc:"吸引食物"},
+    {id:4,name:"双倍",dur:300,color:"#76ff03",desc:"得分x2"}
+];
+
+/* ═══════════════════════ 游戏状态 ═══════════════════════ */
+var STATE_MENU=0, STATE_PLAY=1, STATE_PAUSE=2, STATE_OVER=3;
+var MODE_ENDLESS=0, MODE_SPEED=1;
+
+var G={
+    state:STATE_MENU, mode:MODE_ENDLESS,
+    snake:[], dir:{x:1,y:0}, nextDir:{x:1,y:0},
+    food:null, goldFood:null, powerups:[], walls:[],
+    score:0, highScore:0, combo:0, comboTimer:0,
+    speed:8, baseSpeed:8, frameCount:0, tickAccum:0,
+    powers:{}, particles:[],
+    speedMode:{timeLeft:0,targetScore:0,level:0},
+    menuSel:0, overSel:0
+};
+
+/* ═══════════════════════ localStorage ═══════════════════════ */
+function loadHigh(){
+    try{ G.highScore=parseInt(localStorage.getItem("snake_variant_high"))||0; }catch(e){ G.highScore=0; }
+}
+function saveHigh(){
+    if(G.score>G.highScore){ G.highScore=G.score; try{ localStorage.setItem("snake_variant_high",G.highScore); }catch(e){} }
+}
+loadHigh();
+
+/* ═══════════════════════ 工具函数 ═══════════════════════ */
+function rand(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+function cellsEqual(a,b){ return a.x===b.x && a.y===b.y; }
+function isOccupied(x,y){
+    for(var i=0;i<G.snake.length;i++) if(G.snake[i].x===x&&G.snake[i].y===y) return true;
+    for(var i=0;i<G.walls.length;i++) if(G.walls[i].x===x&&G.walls[i].y===y) return true;
+    return false;
+}
+function freeCell(){
+    var tries=0;
+    while(tries++<500){
+        var x=rand(1,COLS-2), y=rand(1,ROWS-2);
+        if(!isOccupied(x,y)) return {x:x,y:y};
+    }
+    return {x:COLS/2|0,y:ROWS/2|0};
+}
+
+/* ═══════════════════════ 粒子系统 ═══════════════════════ */
+function spawnParticles(x,y,color,n){
+    for(var i=0;i<n;i++){
+        G.particles.push({
+            x:x*CELL+CELL/2, y:y*CELL+CELL/2,
+            vx:(Math.random()-0.5)*4, vy:(Math.random()-0.5)*4,
+            life:rand(15,30), color:color, size:rand(2,5)
+        });
+    }
+}
+function updateParticles(){
+    for(var i=G.particles.length-1;i>=0;i--){
+        var p=G.particles[i];
+        p.x+=p.vx; p.y+=p.vy; p.life--;
+        if(p.life<=0) G.particles.splice(i,1);
+    }
+}
+function drawParticles(){
+    for(var i=0;i<G.particles.length;i++){
+        var p=G.particles[i];
+        ctx.globalAlpha=p.life/30;
+        ctx.fillStyle=p.color;
+        ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+    }
+    ctx.globalAlpha=1;
+}
+
+/* ═══════════════════════ 初始化 ═══════════════════════ */
+function initGame(mode){
+    G.mode=mode; G.state=STATE_PLAY;
+    G.snake=[]; G.dir={x:1,y:0}; G.nextDir={x:1,y:0};
+    G.food=null; G.goldFood=null; G.powerups=[]; G.walls=[];
+    G.score=0; G.combo=0; G.comboTimer=0;
+    G.speed=8; G.baseSpeed=8; G.frameCount=0; G.tickAccum=0;
+    G.powers={}; G.particles=[];
+
+    // 初始化蛇
+    var cx=COLS/2|0, cy=ROWS/2|0;
+    for(var i=0;i<4;i++) G.snake.push({x:cx-i,y:cy});
+
+    // 模式设置
+    if(mode===MODE_SPEED){
+        G.speedMode={timeLeft:60*60,targetScore:50,level:1}; // 60秒, 目标50分
+        G.baseSpeed=10; G.speed=10;
+    }
+
+    // 生成墙壁(无尽模式后期)
+    if(mode===MODE_ENDLESS) genWalls(5);
+
+    spawnFood();
+}
+
+function genWalls(count){
+    G.walls=[];
+    for(var i=0;i<count;i++){
+        var pos=freeCell();
+        // 避免生成在蛇附近
+        if(Math.abs(pos.x-G.snake[0].x)<5 && Math.abs(pos.y-G.snake[0].y)<5) continue;
+        G.walls.push(pos);
+    }
+}
+
+/* ═══════════════════════ 生成食物/道具 ═══════════════════════ */
+function spawnFood(){
+    var pos=freeCell();
+    G.food=pos;
+    // 随机金色食物
+    if(Math.random()<0.15){
+        var gp=freeCell();
+        G.goldFood={x:gp.x,y:gp.y,timer:300};
+    }
+    // 随机道具
+    if(Math.random()<0.12 && G.powerups.length<2){
+        var pp=freeCell();
+        var tid=rand(1,4);
+        G.powerups.push({x:pp.x,y:pp.y,type:tid,timer:400});
+    }
+}
+
+/* ═══════════════════════ 游戏逻辑 ═══════════════════════ */
+function gameTick(){
+    G.frameCount++;
+    G.dir={x:G.nextDir.x,y:G.nextDir.y};
+
+    var head=G.snake[0];
+    var nx=head.x+G.dir.x, ny=head.y+G.dir.y;
+
+    // 穿墙能力
+    var canWall=G.powers[2]>0;
+    if(canWall){
+        if(nx<0) nx=COLS-1; else if(nx>=COLS) nx=0;
+        if(ny<0) ny=ROWS-1; else if(ny>=ROWS) ny=0;
+    } else {
+        // 边界检测
+        if(nx<0||nx>=COLS||ny<0||ny>=ROWS){ die(); return; }
+    }
+
+    // 墙壁碰撞
+    for(var i=0;i<G.walls.length;i++){
+        if(G.walls[i].x===nx&&G.walls[i].y===ny){ die(); return; }
+    }
+
+    // 自身碰撞(跳过尾巴，因为会移走)
+    for(var i=0;i<G.snake.length-1;i++){
+        if(G.snake[i].x===nx&&G.snake[i].y===ny){ die(); return; }
+    }
+
+    // 移动
+    var newHead={x:nx,y:ny};
+    G.snake.unshift(newHead);
+
+    var ate=false;
+    // 吃普通食物
+    if(G.food && nx===G.food.x && ny===G.food.y){
+        var pts=G.powers[4]>0?20:10;
+        G.score+=pts; G.combo++; G.comboTimer=60;
+        sfxEat(); spawnParticles(nx,ny,COL_FOOD,8);
+        G.food=null; ate=true;
+    }
+    // 吃金色食物
+    if(G.goldFood && nx===G.goldFood.x && ny===G.goldFood.y){
+        var pts=G.powers[4]>0?60:30;
+        G.score+=pts; G.combo++; G.comboTimer=60;
+        sfxEat(); spawnParticles(nx,ny,COL_GOLD,12);
+        G.goldFood=null; ate=true;
+    }
+    // 吃道具
+    for(var i=G.powerups.length-1;i>=0;i--){
+        var pu=G.powerups[i];
+        if(pu.x===nx&&pu.y===ny){
+            sfxPower(); spawnParticles(nx,ny,POWERUP_TYPES[pu.type].color,10);
+            G.powers[pu.type]=POWERUP_TYPES[pu.type].dur;
+            G.powerups.splice(i,1);
+            // 加速道具效果
+            if(pu.type===1) G.speed=Math.min(G.baseSpeed*1.5,16);
+            ate=true;
+        }
+    }
+
+    if(!ate) G.snake.pop();
+
+    // 连击衰减
+    if(G.comboTimer>0){ G.comboTimer--; if(G.comboTimer<=0) G.combo=0; }
+
+    // 道具计时
+    for(var k in G.powers){
+        G.powers[k]--;
+        if(G.powers[k]<=0){
+            delete G.powers[k];
+            if(k==="1") G.speed=G.baseSpeed; // 加速结束
+        }
+    }
+
+    // 金色食物/道具计时
+    if(G.goldFood){ G.goldFood.timer--; if(G.goldFood.timer<=0) G.goldFood=null; }
+    for(var i=G.powerups.length-1;i>=0;i--){
+        G.powerups[i].timer--;
+        if(G.powerups[i].timer<=0) G.powerups.splice(i,1);
+    }
+
+    // 磁铁效果: 食物向蛇头移动
+    if(G.powers[3]>0 && G.food){
+        var dx=head.x-G.food.x, dy=head.y-G.food.y;
+        if(Math.abs(dx)>Math.abs(dy)){
+            G.food.x+=dx>0?1:-1;
+        } else if(dy!==0){
+            G.food.y+=dy>0?1:-1;
+        }
+    }
+
+    // 补充食物
+    if(!G.food) spawnFood();
+
+    // 无尽模式难度递增
+    if(G.mode===MODE_ENDLESS){
+        if(G.score>0 && G.score%50===0 && G.frameCount%30===0){
+            G.baseSpeed=Math.min(G.baseSpeed+0.5,18);
+            if(!G.powers[1]) G.speed=G.baseSpeed;
+            if(G.score%100===0) genWalls(Math.min(5+G.score/50,15));
+        }
+    }
+
+    // 竞速模式
+    if(G.mode===MODE_SPEED){
+        G.speedMode.timeLeft--;
+        if(G.score>=G.speedMode.targetScore){
+            G.speedMode.level++;
+            G.speedMode.targetScore+=50+G.speedMode.level*20;
+            G.speedMode.timeLeft+=30*60; // 加时间
+            G.baseSpeed=Math.min(G.baseSpeed+1,16);
+            if(!G.powers[1]) G.speed=G.baseSpeed;
+            spawnParticles(nx,ny,"#fff",20);
+        }
+        if(G.speedMode.timeLeft<=0) die();
+    }
+
+    updateParticles();
+}
+
+function die(){
+    G.state=STATE_OVER; G.overSel=0;
+    sfxDie(); saveHigh();
+    spawnParticles(G.snake[0].x,G.snake[0].y,"#ff5252",20);
+}
+
+/* ═══════════════════════ 渲染 ═══════════════════════ */
+function drawCell(x,y,color,r){
+    ctx.fillStyle=color;
+    if(r){
+        ctx.beginPath();
+        ctx.arc(x*CELL+CELL/2,y*CELL+CELL/2,CELL/2-1,0,Math.PI*2);
+        ctx.fill();
+    } else {
+        ctx.fillRect(x*CELL+1,y*CELL+1,CELL-2,CELL-2);
+    }
+}
+
+function render(){
+    // 背景
+    ctx.fillStyle=COL_BG; ctx.fillRect(0,0,W,H);
+
+    // 网格
+    ctx.strokeStyle=COL_GRID; ctx.lineWidth=0.5;
+    for(var x=0;x<=COLS;x++){ ctx.beginPath(); ctx.moveTo(x*CELL,0); ctx.lineTo(x*CELL,H); ctx.stroke(); }
+    for(var y=0;y<=ROWS;y++){ ctx.beginPath(); ctx.moveTo(0,y*CELL); ctx.lineTo(W,y*CELL); ctx.stroke(); }
+
+    if(G.state===STATE_MENU){ drawMenu(); return; }
+    if(G.state===STATE_OVER){ drawGame(); drawOverlay(); return; }
+
+    drawGame();
+
+    // 暂停覆盖
+    if(G.state===STATE_PAUSE){
+        ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(0,0,W,H);
+        ctx.fillStyle="#fff"; ctx.font="bold 36px sans-serif"; ctx.textAlign="center";
+        ctx.fillText("暂停",W/2,H/2-20);
+        ctx.font="18px sans-serif";
+        ctx.fillText("按空格或点击继续",W/2,H/2+20);
+        ctx.textAlign="left";
+    }
+}
+
+function drawGame(){
+    // 墙壁
+    ctx.fillStyle=COL_WALL;
+    for(var i=0;i<G.walls.length;i++){
+        var w=G.walls[i];
+        ctx.fillRect(w.x*CELL,w.y*CELL,CELL,CELL);
+        ctx.strokeStyle="#37474f"; ctx.lineWidth=2;
+        ctx.strokeRect(w.x*CELL+2,w.y*CELL+2,CELL-4,CELL-4);
+    }
+
+    // 食物
+    if(G.food){
+        var pulse=1+Math.sin(G.frameCount*0.15)*0.15;
+        ctx.save();
+        ctx.translate(G.food.x*CELL+CELL/2,G.food.y*CELL+CELL/2);
+        ctx.scale(pulse,pulse);
+        ctx.fillStyle=COL_FOOD;
+        ctx.beginPath(); ctx.arc(0,0,CELL/2-2,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+    }
+
+    // 金色食物
+    if(G.goldFood){
+        var pulse=1+Math.sin(G.frameCount*0.2)*0.2;
+        ctx.save();
+        ctx.translate(G.goldFood.x*CELL+CELL/2,G.goldFood.y*CELL+CELL/2);
+        ctx.scale(pulse,pulse);
+        ctx.fillStyle=COL_GOLD;
+        ctx.beginPath(); ctx.arc(0,0,CELL/2-1,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#fff";
+        ctx.font="bold 14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+        ctx.fillText("$",0,0);
+        ctx.restore();
+    }
+
+    // 道具
+    for(var i=0;i<G.powerups.length;i++){
+        var pu=G.powerups[i];
+        var pulse=1+Math.sin(G.frameCount*0.1+i)*0.1;
+        ctx.save();
+        ctx.translate(pu.x*CELL+CELL/2,pu.y*CELL+CELL/2);
+        ctx.scale(pulse,pulse);
+        ctx.fillStyle=POWERUP_TYPES[pu.type].color;
+        ctx.beginPath(); ctx.arc(0,0,CELL/2-2,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#fff";
+        ctx.font="bold 12px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+        var labels=["","速","穿","磁","双"];
+        ctx.fillText(labels[pu.type],0,0);
+        ctx.restore();
+    }
+
+    // 蛇
+    for(var i=G.snake.length-1;i>=0;i--){
+        var s=G.snake[i];
+        var t=i/G.snake.length;
+        var isHead=i===0;
+        var color=isHead?COL_SNAKE_HEAD:lerpColor(COL_SNAKE,"#004d40",t*0.6);
+
+        // 穿墙特效
+        if(G.powers[2]>0){
+            ctx.globalAlpha=0.6+Math.sin(G.frameCount*0.2)*0.3;
+        }
+
+        if(isHead){
+            drawCell(s.x,s.y,color,true);
+            // 眼睛
+            ctx.fillStyle="#000";
+            var ex=s.x*CELL+CELL/2+G.dir.x*4, ey=s.y*CELL+CELL/2+G.dir.y*4;
+            ctx.beginPath(); ctx.arc(ex-3,ey-2,2,0,Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(ex+3,ey-2,2,0,Math.PI*2); ctx.fill();
+        } else {
+            drawCell(s.x,s.y,color,false);
+        }
+        ctx.globalAlpha=1;
+    }
+
+    // 粒子
+    drawParticles();
+
+    // HUD
+    drawHUD();
+}
+
+function lerpColor(a,b,t){
+    var ar=parseInt(a.slice(1,3),16),ag=parseInt(a.slice(3,5),16),ab=parseInt(a.slice(5,7),16);
+    var br=parseInt(b.slice(1,3),16),bg=parseInt(b.slice(3,5),16),bb=parseInt(b.slice(5,7),16);
+    var rr=Math.round(ar+(br-ar)*t), rg=Math.round(ag+(bg-ag)*t), rb=Math.round(ab+(bb-ab)*t);
+    return "rgb("+rr+","+rg+","+rb+")";
+}
+
+function drawHUD(){
+    ctx.fillStyle=COL_UI; ctx.font="bold 16px sans-serif"; ctx.textAlign="left";
+    ctx.fillText("分数: "+G.score,10,24);
+    ctx.fillText("最高: "+G.highScore,10,46);
+    ctx.fillText("长度: "+G.snake.length,10,68);
+
+    if(G.combo>1){
+        ctx.fillStyle=COL_GOLD;
+        ctx.fillText("连击 x"+G.combo,10,90);
+    }
+
+    // 模式信息
+    ctx.textAlign="right";
+    if(G.mode===MODE_ENDLESS){
+        ctx.fillStyle=COL_UI;
+        ctx.fillText("无尽模式",W-10,24);
+    } else {
+        ctx.fillStyle=G.speedMode.timeLeft<600?"#ff5252":COL_UI;
+        var sec=Math.ceil(G.speedMode.timeLeft/60);
+        ctx.fillText("时间: "+sec+"s",W-10,24);
+        ctx.fillStyle=COL_ACCENT;
+        ctx.fillText("关卡 "+G.speedMode.level,W-10,46);
+        ctx.fillStyle=COL_UI;
+        ctx.fillText("目标: "+G.speedMode.targetScore,W-10,68);
+    }
+
+    // 道具状态
+    ctx.textAlign="right";
+    var py=H-10;
+    for(var k in G.powers){
+        var pu=POWERUP_TYPES[k];
+        ctx.fillStyle=pu.color;
+        ctx.fillText(pu.name+" "+Math.ceil(G.powers[k]/60)+"s",W-10,py);
+        py-=20;
+    }
+
+    ctx.textAlign="left";
+
+    // 暂停提示
+    ctx.fillStyle="rgba(255,255,255,0.3)";
+    ctx.font="12px sans-serif";
+    ctx.fillText("空格暂停 | P暂停",10,H-10);
+}
+
+/* ═══════════════════════ 菜单 ═══════════════════════ */
+function drawMenu(){
+    // 标题
+    ctx.fillStyle=COL_SNAKE; ctx.font="bold 48px sans-serif"; ctx.textAlign="center";
+    ctx.fillText("贪食蛇变体",W/2,120);
+
+    ctx.fillStyle=COL_UI; ctx.font="18px sans-serif";
+    ctx.fillText("经典贪食蛇 + 道具系统",W/2,160);
+
+    // 模式选择
+    var modes=["无尽模式","竞速模式"];
+    var descs=["难度递增，挑战最高分","限时挑战，每关递进"];
+    for(var i=0;i<2;i++){
+        var y=260+i*80;
+        var sel=G.menuSel===i;
+        ctx.fillStyle=sel?COL_ACCENT:"rgba(255,255,255,0.1)";
+        roundRect(W/2-150,y-25,300,60,10);
+        ctx.fill();
+        ctx.strokeStyle=sel?"#fff":"rgba(255,255,255,0.3)"; ctx.lineWidth=2;
+        roundRect(W/2-150,y-25,300,60,10);
+        ctx.stroke();
+
+        ctx.fillStyle="#fff"; ctx.font="bold 22px sans-serif";
+        ctx.fillText(modes[i],W/2,y+5);
+        ctx.fillStyle="rgba(255,255,255,0.6)"; ctx.font="14px sans-serif";
+        ctx.fillText(descs[i],W/2,y+28);
+    }
+
+    // 操作说明
+    ctx.fillStyle="rgba(255,255,255,0.5)"; ctx.font="14px sans-serif";
+    ctx.fillText("方向键/WASD控制 | 触屏滑动 | 鼠标点击方向按钮",W/2,H-80);
+    ctx.fillText("空格/P暂停 | 回车确认",W/2,H-55);
+
+    // 最高分
+    if(G.highScore>0){
+        ctx.fillStyle=COL_GOLD; ctx.font="bold 16px sans-serif";
+        ctx.fillText("最高分: "+G.highScore,W/2,H-25);
+    }
+
+    // 方向指示器
+    drawDirButtons();
+
+    ctx.textAlign="left";
+}
+
+function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+/* ═══════════════════════ 结束界面 ═══════════════════════ */
+function drawOverlay(){
+    ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#ff5252"; ctx.font="bold 42px sans-serif"; ctx.textAlign="center";
+    ctx.fillText("游戏结束",W/2,H/2-100);
+
+    ctx.fillStyle="#fff"; ctx.font="bold 28px sans-serif";
+    ctx.fillText("得分: "+G.score,W/2,H/2-50);
+
+    if(G.score>=G.highScore && G.score>0){
+        ctx.fillStyle=COL_GOLD; ctx.font="bold 20px sans-serif";
+        ctx.fillText("新纪录!",W/2,H/2-20);
+    }
+
+    ctx.fillStyle=COL_UI; ctx.font="16px sans-serif";
+    ctx.fillText("长度: "+G.snake.length+"  最高: "+G.highScore,W/2,H/2+10);
+
+    // 选项
+    var opts=["重新开始","返回菜单"];
+    for(var i=0;i<2;i++){
+        var y=H/2+70+i*55;
+        var sel=G.overSel===i;
+        ctx.fillStyle=sel?COL_ACCENT:"rgba(255,255,255,0.15)";
+        roundRect(W/2-100,y-18,200,40,8);
+        ctx.fill();
+        ctx.strokeStyle=sel?"#fff":"rgba(255,255,255,0.3)"; ctx.lineWidth=2;
+        roundRect(W/2-100,y-18,200,40,8);
+        ctx.stroke();
+        ctx.fillStyle="#fff"; ctx.font="bold 18px sans-serif";
+        ctx.fillText(opts[i],W/2,y+6);
+    }
+
+    ctx.textAlign="left";
+}
+
+/* ═══════════════════════ 方向按钮(触屏/鼠标) ═══════════════════════ */
+var dirBtns=[
+    {x:W/2,y:H-90,dx:0,dy:-1,label:"▲"}, // 上
+    {x:W/2-50,y:H-50,dx:-1,dy:0,label:"◀"}, // 左
+    {x:W/2+50,y:H-50,dx:1,dy:0,label:"▶"}, // 右
+    {x:W/2,y:H-10,dx:0,dy:1,label:"▼"}  // 下
+];
+
+function drawDirButtons(){
+    if(G.state!==STATE_PLAY && G.state!==STATE_PAUSE) return;
+    for(var i=0;i<dirBtns.length;i++){
+        var b=dirBtns[i];
+        ctx.fillStyle="rgba(255,255,255,0.1)";
+        ctx.beginPath(); ctx.arc(b.x,b.y,22,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="rgba(255,255,255,0.5)";
+        ctx.font="bold 18px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+        ctx.fillText(b.label,b.x,b.y);
+    }
+    ctx.textAlign="left"; ctx.textBaseline="alphabetic";
+}
+
+function hitDirBtn(mx,my){
+    for(var i=0;i<dirBtns.length;i++){
+        var b=dirBtns[i];
+        var dx=mx-b.x, dy=my-b.y;
+        if(dx*dx+dy*dy<25*25) return b;
+    }
+    return null;
+}
+
+/* ═══════════════════════ 输入处理 ═══════════════════════ */
+function setDir(dx,dy){
+    // 禁止180度转向
+    if(G.dir.x===-dx && G.dir.y===-dy) return;
+    if(dx===0&&dy===0) return;
+    G.nextDir={x:dx,y:dy};
+}
+
+// 键盘
+document.addEventListener("keydown",function(e){
+    initAudio();
+    var k=e.key.toLowerCase();
+
+    if(G.state===STATE_MENU){
+        if(k==="arrowup"||k==="w"){ G.menuSel=0; sfxClick(); }
+        else if(k==="arrowdown"||k==="s"){ G.menuSel=1; sfxClick(); }
+        else if(k==="enter"||k===" "){
+            initGame(G.menuSel);
+            e.preventDefault();
+        }
+        return;
+    }
+
+    if(G.state===STATE_OVER){
+        if(k==="arrowup"||k==="w"){ G.overSel=0; sfxClick(); }
+        else if(k==="arrowdown"||k==="s"){ G.overSel=1; sfxClick(); }
+        else if(k==="enter"||k===" "){
+            if(G.overSel===0) initGame(G.mode);
+            else { G.state=STATE_MENU; loadHigh(); }
+            e.preventDefault();
+        }
+        return;
+    }
+
+    if(G.state===STATE_PLAY){
+        if(k==="arrowup"||k==="w") setDir(0,-1);
+        else if(k==="arrowdown"||k==="s") setDir(0,1);
+        else if(k==="arrowleft"||k==="a") setDir(-1,0);
+        else if(k==="arrowright"||k==="d") setDir(1,0);
+        else if(k===" "||k==="p"){ G.state=STATE_PAUSE; sfxClick(); e.preventDefault(); }
+    }
+    else if(G.state===STATE_PAUSE){
+        if(k===" "||k==="p"||k==="escape"){ G.state=STATE_PLAY; sfxClick(); e.preventDefault(); }
+    }
+
+    if(["arrowup","arrowdown","arrowleft","arrowright"," "].indexOf(k)>=0) e.preventDefault();
+});
+
+// 鼠标/触摸
+function getCanvasPos(ex,ey){
+    var r=canvas.getBoundingClientRect();
+    return { x:(ex-r.left)*(W/r.width), y:(ey-r.top)*(H/r.height) };
+}
+
+canvas.addEventListener("mousedown",function(e){
+    initAudio();
+    var p=getCanvasPos(e.clientX,e.clientY);
+    handleClick(p.x,p.y);
+});
+
+canvas.addEventListener("touchstart",function(e){
+    initAudio();
+    e.preventDefault();
+    var t=e.touches[0];
+    var p=getCanvasPos(t.clientX,t.clientY);
+    handleClick(p.x,p.y);
+},{passive:false});
+
+// 触屏滑动
+var touchStart=null;
+canvas.addEventListener("touchstart",function(e){
+    touchStart={x:e.touches[0].clientX,y:e.touches[0].clientY};
+},{passive:true});
+canvas.addEventListener("touchend",function(e){
+    if(!touchStart) return;
+    var t=e.changedTouches[0];
+    var dx=t.clientX-touchStart.x, dy=t.clientY-touchStart.y;
+    if(Math.abs(dx)<20 && Math.abs(dy)<20) return; // 太小忽略
+    if(G.state===STATE_PLAY){
+        if(Math.abs(dx)>Math.abs(dy)){
+            setDir(dx>0?1:-1,0);
+        } else {
+            setDir(0,dy>0?1:-1);
+        }
+    }
+    touchStart=null;
+},{passive:true});
+
+function handleClick(mx,my){
+    if(G.state===STATE_MENU){
+        // 检查模式按钮
+        for(var i=0;i<2;i++){
+            var y=260+i*80;
+            if(mx>W/2-150&&mx<W/2+150&&my>y-25&&my<y+35){
+                G.menuSel=i; sfxClick();
+                initGame(i); return;
+            }
+        }
+        return;
+    }
+
+    if(G.state===STATE_OVER){
+        for(var i=0;i<2;i++){
+            var y=G.state===STATE_OVER?H/2+70+i*55:0;
+            if(mx>W/2-100&&mx<W/2+100&&my>y-18&&my<y+22){
+                G.overSel=i; sfxClick();
+                if(i===0) initGame(G.mode);
+                else { G.state=STATE_MENU; loadHigh(); }
+                return;
+            }
+        }
+        return;
+    }
+
+    if(G.state===STATE_PLAY){
+        // 方向按钮
+        var btn=hitDirBtn(mx,my);
+        if(btn){ setDir(btn.dx,btn.dy); sfxClick(); return; }
+    }
+
+    if(G.state===STATE_PAUSE){
+        G.state=STATE_PLAY; sfxClick(); return;
+    }
+}
+
+/* ═══════════════════════ 游戏循环 ═══════════════════════ */
+var lastTime=0;
+function gameLoop(ts){
+    requestAnimationFrame(gameLoop);
+    if(!lastTime) lastTime=ts;
+    var dt=ts-lastTime; lastTime=ts;
+
+    if(G.state===STATE_PLAY){
+        // 帧率控制: 每秒G.speed帧
+        var interval=1000/G.speed;
+        G.tickAccum+=dt;
+        while(G.tickAccum>=interval){
+            G.tickAccum-=interval;
+            gameTick();
+            if(G.state!==STATE_PLAY) break;
+        }
+    }
+
+    // 更新粒子(即使暂停也更新视觉)
+    if(G.state!==STATE_PLAY) updateParticles();
+
+    render();
+}
+
+/* ═══════════════════════ 启动 ═══════════════════════ */
+G.state=STATE_MENU;
+requestAnimationFrame(gameLoop);
+
+})();
+
+
+// ===== 游戏工坊统一广告系统 =====
+const GameMonetize = {
+	adsterra: { enabled: !/localhost|127\.0\.0\.1/.test(location.hostname) },
+	sponsor: { enabled: true, wechatQR: '', alipayQR: '' },
+	interstitial: { enabled: true, cooldownMs: 180000, gameCount: 2 },
+	_lastInterTime: 0, _deathCount: 0,
+	_gameOverDetected: false,
+	init() {
+		const banner = document.getElementById('adBanner');
+		if (banner && this.adsterra.enabled) {
+			const s1 = document.createElement('script');
+			s1.src = 'https://pl29544740.effectivecpmnetwork.com/de/26/0e/de260e17b6a348e3489772a87b1cedf1.js';
+			s1.async = true;
+			banner.appendChild(s1);
+		}
+		const spBtn = document.getElementById('sponsorBtn');
+		const spPanel = document.getElementById('sponsorPanel');
+		const spClose = document.getElementById('sponsorClose');
+		if (spBtn && spPanel && spClose && this.sponsor.enabled) {
+			spBtn.onclick = () => { spPanel.style.display = 'flex'; spPanel.style.pointerEvents = 'auto'; };
+			spClose.onclick = () => { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; };
+			spPanel.onclick = (e) => { if (e.target === spPanel) { spPanel.style.display = 'none'; spPanel.style.pointerEvents = 'none'; } };
+		} else if (spBtn) { spBtn.style.display = 'none'; }
+		const skipBtn = document.getElementById('skipInterstitial');
+		const interstitial = document.getElementById('interstitialAd');
+		if (skipBtn && interstitial) {
+			skipBtn.onclick = () => {
+				interstitial.style.display = 'none'; interstitial.style.pointerEvents = 'none';
+				if (this._reviveCallback) { const cb = this._reviveCallback; this._reviveCallback = null; cb(); }
+			};
+		}
+		// 自动检测游戏结束状态
+		this._startGameOverWatcher();
+	},
+	_startGameOverWatcher() {
+		// 检测#restartBtn或包含"重新开始"/"再来一局"的按钮变为可见
+		const checkGameOver = () => {
+			if (this._gameOverDetected) return;
+			// 方法1: 检测#restartBtn可见
+			const restartBtn = document.getElementById('restartBtn');
+			if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法2: 检测#gameOverScreen可见
+			const goScreen = document.getElementById('gameOverScreen');
+			if (goScreen && getComputedStyle(goScreen).display !== 'none') {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+			// 方法3: 检测screen-gameover可见
+			const goScreen2 = document.getElementById('screen-gameover');
+			if (goScreen2 && !goScreen2.classList.contains('hidden')) {
+				this._gameOverDetected = true;
+				this.onGameOver();
+				return;
+			}
+		};
+		// 每500ms检查一次
+		this._goInterval = setInterval(() => {
+			checkGameOver();
+			// 如果检测到了，等2秒后重置标志，允许下次检测
+			if (this._gameOverDetected) {
+				setTimeout(() => { this._gameOverDetected = false; }, 2000);
+			}
+		}, 500);
+	},
+	requestRevive(callback) {
+		this._reviveCallback = callback || null;
+		const el = document.getElementById('interstitialAd');
+		if (!el) { if (callback) callback(); return; }
+		const s2 = document.createElement('script');
+		s2.src = 'https://pl29544742.effectivecpmnetwork.com/be/a9/6d/bea96d779c0ee07c2b15613852dd3e70.js';
+		s2.async = true;
+		document.getElementById('interstitialAdSlot').innerHTML = '';
+		document.getElementById('interstitialAdSlot').appendChild(s2);
+		el.style.display = 'flex'; el.style.pointerEvents = 'auto';
+
+		setTimeout(() => { const slot = document.getElementById('interstitialAdSlot'); if (slot && slot.innerHTML.includes('加载中')) { slot.innerHTML = '<div style=color:#aaa;font:13px Microsoft YaHei,sans-serif>广告暂时无法加载<br>点击下方按钮继续</div>'; } }, 3000);
+		const skipBtn = document.getElementById('skipInterstitial');
+		if (skipBtn) {
+			skipBtn.textContent = '5 秒后可跳过'; skipBtn.disabled = true;
+			let cd = 5;
+			const timer = setInterval(() => {
+				cd--;
+				if (cd <= 0) { clearInterval(timer); skipBtn.textContent = '跳过广告 ▶'; skipBtn.disabled = false; }
+				else { skipBtn.textContent = cd + ' 秒后可跳过'; }
+			}, 1000);
+		}
+	},
+	onGameOver() {
+		this._deathCount++;
+		if (!this.interstitial.enabled) return;
+		if (this._deathCount < this.interstitial.gameCount) return;
+		if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
+		this._lastInterTime = Date.now(); this._deathCount = 0;
+		this.requestRevive(null);
+	},
+};
+GameMonetize.init();
+</script>
+<!-- 游戏工坊统一广告系统 -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>
