@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>编中国结</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a0a00;font-family:'Microsoft YaHei','PingFang SC',sans-serif;}
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;}
+#uiLayer{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;}
+#uiLayer>*{pointer-events:auto;}
+#adBanner{position:absolute;bottom:0;left:0;width:100%;height:60px;background:linear-gradient(90deg,#8b0000,#c41e3a,#8b0000);display:flex;align-items:center;justify-content:center;color:#ffd700;font-size:14px;border-top:2px solid #ffd700;cursor:pointer;z-index:20;}
+#sponsorBtn{position:absolute;top:10px;right:10px;background:linear-gradient(135deg,#ffd700,#ff8c00);color:#8b0000;border:2px solid #ffd700;border-radius:20px;padding:8px 16px;font-size:13px;font-weight:bold;cursor:pointer;z-index:20;display:none;}
+#modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center;}
+#modal.show{display:flex;}
+#modalBox{background:linear-gradient(135deg,#2d0a00,#4a1a00);border:3px solid #ffd700;border-radius:16px;padding:30px;max-width:360px;width:90%;text-align:center;color:#ffd700;}
+#modalBox h3{font-size:20px;margin-bottom:12px;}
+#modalBox p{font-size:14px;color:#e6c97a;margin-bottom:16px;}
+#modalBox button{background:linear-gradient(135deg,#ffd700,#ff8c00);color:#8b0000;border:none;border-radius:20px;padding:10px 30px;font-size:16px;font-weight:bold;cursor:pointer;margin:5px;}
+#interstitial{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:200;align-items:center;justify-content:center;flex-direction:column;}
+#interstitial.show{display:flex;}
+#interstitial .ad-content{background:linear-gradient(135deg,#8b0000,#c41e3a);border:3px solid #ffd700;border-radius:16px;padding:40px;text-align:center;color:#ffd700;}
+#interstitial .ad-content h2{font-size:24px;margin-bottom:10px;}
+#interstitial .ad-content p{font-size:14px;color:#e6c97a;margin-bottom:20px;}
+#interstitial .ad-content button{background:linear-gradient(135deg,#ffd700,#ff8c00);color:#8b0000;border:none;border-radius:20px;padding:12px 36px;font-size:16px;font-weight:bold;cursor:pointer;}
+#closeAd{position:absolute;top:15px;right:15px;color:#ffd700;font-size:28px;cursor:pointer;z-index:201;display:none;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="uiLayer">
+<div id="adBanner">传统文化传承 -- 中国结编织艺术</div>
+<button id="sponsorBtn" onclick="showSponsor()">支持我们</button>
+</div>
+<div id="modal">
+<div id="modalBox">
+<h3>感谢支持</h3>
+<p>您的支持是我们创作的动力！<br>欢迎关注传统文化传承。</p>
+<button onclick="closeModal()">关闭</button>
+</div>
+</div>
+<div id="interstitial">
+<div class="ad-content">
+<h2>中国结</h2>
+<p>千年编织艺术，指尖上的传承</p>
+<button onclick="closeInterstitial()">继续游戏</button>
+</div>
+</div>
+<div id="closeAd" onclick="closeInterstitial()">&times;</div>
+
+<script>
+// ===== 广告系统 =====
+var adTimer=0,adInterval=180000,lastAdTime=0,sponsorClicks=0;
+function showSponsor(){document.getElementById('modal').classList.add('show');sponsorClicks++;}
+function closeModal(){document.getElementById('modal').classList.remove('show');}
+function showInterstitial(){
+    document.getElementById('interstitial').classList.add('show');
+    document.getElementById('closeAd').style.display='block';
+    setTimeout(function(){document.getElementById('closeAd').style.display='block';},3000);
+}
+function closeInterstitial(){
+    document.getElementById('interstitial').classList.remove('show');
+    document.getElementById('closeAd').style.display='none';
+    lastAdTime=Date.now();
+}
+document.getElementById('adBanner').onclick=function(){showInterstitial();};
+document.getElementById('sponsorBtn').onclick=showSponsor;
+
+// ===== Canvas设置 =====
+var canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+var W,H,DPR,scale;
+function resizeCanvas(){
+    DPR=window.devicePixelRatio||1;
+    W=window.innerWidth;H=window.innerHeight;
+    canvas.width=W*DPR;canvas.height=H*DPR;
+    canvas.style.width=W+'px';canvas.style.height=H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    scale=Math.min(W/800,H/900);
+}
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas();
+
+// ===== 工具函数 =====
+function dist(x1,y1,x2,y2){return Math.sqrt((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2));}
+function lerp(a,b,t){return a+(b-a)*t;}
+function clamp(v,mn,mx){return Math.max(mn,Math.min(mx,v));}
+function rand(a,b){return a+Math.random()*(b-a);}
+function randInt(a,b){return Math.floor(rand(a,b+1));}
+function hsl(h,s,l){return 'hsl('+h+','+s+'%,'+l+'%)';}
+
+// ===== 粒子系统 =====
+var particles=[];
+function addParticle(x,y,color,count,speed,life){
+    for(var i=0;i<count;i++){
+        particles.push({x:x,y:y,vx:rand(-speed,speed),vy:rand(-speed,speed),
+            life:life||60,maxLife:life||60,color:color||'#ffd700',size:rand(2,5)});
+    }
+}
+function updateParticles(){
+    for(var i=particles.length-1;i>=0;i--){
+        var p=particles[i];
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.05;p.life--;
+        if(p.life<=0)particles.splice(i,1);
+    }
+}
+function drawParticles(){
+    for(var i=0;i<particles.length;i++){
+        var p=particles[i];
+        ctx.globalAlpha=p.life/p.maxLife;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+// ===== 绳结数据 =====
+// 每个图案由节点(nodes)和连接线(links)组成
+// 节点类型: 'start'(起始点), 'loop'(环), 'cross'(交叉), 'knot'(结), 'end'(结束)
+var PATTERNS=[
+    {
+        name:"基本结",desc:"最简单的入门结",difficulty:1,
+        nodes:[
+            {x:400,y:200,type:'start',label:'S'},
+            {x:300,y:350,type:'loop',label:'1'},
+            {x:500,y:350,type:'loop',label:'2'},
+            {x:400,y:500,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:1,t:2},{f:2,t:3}],
+        colors:['#ff4444','#ff4444','#ff4444'],
+        steps:['从起点开始','向左下方编第一个环','向右下方编第二个环','到达终点，收紧完成']
+    },
+    {
+        name:"双钱结",desc:"双环相扣如铜钱",difficulty:1,
+        nodes:[
+            {x:400,y:180,type:'start',label:'S'},
+            {x:300,y:300,type:'loop',label:'1'},
+            {x:500,y:300,type:'loop',label:'2'},
+            {x:300,y:450,type:'cross',label:'3'},
+            {x:500,y:450,type:'loop',label:'4'},
+            {x:400,y:560,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:1,t:2},{f:2,t:4},{f:1,t:3},{f:3,t:4},{f:4,t:5}],
+        colors:['#cc0000','#cc0000','#cc0000','#cc0000','#cc0000'],
+        steps:['起始点出发','编左侧环','编右侧环','将左侧绳穿过交叉点','连接右侧并收紧','完成双钱结']
+    },
+    {
+        name:"万字结",desc:"形如万字，寓意吉祥",difficulty:2,
+        nodes:[
+            {x:400,y:160,type:'start',label:'S'},
+            {x:280,y:280,type:'loop',label:'1'},
+            {x:520,y:280,type:'loop',label:'2'},
+            {x:200,y:420,type:'cross',label:'3'},
+            {x:600,y:420,type:'cross',label:'4'},
+            {x:350,y:530,type:'knot',label:'5'},
+            {x:450,y:530,type:'knot',label:'6'},
+            {x:400,y:640,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:4},{f:3,t:5},{f:4,t:6},{f:5,t:6},{f:5,t:7},{f:6,t:7}],
+        colors:['#e60000','#e60000','#e60000','#e60000','#e60000','#e60000','#e60000','#e60000'],
+        steps:['从中心出发','向左上编环','向右上编环','左绳向下穿过交叉','右绳向下穿过交叉','左绳编中间结','右绳编中间结','收紧完成万字结']
+    },
+    {
+        name:"盘长结",desc:"方形回环，长长久久",difficulty:2,
+        nodes:[
+            {x:400,y:160,type:'start',label:'S'},
+            {x:300,y:250,type:'loop',label:'1'},
+            {x:500,y:250,type:'loop',label:'2'},
+            {x:250,y:370,type:'cross',label:'3'},
+            {x:400,y:370,type:'knot',label:'4'},
+            {x:550,y:370,type:'cross',label:'5'},
+            {x:300,y:500,type:'loop',label:'6'},
+            {x:500,y:500,type:'loop',label:'7'},
+            {x:400,y:600,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:5},{f:3,t:4},{f:4,t:5},{f:3,t:6},{f:5,t:7},{f:6,t:8},{f:7,t:8}],
+        colors:['#b22222','#b22222','#b22222','#b22222','#b22222','#b22222','#b22222','#b22222'],
+        steps:['从顶部开始','编左环','编右环','左绳穿过左侧交叉','编中间结点','右绳穿过右侧交叉','左绳向下编环','右绳向下编环','底部收合完成']
+    },
+    {
+        name:"藻井结",desc:"形如古井，层层叠叠",difficulty:3,
+        nodes:[
+            {x:400,y:140,type:'start',label:'S'},
+            {x:300,y:230,type:'loop',label:'1'},
+            {x:500,y:230,type:'loop',label:'2'},
+            {x:220,y:340,type:'cross',label:'3'},
+            {x:400,y:300,type:'knot',label:'4'},
+            {x:580,y:340,type:'cross',label:'5'},
+            {x:220,y:460,type:'loop',label:'6'},
+            {x:400,y:420,type:'knot',label:'7'},
+            {x:580,y:460,type:'loop',label:'8'},
+            {x:300,y:560,type:'cross',label:'9'},
+            {x:500,y:560,type:'cross',label:'10'},
+            {x:400,y:650,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:5},{f:3,t:4},{f:4,t:5},{f:3,t:6},{f:4,t:7},{f:5,t:8},{f:6,t:9},{f:7,t:9},{f:7,t:10},{f:8,t:10},{f:9,t:11},{f:10,t:11}],
+        colors:['#c41e3a','#c41e3a','#c41e3a','#c41e3a','#c41e3a','#c41e3a','#c41e3a','#c41e3a','#c41e3a','#c41e3a','#c41e3a'],
+        steps:['从顶部开始','左环和右环','穿过左侧交叉','编中间第一层','穿过右侧交叉','第二层左环','第二层中结','第二层右环','第三层左交叉','第三层右交叉','收紧完成藻井结']
+    },
+    {
+        name:"吉祥结",desc:"如意吉祥，万事如意",difficulty:2,
+        nodes:[
+            {x:400,y:170,type:'start',label:'S'},
+            {x:250,y:300,type:'loop',label:'1'},
+            {x:550,y:300,type:'loop',label:'2'},
+            {x:180,y:450,type:'cross',label:'3'},
+            {x:400,y:400,type:'knot',label:'4'},
+            {x:620,y:450,type:'cross',label:'5'},
+            {x:250,y:580,type:'loop',label:'6'},
+            {x:550,y:580,type:'loop',label:'7'},
+            {x:400,y:680,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:5},{f:3,t:4},{f:4,t:5},{f:3,t:6},{f:5,t:7},{f:6,t:8},{f:7,t:8}],
+        colors:['#dc143c','#dc143c','#dc143c','#dc143c','#dc143c','#dc143c','#dc143c','#dc143c'],
+        steps:['从顶部出发','编左大环','编右大环','左绳穿入交叉','编中心结','右绳穿入交叉','左下环','右下环','底部收紧完成']
+    },
+    {
+        name:"团锦结",desc:"花团锦簇，富贵华丽",difficulty:3,
+        nodes:[
+            {x:400,y:130,type:'start',label:'S'},
+            {x:250,y:220,type:'loop',label:'1'},
+            {x:550,y:220,type:'loop',label:'2'},
+            {x:180,y:350,type:'cross',label:'3'},
+            {x:320,y:310,type:'knot',label:'4'},
+            {x:480,y:310,type:'knot',label:'5'},
+            {x:620,y:350,type:'cross',label:'6'},
+            {x:180,y:480,type:'loop',label:'7'},
+            {x:400,y:430,type:'knot',label:'8'},
+            {x:620,y:480,type:'loop',label:'9'},
+            {x:250,y:580,type:'cross',label:'10'},
+            {x:550,y:580,type:'cross',label:'11'},
+            {x:400,y:670,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:6},{f:3,t:4},{f:4,t:5},{f:5,t:6},{f:3,t:7},{f:4,t:8},{f:5,t:8},{f:6,t:9},{f:7,t:10},{f:8,t:10},{f:8,t:11},{f:9,t:11},{f:10,t:12},{f:11,t:12}],
+        colors:['#ff2400','#ff2400','#ff2400','#ff2400','#ff2400','#ff2400','#ff2400','#ff2400','#ff2400','#ff2400','#ff2400','#ff2400'],
+        steps:['从顶出发','编左环','编右环','左绳穿入','编左中结','编右中结','右绳穿入','左下环','中心交汇','右下环','左下交叉','右下交叉','底部收紧完成']
+    },
+    {
+        name:"琵琶结",desc:"形如琵琶，优雅精致",difficulty:2,
+        nodes:[
+            {x:400,y:170,type:'start',label:'S'},
+            {x:320,y:280,type:'loop',label:'1'},
+            {x:480,y:280,type:'loop',label:'2'},
+            {x:280,y:400,type:'cross',label:'3'},
+            {x:520,y:400,type:'cross',label:'4'},
+            {x:320,y:520,type:'knot',label:'5'},
+            {x:480,y:520,type:'knot',label:'6'},
+            {x:400,y:640,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:4},{f:3,t:5},{f:4,t:6},{f:5,t:6},{f:5,t:7},{f:6,t:7}],
+        colors:['#cd5c5c','#cd5c5c','#cd5c5c','#cd5c5c','#cd5c5c','#cd5c5c','#cd5c5c'],
+        steps:['从顶部开始','编左环','编右环','左绳穿交叉','右绳穿交叉','编左下方结','编右下方结','收紧完成琵琶结']
+    },
+    {
+        name:"如意结",desc:"形如灵芝，万事如意",difficulty:3,
+        nodes:[
+            {x:400,y:130,type:'start',label:'S'},
+            {x:250,y:230,type:'loop',label:'1'},
+            {x:550,y:230,type:'loop',label:'2'},
+            {x:170,y:370,type:'cross',label:'3'},
+            {x:400,y:330,type:'knot',label:'4'},
+            {x:630,y:370,type:'cross',label:'5'},
+            {x:170,y:510,type:'loop',label:'6'},
+            {x:400,y:470,type:'knot',label:'7'},
+            {x:630,y:510,type:'loop',label:'8'},
+            {x:280,y:610,type:'cross',label:'9'},
+            {x:520,y:610,type:'cross',label:'10'},
+            {x:400,y:700,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:5},{f:3,t:4},{f:4,t:5},{f:3,t:6},{f:4,t:7},{f:5,t:8},{f:6,t:9},{f:7,t:9},{f:7,t:10},{f:8,t:10},{f:9,t:11},{f:10,t:11}],
+        colors:['#b03060','#b03060','#b03060','#b03060','#b03060','#b03060','#b03060','#b03060','#b03060','#b03060','#b03060'],
+        steps:['从顶部出发','编左环','编右环','左绳穿交叉','编中心结','右绳穿交叉','第二层左','第二层中','第二层右','第三层左','第三层右','收紧完成如意结']
+    },
+    {
+        name:"双联结",desc:"两结相连，好事成双",difficulty:2,
+        nodes:[
+            {x:400,y:150,type:'start',label:'S'},
+            {x:300,y:260,type:'loop',label:'1'},
+            {x:500,y:260,type:'loop',label:'2'},
+            {x:250,y:380,type:'cross',label:'3'},
+            {x:550,y:380,type:'cross',label:'4'},
+            {x:300,y:500,type:'loop',label:'5'},
+            {x:500,y:500,type:'loop',label:'6'},
+            {x:400,y:620,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:4},{f:3,t:5},{f:4,t:6},{f:5,t:7},{f:6,t:7}],
+        colors:['#dc143c','#dc143c','#dc143c','#dc143c','#dc143c','#dc143c','#dc143c'],
+        steps:['从顶部开始','编左环','编右环','左绳穿交叉','右绳穿交叉','编左下环','编右下环','收紧完成双联结']
+    },
+    {
+        name:"十全结",desc:"十全十美，至高祝福",difficulty:3,
+        nodes:[
+            {x:400,y:120,type:'start',label:'S'},
+            {x:260,y:210,type:'loop',label:'1'},
+            {x:540,y:210,type:'loop',label:'2'},
+            {x:180,y:330,type:'cross',label:'3'},
+            {x:340,y:290,type:'knot',label:'4'},
+            {x:460,y:290,type:'knot',label:'5'},
+            {x:620,y:330,type:'cross',label:'6'},
+            {x:180,y:460,type:'loop',label:'7'},
+            {x:340,y:420,type:'knot',label:'8'},
+            {x:460,y:420,type:'knot',label:'9'},
+            {x:620,y:460,type:'loop',label:'10'},
+            {x:260,y:560,type:'cross',label:'11'},
+            {x:400,y:530,type:'knot',label:'12'},
+            {x:540,y:560,type:'cross',label:'13'},
+            {x:340,y:650,type:'cross',label:'14'},
+            {x:460,y:650,type:'cross',label:'15'},
+            {x:400,y:740,type:'end',label:'E'}
+        ],
+        links:[{f:0,t:1},{f:0,t:2},{f:1,t:3},{f:2,t:6},{f:3,t:4},{f:4,t:5},{f:5,t:6},{f:3,t:7},{f:4,t:8},{f:5,t:9},{f:6,t:10},{f:7,t:11},{f:8,t:12},{f:9,t:12},{f:10,t:13},{f:11,t:14},{f:12,t:14},{f:12,t:15},{f:13,t:15},{f:14,t:16},{f:15,t:16}],
+        colors:['#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000','#ff0000'],
+        steps:['从顶部出发','编左环','编右环','左绳穿入','编左中结','编右中结','右绳穿入','第二层左','第二层左中','第二层右中','第二层右','第三层左','第三层中','第三层右','第四层左','第四层右','收紧完成十全结']
+    }
+];
+
+// ===== 游戏状态 =====
+var STATE={MENU:0,PLAYING:1,STEP_GUIDE:2,PATTERN_SELECT:3,COMPLETE:4};
+var G={
+    state:STATE.MENU,
+    pattern:0,
+    currentStep:0,
+    totalScore:0,
+    highScore:parseInt(localStorage.getItem('chineseKnot_highScore'))||0,
+    combo:0,
+    maxCombo:0,
+    time:0,
+    animTime:0,
+    clickAnim:0,
+    completedPatterns:[],
+    particles:[],
+    ropeProgress:0,
+    ropeAnimTime:0,
+    stepComplete:false,
+    guideAlpha:0,
+    menuParticles:[],
+    menuTime:0,
+    bgStars:[],
+    knotAnim:0,
+    handX:0,handY:0,handShow:false,handTime:0
+};
+
+// 初始化星星背景
+function initStars(){
+    G.bgStars=[];
+    for(var i=0;i<60;i++){
+        G.bgStars.push({x:rand(0,W),y:rand(0,H),size:rand(1,3),speed:rand(0.2,0.8),twinkle:rand(0,Math.PI*2)});
+    }
+}
+initStars();
+
+// ===== 节点点击检测 =====
+function getNodePos(node){
+    return{x:node.x*scale+(W-800*scale)/2,y:node.y*scale+(H-900*scale)/2};
+}
+
+function hitNode(mx,my,nodeIdx){
+    var pat=PATTERNS[G.pattern];
+    var node=pat.nodes[nodeIdx];
+    var pos=getNodePos(node);
+    return dist(mx,my,pos.x,pos.y)<30*scale;
+}
+
+// ===== 绘制函数 =====
+function drawBg(){
+    // 深红渐变背景
+    var grd=ctx.createLinearGradient(0,0,0,H);
+    grd.addColorStop(0,'#1a0505');
+    grd.addColorStop(0.3,'#2d0a0a');
+    grd.addColorStop(0.7,'#1a0505');
+    grd.addColorStop(1,'#0d0202');
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,0,W,H);
+
+    // 星星
+    G.menuTime+=0.02;
+    for(var i=0;i<G.bgStars.length;i++){
+        var s=G.bgStars[i];
+        s.twinkle+=0.03;
+        var alpha=0.3+0.4*Math.sin(s.twinkle);
+        ctx.globalAlpha=alpha;
+        ctx.fillStyle='#ffd700';
+        ctx.beginPath();ctx.arc(s.x,s.y,s.size,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawKnotDecoration(cx,cy,size,t){
+    // 绘制装饰性中国结图案
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(t*0.005);
+
+    var r=size;
+    ctx.strokeStyle='#ffd700';
+    ctx.lineWidth=2;
+    ctx.globalAlpha=0.15;
+
+    // 外圈装饰
+    for(var i=0;i<8;i++){
+        var a=i*Math.PI/4;
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        var ex=Math.cos(a)*r,ey=Math.sin(a)*r;
+        var cpx=Math.cos(a+0.3)*r*0.6,cpy=Math.sin(a+0.3)*r*0.6;
+        ctx.quadraticCurveTo(cpx,cpy,ex,ey);
+        ctx.stroke();
+    }
+
+    // 中心圆
+    ctx.beginPath();ctx.arc(0,0,r*0.3,0,Math.PI*2);ctx.stroke();
+
+    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function drawMenu(){
+    drawBg();
+
+    // 装饰结
+    drawKnotDecoration(W*0.15,H*0.3,80*scale,G.menuTime*60);
+    drawKnotDecoration(W*0.85,H*0.2,60*scale,G.menuTime*60+100);
+    drawKnotDecoration(W*0.2,H*0.75,70*scale,G.menuTime*60+200);
+    drawKnotDecoration(W*0.8,H*0.7,90*scale,G.menuTime*60+300);
+
+    // 标题
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+
+    // 标题阴影
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.font='bold '+(52*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('编中国结',W/2+3,H*0.22+3);
+
+    // 标题
+    var titleGrd=ctx.createLinearGradient(W/2-150*scale,H*0.22-30*scale,W/2+150*scale,H*0.22+30*scale);
+    titleGrd.addColorStop(0,'#ffd700');
+    titleGrd.addColorStop(0.5,'#ffec8b');
+    titleGrd.addColorStop(1,'#ffd700');
+    ctx.fillStyle=titleGrd;
+    ctx.font='bold '+(52*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('编中国结',W/2,H*0.22);
+
+    // 副标题
+    ctx.fillStyle='#e6c97a';
+    ctx.font=(18*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('指尖上的千年编织艺术',W/2,H*0.30);
+
+    // 中间大结装饰
+    drawBigKnot(W/2,H*0.50,120*scale);
+
+    // 开始按钮
+    var btnW=200*scale,btnH=55*scale;
+    var btnX=W/2-btnW/2,btnY=H*0.72;
+
+    // 按钮动画
+    G.clickAnim+=0.05;
+    var pulse=1+0.03*Math.sin(G.clickAnim*3);
+
+    ctx.save();
+    ctx.translate(W/2,btnY+btnH/2);
+    ctx.scale(pulse,pulse);
+    ctx.translate(-W/2,-(btnY+btnH/2));
+
+    var btnGrd=ctx.createLinearGradient(btnX,btnY,btnX,btnY+btnH);
+    btnGrd.addColorStop(0,'#ffd700');
+    btnGrd.addColorStop(0.5,'#ff8c00');
+    btnGrd.addColorStop(1,'#cc6600');
+    ctx.fillStyle=btnGrd;
+    roundRect(ctx,btnX,btnY,btnW,btnH,28*scale);
+    ctx.fill();
+
+    // 按钮边框
+    ctx.strokeStyle='#ffec8b';
+    ctx.lineWidth=2;
+    roundRect(ctx,btnX,btnY,btnW,btnH,28*scale);
+    ctx.stroke();
+
+    ctx.fillStyle='#8b0000';
+    ctx.font='bold '+(24*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('开始编织',W/2,btnY+btnH/2);
+    ctx.restore();
+
+    // 最高分
+    if(G.highScore>0){
+        ctx.fillStyle='#e6c97a';
+        ctx.font=(16*scale)+'px "Microsoft YaHei",sans-serif';
+        ctx.fillText('最高分: '+G.highScore,W/2,H*0.82);
+    }
+
+    // 操作提示
+    ctx.fillStyle='#aa8866';
+    ctx.font=(14*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('点击屏幕或按任意键开始',W/2,H*0.90);
+
+    drawParticles();
+}
+
+function drawBigKnot(cx,cy,size){
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.strokeStyle='#c41e3a';
+    ctx.lineWidth=4*scale;
+    ctx.lineCap='round';
+    ctx.lineJoin='round';
+    ctx.globalAlpha=0.6;
+
+    // 绘制简化中国结图案
+    var r=size*0.4;
+
+    // 上方挂绳
+    ctx.beginPath();ctx.moveTo(0,-size*0.6);ctx.lineTo(0,-r);ctx.stroke();
+
+    // 主体交叉
+    ctx.beginPath();
+    ctx.moveTo(-r,-r);ctx.quadraticCurveTo(0,0,r,-r);ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(r,-r);ctx.quadraticCurveTo(0,0,-r,-r);ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-r,r);ctx.quadraticCurveTo(0,0,r,r);ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(r,r);ctx.quadraticCurveTo(0,0,-r,r);ctx.stroke();
+
+    // 四角环
+    for(var i=0;i<4;i++){
+        var a=i*Math.PI/2+Math.PI/4;
+        ctx.beginPath();
+        var px=Math.cos(a)*r*1.2,py=Math.sin(a)*r*1.2;
+        ctx.arc(px,py,r*0.35,0,Math.PI*2);
+        ctx.stroke();
+    }
+
+    // 中心
+    ctx.beginPath();ctx.arc(0,0,r*0.25,0,Math.PI*2);ctx.stroke();
+
+    // 下方流苏
+    ctx.beginPath();ctx.moveTo(0,r);ctx.lineTo(0,size*0.5);ctx.stroke();
+    for(var i=-2;i<=2;i++){
+        ctx.beginPath();
+        ctx.moveTo(i*8*scale,size*0.45);
+        ctx.lineTo(i*8*scale,size*0.65);
+        ctx.stroke();
+        // 流苏底部小珠
+        ctx.fillStyle='#c41e3a';
+        ctx.beginPath();ctx.arc(i*8*scale,size*0.67,3*scale,0,Math.PI*2);ctx.fill();
+    }
+
+    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function drawPatternSelect(){
+    drawBg();
+
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold '+(36*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('选择图案',W/2,H*0.08);
+
+    // 图案网格 - 每行3个
+    var cols=3,padding=20*scale;
+    var cellW=(W-padding*(cols+1))/cols;
+    var cellH=100*scale;
+    var startY=H*0.15;
+
+    for(var i=0;i<PATTERNS.length;i++){
+        var col=i%cols,row=Math.floor(i/cols);
+        var x=padding+col*(cellW+padding);
+        var y=startY+row*(cellH+padding);
+
+        if(y+cellH>H-80)break; // 防止超出屏幕
+
+        // 卡片背景
+        var completed=G.completedPatterns.indexOf(i)>=0;
+        var cardGrd=ctx.createLinearGradient(x,y,x,y+cellH);
+        if(completed){
+            cardGrd.addColorStop(0,'#2d4a1a');
+            cardGrd.addColorStop(1,'#1a2d0a');
+        }else{
+            cardGrd.addColorStop(0,'#3d1a0a');
+            cardGrd.addColorStop(1,'#1a0a00');
+        }
+        ctx.fillStyle=cardGrd;
+        roundRect(ctx,x,y,cellW,cellH,12*scale);ctx.fill();
+
+        // 边框
+        ctx.strokeStyle=completed?'#4a8a2a':'#8b4513';
+        ctx.lineWidth=2;
+        roundRect(ctx,x,y,cellW,cellH,12*scale);ctx.stroke();
+
+        // 图案名
+        ctx.fillStyle=completed?'#90ee90':'#ffd700';
+        ctx.font='bold '+(18*scale)+'px "Microsoft YaHei",sans-serif';
+        ctx.fillText(PATTERNS[i].name,x+cellW/2,y+cellH*0.3);
+
+        // 难度
+        var diffText='';
+        for(var d=0;d<PATTERNS[i].difficulty;d++)diffText+='★';
+        ctx.fillStyle='#ff6347';
+        ctx.font=(14*scale)+'px "Microsoft YaHei",sans-serif';
+        ctx.fillText(diffText,x+cellW/2,y+cellH*0.55);
+
+        // 描述
+        ctx.fillStyle='#aa8866';
+        ctx.font=(12*scale)+'px "Microsoft YaHei",sans-serif';
+        ctx.fillText(PATTERNS[i].desc,x+cellW/2,y+cellH*0.78);
+
+        // 完成标记
+        if(completed){
+            ctx.fillStyle='#90ee90';
+            ctx.font='bold '+(20*scale)+'px "Microsoft YaHei",sans-serif';
+            ctx.fillText('✓',x+cellW-20*scale,y+20*scale);
+        }
+    }
+
+    // 返回按钮
+    ctx.fillStyle='#aa8866';
+    ctx.font=(16*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('点击图案开始编织 | 按ESC返回',W/2,H-40*scale);
+
+    drawParticles();
+}
+
+function drawPlaying(){
+    drawBg();
+
+    var pat=PATTERNS[G.pattern];
+
+    // 标题栏
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    ctx.fillRect(0,0,W,50*scale);
+
+    ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold '+(20*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText(pat.name,15*scale,25*scale);
+
+    ctx.textAlign='center';
+    ctx.fillStyle='#e6c97a';
+    ctx.font=(14*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('步骤 '+(G.currentStep+1)+'/'+pat.steps.length,W/2,25*scale);
+
+    ctx.textAlign='right';
+    ctx.fillStyle='#ffd700';
+    ctx.font=(14*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('分数: '+G.totalScore,W-15*scale,25*scale);
+
+    // 绘制已连接的线
+    var offsetX=(W-800*scale)/2,offsetY=(H-900*scale)/2+30*scale;
+
+    for(var i=0;i<pat.links.length;i++){
+        var link=pat.links[i];
+        if(i>G.currentStep)continue;
+
+        var n1=pat.nodes[link.f],n2=pat.nodes[link.t];
+        var x1=n1.x*scale+offsetX,y1=n1.y*scale+offsetY;
+        var x2=n2.x*scale+offsetX,y2=n2.y*scale+offsetY;
+
+        // 绳子颜色渐变
+        var ropeColor=pat.colors[i]||'#c41e3a';
+
+        if(i<G.currentStep){
+            // 已完成的线 - 实线
+            ctx.strokeStyle=ropeColor;
+            ctx.lineWidth=6*scale;
+            ctx.lineCap='round';
+            ctx.beginPath();
+            // 用贝塞尔曲线让绳子更有质感
+            var mx=(x1+x2)/2,my=(y1+y2)/2;
+            var dx=x2-x1,dy=y2-y1;
+            var offset=Math.sin(i*1.5)*20*scale;
+            ctx.moveTo(x1,y1);
+            ctx.quadraticCurveTo(mx+offset,my-offset,x2,y2);
+            ctx.stroke();
+
+            // 绳子高光
+            ctx.strokeStyle='rgba(255,255,255,0.2)';
+            ctx.lineWidth=2*scale;
+            ctx.beginPath();
+            ctx.moveTo(x1,y1);
+            ctx.quadraticCurveTo(mx+offset,my-offset,x2,y2);
+            ctx.stroke();
+        }else if(i===G.currentStep){
+            // 当前步骤 - 虚线动画
+            G.ropeAnimTime+=0.03;
+            ctx.setLineDash([10*scale,8*scale]);
+            ctx.lineDashOffset=-G.ropeAnimTime*30;
+            ctx.strokeStyle=ropeColor;
+            ctx.lineWidth=4*scale;
+            ctx.lineCap='round';
+            ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    // 绘制节点
+    for(var i=0;i<pat.nodes.length;i++){
+        var node=pat.nodes[i];
+        var pos=getNodePos(node);
+
+        // 节点是否已激活
+        var isActive=false;
+        if(i===0)isActive=true; // 起始点总是激活
+        else{
+            for(var j=0;j<=Math.min(G.currentStep,pat.links.length-1);j++){
+                if(pat.links[j].t===i||pat.links[j].f===i){isActive=true;break;}
+            }
+        }
+
+        // 节点光晕
+        if(isActive){
+            ctx.beginPath();
+            var glowGrd=ctx.createRadialGradient(pos.x,pos.y,0,pos.x,pos.y,25*scale);
+            glowGrd.addColorStop(0,'rgba(255,215,0,0.3)');
+            glowGrd.addColorStop(1,'rgba(255,215,0,0)');
+            ctx.fillStyle=glowGrd;
+            ctx.arc(pos.x,pos.y,25*scale,0,Math.PI*2);
+            ctx.fill();
+        }
+
+        // 节点主体
+        ctx.beginPath();
+        var nodeGrd=ctx.createRadialGradient(pos.x-3*scale,pos.y-3*scale,0,pos.x,pos.y,16*scale);
+        if(node.type==='start'){
+            nodeGrd.addColorStop(0,'#ffd700');nodeGrd.addColorStop(1,'#cc8800');
+        }else if(node.type==='end'){
+            nodeGrd.addColorStop(0,'#ff6347');nodeGrd.addColorStop(1,'#cc3322');
+        }else if(node.type==='cross'){
+            nodeGrd.addColorStop(0,'#ff8c00');nodeGrd.addColorStop(1,'#cc6600');
+        }else if(node.type==='knot'){
+            nodeGrd.addColorStop(0,'#c41e3a');nodeGrd.addColorStop(1,'#8b0000');
+        }else{
+            nodeGrd.addColorStop(0,'#e6c97a');nodeGrd.addColorStop(1,'#b8860b');
+        }
+        ctx.fillStyle=nodeGrd;
+        ctx.arc(pos.x,pos.y,16*scale,0,Math.PI*2);
+        ctx.fill();
+
+        // 节点边框
+        ctx.strokeStyle='#ffd700';
+        ctx.lineWidth=2*scale;
+        ctx.stroke();
+
+        // 节点标签
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillStyle='#fff';
+        ctx.font='bold '+(12*scale)+'px "Microsoft YaHei",sans-serif';
+        ctx.fillText(node.label,pos.x,pos.y);
+    }
+
+    // 步骤引导
+    if(G.currentStep<pat.steps.length){
+        var stepY=H-120*scale;
+
+        // 引导背景
+        ctx.fillStyle='rgba(0,0,0,0.6)';
+        roundRect(ctx,20*scale,stepY-15*scale,W-40*scale,70*scale,12*scale);
+        ctx.fill();
+        ctx.strokeStyle='#8b4513';
+        ctx.lineWidth=1;
+        roundRect(ctx,20*scale,stepY-15*scale,W-40*scale,70*scale,12*scale);
+        ctx.stroke();
+
+        // 引导文字
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillStyle='#ffd700';
+        ctx.font='bold '+(18*scale)+'px "Microsoft YaHei",sans-serif';
+        ctx.fillText('步骤 '+pat.steps[G.currentStep],W/2,stepY+10*scale);
+
+        // 提示
+        ctx.fillStyle='#aa8866';
+        ctx.font=(13*scale)+'px "Microsoft YaHei",sans-serif';
+        ctx.fillText('点击节点或按空格继续',W/2,stepY+35*scale);
+    }
+
+    // 手指引导动画
+    if(G.handShow && G.currentStep<pat.links.length){
+        var link=pat.links[G.currentStep];
+        var targetNode=pat.nodes[link.t];
+        var targetPos=getNodePos(targetNode);
+
+        G.handTime+=0.02;
+        var handProgress=Math.min(G.handTime,1);
+        var fromPos=getNodePos(pat.nodes[link.f]);
+
+        G.handX=lerp(fromPos.x,targetPos.x,handProgress);
+        G.handY=lerp(fromPos.y,targetPos.y,handProgress);
+
+        // 绘制手指
+        ctx.save();
+        ctx.translate(G.handX,G.handY);
+        ctx.globalAlpha=0.6;
+
+        // 手指形状
+        ctx.fillStyle='#ffd700';
+        ctx.beginPath();
+        ctx.moveTo(0,-15*scale);
+        ctx.lineTo(8*scale,0);
+        ctx.lineTo(5*scale,12*scale);
+        ctx.lineTo(-5*scale,12*scale);
+        ctx.lineTo(-8*scale,0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.globalAlpha=1;
+        ctx.restore();
+    }
+
+    drawParticles();
+}
+
+function drawComplete(){
+    drawBg();
+
+    var pat=PATTERNS[G.pattern];
+
+    // 完成大结
+    drawBigKnot(W/2,H*0.28,150*scale);
+
+    ctx.textAlign='center';ctx.textBaseline='middle';
+
+    // 完成文字
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold '+(40*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('编织完成!',W/2,H*0.52);
+
+    ctx.fillStyle='#e6c97a';
+    ctx.font=(20*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText(pat.name,W/2,H*0.58);
+
+    // 分数统计
+    var baseScore=100*pat.difficulty;
+    var comboBonus=G.combo*10;
+    var totalPatternScore=baseScore+comboBonus;
+
+    ctx.fillStyle='#ffd700';
+    ctx.font=(18*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('基础分: '+baseScore+'  连击奖励: '+comboBonus,W/2,H*0.65);
+
+    ctx.fillStyle='#ff6347';
+    ctx.font='bold '+(28*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('总分: '+totalPatternScore,W/2,H*0.71);
+
+    // 按钮
+    var btnW=180*scale,btnH=50*scale;
+    var btnY=H*0.80;
+
+    // 继续按钮
+    var btnGrd=ctx.createLinearGradient(W/2-btnW/2-100*scale,btnY,W/2-btnW/2-100*scale,btnY+btnH);
+    btnGrd.addColorStop(0,'#ffd700');btnGrd.addColorStop(1,'#cc8800');
+    ctx.fillStyle=btnGrd;
+    roundRect(ctx,W/2-btnW-10*scale,btnY,btnW,btnH,25*scale);ctx.fill();
+    ctx.fillStyle='#8b0000';
+    ctx.font='bold '+(18*scale)+'px "Microsoft YaHei",sans-serif';
+    ctx.fillText('继续编织',W/2-btnW/2-10*scale,btnY+btnH/2);
+
+    // 返回按钮
+    var btnGrd2=ctx.createLinearGradient(W/2+10*scale,btnY,W/2+10*scale,btnY+btnH);
+    btnGrd2.addColorStop(0,'#8b4513');btnGrd2.addColorStop(1,'#5a2d0a');
+    ctx.fillStyle=btnGrd2;
+    roundRect(ctx,W/2+10*scale,btnY,btnW,btnH,25*scale);ctx.fill();
+    ctx.fillStyle='#ffd700';
+    ctx.fillText('返回菜单',W/2+btnW/2+10*scale,btnY+btnH/2);
+
+    drawParticles();
+}
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.arcTo(x+w,y,x+w,y+r,r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+    ctx.lineTo(x+r,y+h);
+    ctx.arcTo(x,y+h,x,y+h-r,r);
+    ctx.lineTo(x,y+r);
+    ctx.arcTo(x,y,x+r,y,r);
+    ctx.closePath();
+}
+
+// ===== 游戏逻辑 =====
+function advanceStep(){
+    var pat=PATTERNS[G.pattern];
+
+    if(G.currentStep<pat.steps.length){
+        G.currentStep++;
+        G.combo++;
+        G.maxCombo=Math.max(G.maxCombo,G.combo);
+
+        // 粒子效果
+        if(G.currentStep<=pat.links.length){
+            var link=pat.links[G.currentStep-1];
+            var node=pat.nodes[link.t];
+            var pos=getNodePos(node);
+            addParticle(pos.x,pos.y,'#ffd700',15,3,40);
+            addParticle(pos.x,pos.y,'#ff4444',8,2,30);
+        }
+
+        // 检查完成
+        if(G.currentStep>=pat.steps.length){
+            var baseScore=100*pat.difficulty;
+            var comboBonus=G.combo*10;
+            G.totalScore+=baseScore+comboBonus;
+            if(G.completedPatterns.indexOf(G.pattern)<0){
+                G.completedPatterns.push(G.pattern);
+            }
+            if(G.totalScore>G.highScore){
+                G.highScore=G.totalScore;
+                localStorage.setItem('chineseKnot_highScore',G.highScore);
+            }
+            G.state=STATE.COMPLETE;
+            addParticle(W/2,H*0.3,'#ffd700',50,5,60);
+            addParticle(W/2,H*0.3,'#ff4444',30,4,50);
+            showInterstitial();
+        }
+    }
+}
+
+// ===== 输入处理 =====
+function getPos(e){
+    if(e.touches&&e.touches.length>0){
+        return{x:e.touches[0].clientX,y:e.touches[0].clientY};
+    }
+    return{x:e.clientX,y:e.clientY};
+}
+
+function handleClick(e){
+    e.preventDefault();
+    var pos=getPos(e);
+    var mx=pos.x,my=pos.y;
+
+    if(G.state===STATE.MENU){
+        // 检查开始按钮
+        var btnW=200*scale,btnH=55*scale;
+        var btnX=W/2-btnW/2,btnY=H*0.72;
+        if(mx>=btnX&&mx<=btnX+btnW&&my>=btnY&&my<=btnY+btnH){
+            G.state=STATE.PATTERN_SELECT;
+            addParticle(mx,my,'#ffd700',20,4,40);
+        }
+    }else if(G.state===STATE.PATTERN_SELECT){
+        var cols=3,padding=20*scale;
+        var cellW=(W-padding*(cols+1))/cols;
+        var cellH=100*scale;
+        var startY=H*0.15;
+
+        for(var i=0;i<PATTERNS.length;i++){
+            var col=i%cols,row=Math.floor(i/cols);
+            var x=padding+col*(cellW+padding);
+            var y=startY+row*(cellH+padding);
+            if(mx>=x&&mx<=x+cellW&&my>=y&&my<=y+cellH){
+                G.pattern=i;
+                G.currentStep=0;
+                G.combo=0;
+                G.handShow=true;
+                G.handTime=0;
+                G.state=STATE.PLAYING;
+                addParticle(mx,my,'#ffd700',25,4,50);
+                break;
+            }
+        }
+
+        // ESC返回
+    }else if(G.state===STATE.PLAYING){
+        // 检查节点点击
+        var pat=PATTERNS[G.pattern];
+        if(G.currentStep<pat.links.length){
+            var targetIdx=pat.links[G.currentStep].t;
+            if(hitNode(mx,my,targetIdx)){
+                advanceStep();
+                G.handShow=false;
+            }
+        }
+    }else if(G.state===STATE.COMPLETE){
+        var btnW=180*scale,btnH=50*scale;
+        var btnY=H*0.80;
+
+        // 继续按钮
+        if(mx>=W/2-btnW-10*scale&&mx<=W/2-10*scale&&my>=btnY&&my<=btnY+btnH){
+            G.state=STATE.PATTERN_SELECT;
+            addParticle(mx,my,'#ffd700',20,4,40);
+        }
+        // 返回按钮
+        if(mx>=W/2+10*scale&&mx<=W/2+btnW+10*scale&&my>=btnY&&my<=btnY+btnH){
+            G.state=STATE.MENU;
+            addParticle(mx,my,'#ffd700',20,4,40);
+        }
+    }
+}
+
+// 键盘处理
+function handleKey(e){
+    if(G.state===STATE.MENU){
+        G.state=STATE.PATTERN_SELECT;
+    }else if(G.state===STATE.PATTERN_SELECT){
+        if(e.key==='Escape'){
+            G.state=STATE.MENU;
+        }
+    }else if(G.state===STATE.PLAYING){
+        if(e.key===' '||e.key==='Enter'){
+            advanceStep();
+            G.handShow=false;
+        }else if(e.key==='Escape'){
+            G.state=STATE.PATTERN_SELECT;
+        }
+    }else if(G.state===STATE.COMPLETE){
+        if(e.key===' '||e.key==='Enter'){
+            G.state=STATE.PATTERN_SELECT;
+        }else if(e.key==='Escape'){
+            G.state=STATE.MENU;
+        }
+    }
+}
+
+canvas.addEventListener('click',handleClick);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handleClick(e);},{passive:false});
+document.addEventListener('keydown',handleKey);
+
+// ===== 广告系统增强 =====
+function checkAd(){
+    var now=Date.now();
+    if(now-lastAdTime>adInterval){
+        showInterstitial();
+    }
+}
+
+// 赞助按钮显示逻辑
+function updateSponsorBtn(){
+    var btn=document.getElementById('sponsorBtn');
+    if(G.state===STATE.PLAYING||G.state===STATE.COMPLETE){
+        btn.style.display='block';
+    }else{
+        btn.style.display='none';
+    }
+}
+
+// ===== 主循环 =====
+function gameLoop(){
+    resizeCanvas();
+
+    updateParticles();
+    checkAd();
+    updateSponsorBtn();
+
+    switch(G.state){
+        case STATE.MENU: drawMenu();break;
+        case STATE.PATTERN_SELECT: drawPatternSelect();break;
+        case STATE.PLAYING: drawPlaying();break;
+        case STATE.COMPLETE: drawComplete();break;
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

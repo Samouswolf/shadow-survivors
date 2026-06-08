@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>方块堆叠</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    background: #0a0a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+#gameCanvas {
+    background: #0f0f2a;
+    border: 2px solid #1a1a3a;
+    border-radius: 10px;
+    image-rendering: pixelated;
+}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ============ 画布尺寸 ============
+const BASE_WIDTH = 420;
+const BASE_HEIGHT = 700;
+canvas.width = BASE_WIDTH;
+canvas.height = BASE_HEIGHT;
+
+// ============ 游戏状态 ============
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAME_OVER: 3 };
+
+// ============ 配置常量 ============
+const BLOCK_HEIGHT = 35;
+const PERFECT_THRESHOLD = 8;
+const INITIAL_SPEED = 1.8;
+const SPEED_INCREMENT = 0.12;
+const MAX_SPEED = 7;
+const BASE_BLOCK_WIDTH = 180;
+const GROUND_Y = BASE_HEIGHT - 80;
+const GRAVITY = 0.5;
+const BOUNCE_FACTOR = 0.3;
+const FRICTION = 0.95;
+const PHYSICS_STEPS = 3;
+const MAX_PARTICLES = 200;
+const MAX_PHYSICS_BLOCKS = 50;
+
+// 色彩渐变（从底部到顶部）
+const COLORS = [
+    '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c',
+    '#3498db', '#9b59b6', '#e91e63', '#00bcd4', '#8bc34a',
+    '#ff5722', '#795548', '#607d8b', '#ff9800', '#4caf50',
+    '#f44336', '#ff9800', '#ffc107', '#8bc34a', '#4caf50'
+];
+
+// 连击文字配置
+const COMBO_TEXTS = {
+    2: '完美!',
+    3: '太棒了!',
+    4: '厉害!',
+    5: '超级连击!',
+    6: '无人能挡!',
+    7: '绝世高手!',
+    8: '神级操作!',
+    9: '传说级!',
+    10: '神!'
+};
+
+// ============ 游戏变量 ============
+let gameState = STATE.MENU;
+let blocks = [];
+let currentBlock = null;
+let fallingBlocks = [];
+let physicsBlocks = [];
+let particles = [];
+let sparkles = [];
+let flashAlpha = 0;
+let cameraY = 0;
+let targetCameraY = 0;
+let score = 0;
+let comboCount = 0;
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let perfectFlash = 0;
+let comboTextAlpha = 0;
+let comboTextY = 0;
+let level = 0;
+let bestCombo = 0;
+let totalPerfects = 0;
+let gameTime = 0;
+let lastFrameTime = 0;
+let fps = 60;
+let fpsTimer = 0;
+let fpsCount = 0;
+
+// 动画相关
+let menuAnimTime = 0;
+let gameOverAnimTime = 0;
+let blockAppearScale = 1;
+
+// 高分记录
+let highScore = parseInt(localStorage.getItem('blockStack_highScore')) || 0;
+let bestComboRecord = parseInt(localStorage.getItem('blockStack_bestCombo')) || 0;
+let totalGames = parseInt(localStorage.getItem('blockStack_totalGames')) || 0;
+
+// ============ 方块数据结构 ============
+function createBlock(x, y, width) {
+    return {
+        x: x,
+        y: y,
+        width: width,
+        height: BLOCK_HEIGHT,
+        color: COLORS[blocks.length % COLORS.length],
+        perfect: false,
+        placedTime: Date.now()
+    };
+}
+
+function createPhysicsBlock(x, y, width, color) {
+    if (physicsBlocks.length >= MAX_PHYSICS_BLOCKS) {
+        physicsBlocks.shift();
+    }
+    return {
+        x: x,
+        y: y,
+        width: width,
+        height: BLOCK_HEIGHT,
+        color: color,
+        vx: (Math.random() - 0.5) * 3,
+        vy: Math.random() * -6 - 3,
+        rotation: 0,
+        rotationSpeed: (Math.random() - 0.5) * 0.15,
+        alpha: 1,
+        life: 1.0,
+        gravity: GRAVITY,
+        grounded: false
+    };
+}
+
+// ============ 粒子系统 ============
+function spawnParticles(x, y, count, color, speed, gravity) {
+    const actualCount = Math.min(count, MAX_PARTICLES - particles.length);
+    for (let i = 0; i < actualCount; i++) {
+        particles.push({
+            x: x + (Math.random() - 0.5) * 30,
+            y: y + (Math.random() - 0.5) * 30,
+            vx: (Math.random() - 0.5) * speed,
+            vy: (Math.random() - 0.5) * speed,
+            size: Math.random() * 4 + 1,
+            color: color,
+            alpha: 1,
+            life: 1.0,
+            gravity: gravity || 0.1
+        });
+    }
+}
+
+function spawnSparkle(x, y, count) {
+    for (let i = 0; i < count; i++) {
+        sparkles.push({
+            x: x + (Math.random() - 0.5) * 40,
+            y: y + (Math.random() - 0.5) * 40,
+            size: Math.random() * 10 + 4,
+            alpha: 1,
+            rotation: Math.random() * Math.PI * 2,
+            rotSpeed: (Math.random() - 0.5) * 0.2,
+            life: 1.0
+        });
+    }
+}
+
+function spawnPerfectEffect(x, y, width) {
+    // 金色粒子爆发
+    spawnParticles(x + width / 2, y, 40, '#FFD700', 10, 0.15);
+    spawnParticles(x + width / 2, y, 20, '#FFA500', 8, 0.1);
+    spawnSparkle(x + width / 2, y, 20);
+
+    // 横向扩散粒子
+    for (let i = 0; i < 15; i++) {
+        particles.push({
+            x: x + Math.random() * width,
+            y: y,
+            vx: (Math.random() - 0.5) * 15,
+            vy: (Math.random() - 1) * 5,
+            size: Math.random() * 3 + 1,
+            color: '#fff',
+            alpha: 1,
+            life: 1.0,
+            gravity: 0.05
+        });
+    }
+}
+
+function spawnComboEffect(x, y, combo) {
+    const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FF9FF3', '#54A0FF'];
+    const particleCount = Math.min(combo * 20, 100);
+    for (let i = 0; i < particleCount; i++) {
+        particles.push({
+            x: x + (Math.random() - 0.5) * 60,
+            y: y,
+            vx: (Math.random() - 0.5) * 12,
+            vy: (Math.random() - 1) * 10,
+            size: Math.random() * 7 + 3,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            alpha: 1,
+            life: 1.0,
+            gravity: 0.12
+        });
+    }
+    spawnSparkle(x, y, combo * 5);
+}
+
+function spawnGameOverEffect(x, y) {
+    spawnParticles(x, y, 80, '#FF6B6B', 12, 0.2);
+    spawnParticles(x, y, 40, '#FF4757', 10, 0.15);
+    spawnSparkle(x, y, 30);
+}
+
+// ============ 初始化游戏 ============
+function initGame() {
+    gameState = STATE.PLAYING;
+    blocks = [];
+    fallingBlocks = [];
+    physicsBlocks = [];
+    particles = [];
+    sparkles = [];
+    score = 0;
+    comboCount = 0;
+    bestCombo = 0;
+    totalPerfects = 0;
+    level = 0;
+    cameraY = 0;
+    targetCameraY = 0;
+    shakeTimer = 0;
+    flashAlpha = 0;
+    perfectFlash = 0;
+    comboTextAlpha = 0;
+    gameTime = 0;
+    blockAppearScale = 1;
+    totalGames++;
+    localStorage.setItem('blockStack_totalGames', totalGames);
+
+    // 创建底部方块
+    const groundBlock = createBlock(
+        (BASE_WIDTH - BASE_BLOCK_WIDTH) / 2,
+        GROUND_Y,
+        BASE_BLOCK_WIDTH
+    );
+    blocks.push(groundBlock);
+
+    // 创建第一个移动方块
+    spawnNextBlock();
+}
+
+function spawnNextBlock() {
+    const lastBlock = blocks[blocks.length - 1];
+    const newX = Math.random() > 0.5 ? -lastBlock.width : BASE_WIDTH;
+    const speed = Math.min(INITIAL_SPEED + level * SPEED_INCREMENT, MAX_SPEED);
+
+    currentBlock = {
+        x: newX,
+        y: lastBlock.y - BLOCK_HEIGHT,
+        width: lastBlock.width,
+        height: BLOCK_HEIGHT,
+        color: COLORS[(blocks.length) % COLORS.length],
+        speed: newX < 0 ? speed : -speed,
+        direction: newX < 0 ? 1 : -1,
+        appearTime: Date.now()
+    };
+
+    blockAppearScale = 0;
+
+    // 相机跟随
+    if (currentBlock.y < BASE_HEIGHT / 2) {
+        targetCameraY = currentBlock.y - BASE_HEIGHT / 3;
+    }
+}
+
+// ============ 放置方块 ============
+function placeBlock() {
+    if (!currentBlock || gameState !== STATE.PLAYING) return;
+
+    const lastBlock = blocks[blocks.length - 1];
+    const overlapX = Math.max(0,
+        Math.min(currentBlock.x + currentBlock.width, lastBlock.x + lastBlock.width) -
+        Math.max(currentBlock.x, lastBlock.x)
+    );
+    const overlapRatio = overlapX / lastBlock.width;
+
+    if (overlapRatio <= 0) {
+        // 完全错过 - 游戏结束
+        triggerGameOver();
+        return;
+    }
+
+    // 计算新方块位置和宽度
+    const newX = Math.max(currentBlock.x, lastBlock.x);
+    const newWidth = Math.min(
+        currentBlock.x + currentBlock.width,
+        lastBlock.x + lastBlock.width
+    ) - newX;
+
+    const isPerfect = Math.abs(currentBlock.x - lastBlock.x) < PERFECT_THRESHOLD;
+
+    if (isPerfect) {
+        // 完美对齐 - 不裁剪
+        const perfectBlock = createBlock(
+            lastBlock.x,
+            currentBlock.y,
+            lastBlock.width
+        );
+        perfectBlock.perfect = true;
+        blocks.push(perfectBlock);
+        comboCount++;
+        totalPerfects++;
+        if (comboCount > bestCombo) bestCombo = comboCount;
+
+        // 连击计分（指数增长）
+        const comboMultiplier = Math.min(comboCount, 10);
+        const baseScore = 10 * comboMultiplier * comboMultiplier;
+        score += baseScore;
+
+        // 特效
+        spawnPerfectEffect(lastBlock.x, currentBlock.y, lastBlock.width);
+        spawnComboEffect(newX + newWidth / 2, currentBlock.y, comboCount);
+
+        perfectFlash = 1.0;
+        comboTextAlpha = 1.0;
+        comboTextY = currentBlock.y - 30;
+
+        // 屏幕震动（连击越高震动越强）
+        if (comboCount >= 2) {
+            shakeTimer = 10 + comboCount * 2;
+            shakeIntensity = Math.min(comboCount * 3, 15);
+        }
+
+        flashAlpha = 0.4;
+    } else {
+        // 裁剪方块
+        const newBlock = createBlock(newX, currentBlock.y, newWidth);
+        blocks.push(newBlock);
+
+        // 生成掉落碎片
+        if (currentBlock.x < lastBlock.x) {
+            const fragment = createPhysicsBlock(
+                currentBlock.x,
+                currentBlock.y,
+                lastBlock.x - currentBlock.x,
+                currentBlock.color
+            );
+            physicsBlocks.push(fragment);
+        }
+        if (currentBlock.x + currentBlock.width > lastBlock.x + lastBlock.width) {
+            const fragment = createPhysicsBlock(
+                lastBlock.x + lastBlock.width,
+                currentBlock.y,
+                (currentBlock.x + currentBlock.width) - (lastBlock.x + lastBlock.width),
+                currentBlock.color
+            );
+            physicsBlocks.push(fragment);
+        }
+
+        comboCount = 0;
+        score += 10;
+
+        spawnParticles(newX + newWidth / 2, currentBlock.y, 15, currentBlock.color, 5, 0.1);
+        shakeTimer = 5;
+        shakeIntensity = 3;
+    }
+
+    currentBlock = null;
+    level++;
+
+    setTimeout(() => {
+        if (gameState === STATE.PLAYING) {
+            spawnNextBlock();
+        }
+    }, 150);
+}
+
+// ============ 游戏结束 ============
+function triggerGameOver() {
+    gameState = STATE.GAME_OVER;
+    gameOverAnimTime = 0;
+
+    // 保存最高分
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('blockStack_highScore', highScore);
+    }
+    if (bestCombo > bestComboRecord) {
+        bestComboRecord = bestCombo;
+        localStorage.setItem('blockStack_bestCombo', bestComboRecord);
+    }
+
+    // 当前方块掉落
+    if (currentBlock) {
+        const pb = createPhysicsBlock(
+            currentBlock.x,
+            currentBlock.y,
+            currentBlock.width,
+            currentBlock.color
+        );
+        physicsBlocks.push(pb);
+        spawnGameOverEffect(currentBlock.x + currentBlock.width / 2, currentBlock.y);
+        currentBlock = null;
+    }
+
+    // 所有未放置的方块掉落
+    fallingBlocks.forEach(fb => {
+        const pb = createPhysicsBlock(fb.x, fb.y, fb.width, fb.color);
+        physicsBlocks.push(pb);
+    });
+    fallingBlocks = [];
+
+    shakeTimer = 25;
+    shakeIntensity = 12;
+}
+
+// ============ 更新粒子 ============
+function updateParticles() {
+    particles = particles.filter(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.gravity;
+        p.life -= 0.025;
+        p.alpha = p.life;
+        p.size *= 0.97;
+        return p.life > 0 && p.size > 0.1;
+    });
+
+    sparkles = sparkles.filter(s => {
+        s.rotation += s.rotSpeed;
+        s.life -= 0.035;
+        s.alpha = s.life;
+        s.size *= 0.96;
+        return s.life > 0 && s.size > 0.5;
+    });
+}
+
+// ============ 更新物理方块 ============
+function updatePhysicsBlocks() {
+    physicsBlocks = physicsBlocks.filter(pb => {
+        // 多步物理模拟
+        for (let step = 0; step < PHYSICS_STEPS; step++) {
+            // 重力
+            pb.vy += pb.gravity / PHYSICS_STEPS;
+            pb.vx *= FRICTION;
+            pb.x += pb.vx / PHYSICS_STEPS;
+            pb.y += pb.vy / PHYSICS_STEPS;
+            pb.rotation += pb.rotationSpeed / PHYSICS_STEPS;
+
+            // 地面碰撞
+            if (pb.y + pb.height > BASE_HEIGHT + 150) {
+                pb.life -= 0.03;
+                pb.alpha = pb.life;
+            }
+
+            // 边界反弹
+            if (pb.x < -20) {
+                pb.x = -20;
+                pb.vx *= -BOUNCE_FACTOR;
+            }
+            if (pb.x + pb.width > BASE_WIDTH + 20) {
+                pb.x = BASE_WIDTH + 20 - pb.width;
+                pb.vx *= -BOUNCE_FACTOR;
+            }
+        }
+
+        return pb.life > 0;
+    });
+}
+
+// ============ 更新游戏 ============
+function update(timestamp) {
+    // FPS计算
+    fpsCount++;
+    fpsTimer += timestamp - lastFrameTime;
+    lastFrameTime = timestamp;
+    if (fpsTimer >= 1000) {
+        fps = fpsCount;
+        fpsCount = 0;
+        fpsTimer = 0;
+    }
+
+    if (gameState !== STATE.PLAYING) {
+        menuAnimTime += 0.02;
+        if (gameState === STATE.GAME_OVER) {
+            gameOverAnimTime += 0.02;
+        }
+        updateParticles();
+        updatePhysicsBlocks();
+        return;
+    }
+
+    gameTime += 1 / 60;
+
+    // 移动当前方块
+    if (currentBlock) {
+        currentBlock.x += currentBlock.speed;
+
+        // 边界反弹
+        if (currentBlock.x <= 0 || currentBlock.x + currentBlock.width >= BASE_WIDTH) {
+            currentBlock.speed *= -1;
+            currentBlock.direction *= -1;
+        }
+
+        // 方块出现动画
+        const appearProgress = Math.min(1, (Date.now() - currentBlock.appearTime) / 150);
+        blockAppearScale = easeOutBack(appearProgress);
+    }
+
+    // 相机平滑跟随
+    cameraY += (targetCameraY - cameraY) * 0.08;
+
+    // 震动衰减
+    if (shakeTimer > 0) {
+        shakeTimer--;
+        shakeIntensity *= 0.92;
+    }
+
+    // 闪光衰减
+    if (flashAlpha > 0) flashAlpha -= 0.025;
+    if (perfectFlash > 0) perfectFlash -= 0.04;
+    if (comboTextAlpha > 0) comboTextAlpha -= 0.025;
+
+    updateParticles();
+    updatePhysicsBlocks();
+}
+
+// ============ 缓动函数 ============
+function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// ============ 渲染背景 ============
+function renderBackground() {
+    // 动态渐变背景
+    const hue = (gameTime * 5) % 360;
+    const gradient = ctx.createLinearGradient(0, 0, 0, BASE_HEIGHT);
+    gradient.addColorStop(0, `hsl(${240 + hue * 0.1}, 30%, 8%)`);
+    gradient.addColorStop(0.5, `hsl(${250 + hue * 0.1}, 25%, 12%)`);
+    gradient.addColorStop(1, `hsl(${260 + hue * 0.1}, 20%, 16%)`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    // 网格背景
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.lineWidth = 1;
+    const gridSize = 40;
+    for (let x = 0; x < BASE_WIDTH; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, BASE_HEIGHT);
+        ctx.stroke();
+    }
+    for (let y = (cameraY * 0.5) % gridSize; y < BASE_HEIGHT; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(BASE_WIDTH, y);
+        ctx.stroke();
+    }
+
+    // 星星背景
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    for (let i = 0; i < 60; i++) {
+        const x = (i * 17 + 13) % BASE_WIDTH;
+        const y = ((i * 23 + 7) % BASE_HEIGHT + cameraY * 0.05) % BASE_HEIGHT;
+        const size = (i % 3) + 0.5;
+        const twinkle = Math.sin(Date.now() / 500 + i) * 0.3 + 0.7;
+        ctx.globalAlpha = twinkle * 0.5;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ============ 渲染方块 ============
+function renderBlock(x, y, width, height, color, alpha, perfect, rotation, scale) {
+    ctx.save();
+
+    if (rotation) {
+        ctx.translate(x + width / 2, y + height / 2);
+        ctx.rotate(rotation);
+        ctx.translate(-(x + width / 2), -(y + height / 2));
+    }
+
+    if (scale && scale < 1) {
+        ctx.translate(x + width / 2, y + height / 2);
+        ctx.scale(scale, scale);
+        ctx.translate(-(x + width / 2), -(y + height / 2));
+    }
+
+    ctx.globalAlpha = alpha || 1;
+
+    // 阴影
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+
+    // 方块主体
+    const gradient = ctx.createLinearGradient(x, y, x, y + height);
+    gradient.addColorStop(0, lightenColor(color, 20));
+    gradient.addColorStop(0.5, color);
+    gradient.addColorStop(1, shadeColor(color, -30));
+    ctx.fillStyle = gradient;
+
+    // 圆角矩形
+    const radius = 5;
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    // 边框高光
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 顶部高光
+    const highlightGrad = ctx.createLinearGradient(x, y, x, y + height * 0.3);
+    highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
+    highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = highlightGrad;
+    ctx.fill();
+
+    // 内部纹理线条
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i < 3; i++) {
+        const lineY = y + (height / 3) * i;
+        ctx.beginPath();
+        ctx.moveTo(x + 5, lineY);
+        ctx.lineTo(x + width - 5, lineY);
+        ctx.stroke();
+    }
+
+    // 完美方块特效
+    if (perfect) {
+        // 金色边框
+        ctx.strokeStyle = '#FFD700';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        // 内部发光
+        const glowGrad = ctx.createRadialGradient(
+            x + width / 2, y + height / 2, 0,
+            x + width / 2, y + height / 2, width / 2
+        );
+        glowGrad.addColorStop(0, 'rgba(255, 215, 0, 0.2)');
+        glowGrad.addColorStop(1, 'rgba(255, 215, 0, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.fill();
+
+        // 角落装饰
+        const cornerSize = 8;
+        ctx.fillStyle = '#FFD700';
+        // 左上
+        ctx.fillRect(x, y, cornerSize, 2);
+        ctx.fillRect(x, y, 2, cornerSize);
+        // 右上
+        ctx.fillRect(x + width - cornerSize, y, cornerSize, 2);
+        ctx.fillRect(x + width - 2, y, 2, cornerSize);
+        // 左下
+        ctx.fillRect(x, y + height - 2, cornerSize, 2);
+        ctx.fillRect(x, y + height - cornerSize, 2, cornerSize);
+        // 右下
+        ctx.fillRect(x + width - cornerSize, y + height - 2, cornerSize, 2);
+        ctx.fillRect(x + width - 2, y + height - cornerSize, 2, cornerSize);
+    }
+
+    ctx.restore();
+}
+
+// ============ 渲染粒子 ============
+function renderParticles() {
+    particles.forEach(p => {
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - cameraY, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    });
+
+    sparkles.forEach(s => {
+        ctx.save();
+        ctx.globalAlpha = s.alpha;
+        ctx.translate(s.x, s.y - cameraY);
+        ctx.rotate(s.rotation);
+
+        // 绘制星形
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2;
+            const x1 = Math.cos(angle) * s.size;
+            const y1 = Math.sin(angle) * s.size;
+            const x2 = Math.cos(angle + Math.PI / 4) * s.size * 0.35;
+            const y2 = Math.sin(angle + Math.PI / 4) * s.size * 0.35;
+
+            if (i === 0) ctx.moveTo(x1, y1);
+            else ctx.lineTo(x1, y1);
+            ctx.lineTo(x2, y2);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+    });
+}
+
+// ============ 渲染移动方块指示器 ============
+function renderBlockGuide() {
+    if (!currentBlock) return;
+
+    const lastBlock = blocks[blocks.length - 1];
+
+    // 虚线指示器
+    ctx.save();
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+
+    // 左右边界线
+    ctx.beginPath();
+    ctx.moveTo(lastBlock.x, currentBlock.y + BLOCK_HEIGHT);
+    ctx.lineTo(lastBlock.x, BASE_HEIGHT);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(lastBlock.x + lastBlock.width, currentBlock.y + BLOCK_HEIGHT);
+    ctx.lineTo(lastBlock.x + lastBlock.width, BASE_HEIGHT);
+    ctx.stroke();
+
+    // 目标区域高光
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.fillRect(lastBlock.x, currentBlock.y + BLOCK_HEIGHT, lastBlock.width, BASE_HEIGHT);
+
+    ctx.setLineDash([]);
+    ctx.restore();
+}
+
+// ============ 渲染塔的高度标记 ============
+function renderHeightMarkers() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.font = '10px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'right';
+
+    for (let i = 0; i < blocks.length; i += 5) {
+        if (i === 0) continue;
+        const y = blocks[i].y;
+        if (y - cameraY > 0 && y - cameraY < BASE_HEIGHT) {
+            ctx.fillText(`${i}`, BASE_WIDTH - 5, y - cameraY + 4);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.beginPath();
+            ctx.moveTo(0, y - cameraY);
+            ctx.lineTo(BASE_WIDTH - 25, y - cameraY);
+            ctx.stroke();
+        }
+    }
+
+    ctx.restore();
+}
+
+// ============ 渲染UI ============
+function renderUI() {
+    ctx.save();
+
+    // 分数背景
+    const scoreGrad = ctx.createLinearGradient(BASE_WIDTH / 2 - 60, 0, BASE_WIDTH / 2 + 60, 0);
+    scoreGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    scoreGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0.4)');
+    scoreGrad.addColorStop(0.7, 'rgba(0, 0, 0, 0.4)');
+    scoreGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = scoreGrad;
+    ctx.fillRect(0, 0, BASE_WIDTH, 80);
+
+    // 分数
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(score, BASE_WIDTH / 2, 35);
+
+    // 连击显示
+    if (comboCount > 0) {
+        ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+        const comboColor = comboCount >= 5 ? '#FF6B6B' : comboCount >= 3 ? '#4ECDC4' : '#FFD700';
+        ctx.fillStyle = comboColor;
+        ctx.fillText(`连击 x${comboCount}`, BASE_WIDTH / 2, 60);
+
+        // 连击进度条
+        const barWidth = 100;
+        const barHeight = 3;
+        const barX = BASE_WIDTH / 2 - barWidth / 2;
+        const barY = 65;
+        const progress = Math.min(comboCount / 10, 1);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+        ctx.fillStyle = comboColor;
+        ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+    }
+
+    // 层数
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.textAlign = 'right';
+    ctx.fillText(`层数: ${blocks.length - 1}`, BASE_WIDTH - 15, 25);
+
+    // 最高分
+    ctx.textAlign = 'left';
+    ctx.fillText(`最高: ${highScore}`, 15, 25);
+
+    // FPS（调试用，可注释掉）
+    // ctx.fillText(`FPS: ${fps}`, 15, 45);
+
+    ctx.restore();
+
+    // 连击文字动画
+    if (comboTextAlpha > 0 && comboCount >= 2) {
+        ctx.save();
+        ctx.globalAlpha = comboTextAlpha;
+
+        const textScale = 1 + (1 - comboTextAlpha) * 0.3;
+        ctx.translate(BASE_WIDTH / 2, comboTextY - cameraY);
+        ctx.scale(textScale, textScale);
+
+        // 文字阴影
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.font = `bold ${28 + comboCount * 2}px "Segoe UI", Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(getComboText(comboCount), 2, 2);
+
+        // 文字
+        ctx.fillStyle = comboCount >= 5 ? '#FF6B6B' : '#FFD700';
+        ctx.fillText(getComboText(comboCount), 0, 0);
+
+        ctx.restore();
+    }
+}
+
+// ============ 获取连击文字 ============
+function getComboText(combo) {
+    if (combo >= 10) return COMBO_TEXTS[10];
+    if (combo >= 2) return COMBO_TEXTS[combo] || `${combo}连击!`;
+    return '';
+}
+
+// ============ 渲染完美闪光 ============
+function renderPerfectFlash() {
+    if (perfectFlash > 0) {
+        ctx.save();
+        ctx.globalAlpha = perfectFlash * 0.25;
+
+        const lastBlock = blocks[blocks.length - 1];
+        const centerX = lastBlock.x + lastBlock.width / 2;
+        const centerY = lastBlock.y - cameraY;
+
+        const gradient = ctx.createRadialGradient(
+            centerX, centerY, 0,
+            centerX, centerY, lastBlock.width * 1.5
+        );
+        gradient.addColorStop(0, '#FFD700');
+        gradient.addColorStop(0.5, 'rgba(255, 215, 0, 0.3)');
+        gradient.addColorStop(1, 'rgba(255, 215, 0, 0)');
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+        ctx.restore();
+    }
+}
+
+// ============ 渲染菜单 ============
+function renderMenu() {
+    renderBackground();
+
+    ctx.save();
+
+    // 标题动画
+    const titleY = 170 + Math.sin(menuAnimTime * 2) * 5;
+
+    // 标题阴影
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.1)';
+    ctx.font = 'bold 52px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('方块堆叠', BASE_WIDTH / 2 + 3, titleY + 3);
+
+    // 标题
+    ctx.fillStyle = '#FFD700';
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 25;
+    ctx.fillText('方块堆叠', BASE_WIDTH / 2, titleY);
+    ctx.shadowBlur = 0;
+
+    // 副标题
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('精准堆叠 · 物理引擎 · 连击加分', BASE_WIDTH / 2, titleY + 40);
+
+    // 统计信息
+    if (highScore > 0 || totalGames > 0) {
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+        ctx.fillText(`最高分: ${highScore}`, BASE_WIDTH / 2, 270);
+
+        ctx.fillStyle = '#4ECDC4';
+        ctx.font = '14px "Segoe UI", Arial, sans-serif';
+        ctx.fillText(`最佳连击: ${bestComboRecord}x | 游戏次数: ${totalGames}`, BASE_WIDTH / 2, 295);
+    }
+
+    // 开始按钮
+    const btnX = BASE_WIDTH / 2 - 110;
+    const btnY = 340;
+    const btnW = 220;
+    const btnH = 60;
+
+    // 按钮发光效果
+    const btnGlow = Math.sin(menuAnimTime * 3) * 0.2 + 0.8;
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 20 * btnGlow;
+
+    // 按钮背景
+    const btnGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
+    btnGrad.addColorStop(0, '#FFD700');
+    btnGrad.addColorStop(1, '#FFA500');
+    ctx.fillStyle = btnGrad;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 15);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // 按钮文字
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 24px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('开始游戏', BASE_WIDTH / 2, btnY + 40);
+
+    // 操作说明
+    ctx.fillStyle = '#888';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('点击 / 空格键 / 触屏 放置方块', BASE_WIDTH / 2, 460);
+    ctx.fillText('精准对齐获得连击加分', BASE_WIDTH / 2, 485);
+    ctx.fillText('按 P/Esc 暂停游戏', BASE_WIDTH / 2, 510);
+
+    // 装饰方块动画
+    const time = Date.now() / 1000;
+    for (let i = 0; i < 6; i++) {
+        const x = 30 + i * 65;
+        const y = 560 + Math.sin(time + i * 0.8) * 15;
+        const rot = Math.sin(time * 0.5 + i) * 0.1;
+        renderBlock(x, y, 45, 25, COLORS[i], 0.7, false, rot, 1);
+    }
+
+    ctx.restore();
+}
+
+// ============ 渲染游戏结束 ============
+function renderGameOver() {
+    // 半透明遮罩
+    ctx.save();
+    const overlayAlpha = Math.min(gameOverAnimTime * 2, 0.75);
+    ctx.fillStyle = `rgba(0, 0, 0, ${overlayAlpha})`;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    const fadeIn = Math.min(gameOverAnimTime * 3, 1);
+    ctx.globalAlpha = fadeIn;
+
+    // 游戏结束文字
+    ctx.fillStyle = '#FF6B6B';
+    ctx.font = 'bold 44px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#FF6B6B';
+    ctx.shadowBlur = 15;
+    ctx.fillText('游戏结束', BASE_WIDTH / 2, 180);
+    ctx.shadowBlur = 0;
+
+    // 分数
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 40px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(`${score}`, BASE_WIDTH / 2, 250);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('分', BASE_WIDTH / 2, 275);
+
+    // 统计框
+    const statsY = 300;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.beginPath();
+    ctx.roundRect(BASE_WIDTH / 2 - 120, statsY, 240, 120, 10);
+    ctx.fill();
+
+    ctx.fillStyle = '#ccc';
+    ctx.font = '14px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(`层数: ${blocks.length - 1}`, BASE_WIDTH / 2, statsY + 25);
+    ctx.fillText(`完美对齐: ${totalPerfects} 次`, BASE_WIDTH / 2, statsY + 50);
+    ctx.fillText(`最佳连击: ${bestCombo}x`, BASE_WIDTH / 2, statsY + 75);
+    ctx.fillText(`总游戏次数: ${totalGames}`, BASE_WIDTH / 2, statsY + 100);
+
+    // 新纪录
+    if (score >= highScore && score > 0) {
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+        ctx.shadowColor = '#FFD700';
+        ctx.shadowBlur = 15;
+        ctx.fillText('新纪录!', BASE_WIDTH / 2, 445);
+        ctx.shadowBlur = 0;
+    }
+
+    // 重新开始按钮
+    const btnX = BASE_WIDTH / 2 - 110;
+    const btnY = 470;
+    const btnW = 220;
+    const btnH = 55;
+
+    const btnGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
+    btnGrad.addColorStop(0, '#4ECDC4');
+    btnGrad.addColorStop(1, '#45B7D1');
+    ctx.fillStyle = btnGrad;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('再来一次', BASE_WIDTH / 2, btnY + 37);
+
+    ctx.restore();
+}
+
+// ============ 渲染暂停界面 ============
+function renderPauseScreen() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    // 暂停图标
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(BASE_WIDTH / 2 - 25, BASE_HEIGHT / 2 - 60, 15, 50);
+    ctx.fillRect(BASE_WIDTH / 2 + 10, BASE_HEIGHT / 2 - 60, 15, 50);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏暂停', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 20);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('点击或按空格继续', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 50);
+
+    ctx.restore();
+}
+
+// ============ 主渲染 ============
+function render() {
+    ctx.clearRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    if (gameState === STATE.MENU) {
+        renderMenu();
+        return;
+    }
+
+    // 应用震动
+    ctx.save();
+    if (shakeTimer > 0) {
+        const shakeX = (Math.random() - 0.5) * shakeIntensity;
+        const shakeY = (Math.random() - 0.5) * shakeIntensity;
+        ctx.translate(shakeX, shakeY);
+    }
+
+    renderBackground();
+
+    // 应用相机
+    ctx.save();
+    ctx.translate(0, -cameraY);
+
+    // 渲染高度标记
+    renderHeightMarkers();
+
+    // 渲染所有已放置的方块
+    blocks.forEach((block, index) => {
+        // 跳过屏幕外的方块
+        if (block.y - cameraY > BASE_HEIGHT + 50) return;
+        if (block.y - cameraY < -100) return;
+
+        renderBlock(
+            block.x,
+            block.y,
+            block.width,
+            block.height,
+            block.color,
+            1,
+            block.perfect,
+            0,
+            1
+        );
+    });
+
+    // 渲染物理方块（碎片）
+    physicsBlocks.forEach(pb => {
+        if (pb.y - cameraY > BASE_HEIGHT + 100) return;
+        if (pb.y - cameraY < -100) return;
+
+        renderBlock(
+            pb.x,
+            pb.y,
+            pb.width,
+            pb.height,
+            pb.color,
+            pb.alpha,
+            false,
+            pb.rotation,
+            1
+        );
+    });
+
+    // 渲染移动方块
+    if (currentBlock) {
+        renderBlock(
+            currentBlock.x,
+            currentBlock.y,
+            currentBlock.width,
+            currentBlock.height,
+            currentBlock.color,
+            1,
+            false,
+            0,
+            blockAppearScale
+        );
+
+        // 方块下方的光晕
+        const glowGrad = ctx.createLinearGradient(
+            currentBlock.x, currentBlock.y + currentBlock.height,
+            currentBlock.x, currentBlock.y + currentBlock.height + 40
+        );
+        glowGrad.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
+        glowGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.fillRect(
+            currentBlock.x - 8,
+            currentBlock.y + currentBlock.height,
+            currentBlock.width + 16,
+            40
+        );
+    }
+
+    // 渲染指示器
+    renderBlockGuide();
+
+    // 渲染粒子
+    renderParticles();
+
+    ctx.restore(); // 结束相机变换
+
+    // 渲染UI（屏幕空间）
+    renderUI();
+    renderPerfectFlash();
+
+    // 闪光效果
+    if (flashAlpha > 0) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
+        ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+    }
+
+    // 游戏结束界面
+    if (gameState === STATE.GAME_OVER) {
+        renderGameOver();
+    }
+
+    // 暂停界面
+    if (gameState === STATE.PAUSED) {
+        renderPauseScreen();
+    }
+
+    ctx.restore(); // 结束震动变换
+}
+
+// ============ 辅助函数 ============
+function shadeColor(color, percent) {
+    let R = parseInt(color.substring(1, 3), 16);
+    let G = parseInt(color.substring(3, 5), 16);
+    let B = parseInt(color.substring(5, 7), 16);
+
+    R = Math.min(255, Math.max(0, R + Math.round(R * percent / 100)));
+    G = Math.min(255, Math.max(0, G + Math.round(G * percent / 100)));
+    B = Math.min(255, Math.max(0, B + Math.round(B * percent / 100)));
+
+    return `#${R.toString(16).padStart(2, '0')}${G.toString(16).padStart(2, '0')}${B.toString(16).padStart(2, '0')}`;
+}
+
+function lightenColor(color, percent) {
+    let R = parseInt(color.substring(1, 3), 16);
+    let G = parseInt(color.substring(3, 5), 16);
+    let B = parseInt(color.substring(5, 7), 16);
+
+    R = Math.min(255, R + Math.round((255 - R) * percent / 100));
+    G = Math.min(255, G + Math.round((255 - G) * percent / 100));
+    B = Math.min(255, B + Math.round((255 - B) * percent / 100));
+
+    return `#${R.toString(16).padStart(2, '0')}${G.toString(16).padStart(2, '0')}${B.toString(16).padStart(2, '0')}`;
+}
+
+// ============ 点击检测 ============
+function isInRect(mx, my, x, y, w, h) {
+    return mx >= x && mx <= x + w && my >= y && my <= y + h;
+}
+
+// ============ 输入处理 ============
+function handleClick(mx, my) {
+    if (gameState === STATE.MENU) {
+        // 检测开始按钮
+        if (isInRect(mx, my, BASE_WIDTH / 2 - 110, 340, 220, 60)) {
+            initGame();
+        }
+    } else if (gameState === STATE.PLAYING) {
+        placeBlock();
+    } else if (gameState === STATE.GAME_OVER) {
+        // 检测重新开始按钮
+        if (gameOverAnimTime > 0.5 && isInRect(mx, my, BASE_WIDTH / 2 - 110, 470, 220, 55)) {
+            initGame();
+        }
+    } else if (gameState === STATE.PAUSED) {
+        gameState = STATE.PLAYING;
+    }
+}
+
+// ============ 事件监听 ============
+// 鼠标点击
+canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+    handleClick(mx, my);
+});
+
+// 触屏
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const touch = e.touches[0];
+    const mx = (touch.clientX - rect.left) * scaleX;
+    const my = (touch.clientY - rect.top) * scaleY;
+    handleClick(mx, my);
+}, { passive: false });
+
+// 键盘
+document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        if (gameState === STATE.MENU) {
+            initGame();
+        } else if (gameState === STATE.PLAYING) {
+            placeBlock();
+        } else if (gameState === STATE.GAME_OVER) {
+            if (gameOverAnimTime > 0.5) {
+                initGame();
+            }
+        } else if (gameState === STATE.PAUSED) {
+            gameState = STATE.PLAYING;
+        }
+    }
+
+    if (e.code === 'Escape' || e.code === 'KeyP') {
+        if (gameState === STATE.PLAYING) {
+            gameState = STATE.PAUSED;
+        } else if (gameState === STATE.PAUSED) {
+            gameState = STATE.PLAYING;
+        }
+    }
+});
+
+// ============ 响应式调整 ============
+function resizeCanvas() {
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    const ratio = BASE_WIDTH / BASE_HEIGHT;
+
+    let width, height;
+
+    if (windowWidth / windowHeight < ratio) {
+        width = windowWidth * 0.95;
+        height = width / ratio;
+    } else {
+        height = windowHeight * 0.95;
+        width = height * ratio;
+    }
+
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============ 游戏循环 ============
+function gameLoop(timestamp) {
+    update(timestamp);
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// 启动游戏
+requestAnimationFrame(gameLoop);
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>颜色消除</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+canvas { display: block; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+// ============================================================
+// 颜色消除 - 快速匹配颜色名称消除，限时挑战，颜色心理学
+// ============================================================
+
+const canvas = document.getElementById('gc');
+const ctx = canvas.getContext('2d');
+
+// ============================================================
+// 1. 常量配置
+// ============================================================
+const CONFIG = {
+    GAME_TIME: 60,           // 游戏总时长(秒)
+    GRID_COLS: 4,            // 网格列数
+    GRID_ROWS: 4,            // 网格行数
+    CELL_PAD: 6,             // 格子间距
+    ROUND_BASE_TIME: 60,     // 基础回合时间
+    ROUND_TIME_DECAY: 2,     // 每轮回合时间递减
+    ROUND_MIN_TIME: 30,      // 最小回合时间
+    COMBO_WINDOW: 1500,      // 连击窗口(ms)
+    CORRECT_BASE_SCORE: 100, // 基础正确得分
+    COMBO_MULTIPLIER: 0.5,   // 连击加成系数
+    SPEED_BONUS_MAX: 50,     // 速度奖励上限
+    SPEED_BONUS_WINDOW: 2000,// 速度奖励窗口(ms)
+    WRONG_PENALTY: 3,        // 答错扣时(秒)
+    PARTICLE_COUNT: 30,      // 粒子数量
+    STREAK_THRESHOLDS: [5, 10, 20, 50], // 连击里程碑
+    LEVELS: [
+        { name: '新手入门', target: 5,  cols: 3, rows: 3, time: 70 },
+        { name: '初级挑战', target: 10, cols: 3, rows: 3, time: 65 },
+        { name: '色彩辨识', target: 15, cols: 4, rows: 3, time: 60 },
+        { name: '中级训练', target: 20, cols: 4, rows: 4, time: 55 },
+        { name: '高级考验', target: 30, cols: 4, rows: 4, time: 50 },
+        { name: '极速反应', target: 40, cols: 4, rows: 4, time: 45 },
+        { name: '颜色大师', target: 50, cols: 5, rows: 4, time: 40 },
+        { name: '终极挑战', target: 65, cols: 5, rows: 5, time: 35 },
+        { name: '无尽模式', target: Infinity, cols: 5, rows: 5, time: 30 }
+    ]
+};
+
+// ============================================================
+// 2. 颜色数据 - 包含Stroop效应核心数据
+// ============================================================
+const COLORS = [
+    { name: '红色', hex: '#e74c3c', darkHex: '#c0392b' },
+    { name: '蓝色', hex: '#3498db', darkHex: '#2980b9' },
+    { name: '绿色', hex: '#2ecc71', darkHex: '#27ae60' },
+    { name: '黄色', hex: '#f1c40f', darkHex: '#f39c12' },
+    { name: '紫色', hex: '#9b59b6', darkHex: '#8e44ad' },
+    { name: '橙色', hex: '#e67e22', darkHex: '#d35400' },
+    { name: '粉色', hex: '#fd79a8', darkHex: '#e84393' },
+    { name: '青色', hex: '#00cec9', darkHex: '#00b894' },
+    { name: '白色', hex: '#ecf0f1', darkHex: '#bdc3c7' },
+    { name: '棕色', hex: '#a0522d', darkHex: '#8B4513' }
+];
+
+// ============================================================
+// 3. 成语/诗句/谜题数据
+// ============================================================
+const WISDOM_DATA = [
+    '五彩缤纷', '万紫千红', '青出于蓝', '灯红酒绿', '花红柳绿',
+    '青山绿水', '紫气东来', '白头偕老', '红颜知己', '蓝田生玉',
+    '绿水青山', '黄粱一梦', '赤子之心', '黑白分明', '橙黄橘绿',
+    '桃红柳绿', '姹紫嫣红', '青黄不接', '白云苍狗', '朱门酒肉',
+    '碧海青天', '丹心碧血', '金碧辉煌', '银装素裹', '灰飞烟灭'
+];
+
+// ============================================================
+// 4. 游戏状态
+// ============================================================
+var G = {
+    state: 'menu',         // menu, playing, paused, gameover, levelComplete
+    score: 0,
+    highScore: 0,
+    level: 0,
+    combo: 0,
+    maxCombo: 0,
+    correct: 0,
+    wrong: 0,
+    totalCorrect: 0,       // 总正确数(跨关卡)
+    timeLeft: 0,
+    totalTime: 0,
+    lastCorrectTime: 0,
+    grid: [],
+    targetColor: null,     // 目标颜色名称
+    targetIndex: -1,       // 目标颜色索引
+    selectedCell: -1,
+    cellSize: 0,
+    gridX: 0,
+    gridY: 0,
+    particles: [],
+    streakParticles: [],
+    wisdom: '',
+    wisdomTimer: 0,
+    shakeTimer: 0,
+    shakeIntensity: 0,
+    fadeAlpha: 1,
+    fadeDir: 0,            // 1=淡入, -1=淡出
+    fadeCallback: null,
+    menuParticles: [],
+    gameStartTime: 0,
+    roundStartTime: 0,
+    animFrame: 0,
+    // 按钮
+    buttons: [],
+    touchStartY: 0,
+    lastFrameTime: 0
+};
+
+// ============================================================
+// 5. 工具函数
+// ============================================================
+function rand(min, max) {
+    return Math.random() * (max - min) + min;
+}
+
+function randInt(min, max) {
+    return Math.floor(rand(min, max + 1));
+}
+
+function randPick(arr) {
+    return arr[randInt(0, arr.length - 1)];
+}
+
+function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+        var j = randInt(0, i);
+        var tmp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = tmp;
+    }
+    return arr;
+}
+
+function distance(x1, y1, x2, y2) {
+    var dx = x1 - x2, dy = y1 - y2;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+
+function clamp(v, min, max) {
+    return v < min ? min : v > max ? max : v;
+}
+
+function hexToRgb(hex) {
+    var r = parseInt(hex.slice(1, 3), 16);
+    var g = parseInt(hex.slice(3, 5), 16);
+    var b = parseInt(hex.slice(5, 7), 16);
+    return { r: r, g: g, b: b };
+}
+
+function formatTime(s) {
+    var m = Math.floor(s / 60);
+    var sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+// ============================================================
+// 6. 响应式布局
+// ============================================================
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    recalcLayout();
+}
+
+function recalcLayout() {
+    var W = canvas.width, H = canvas.height;
+    var level = CONFIG.LEVELS[G.level] || CONFIG.LEVELS[0];
+    var cols = level.cols, rows = level.rows;
+
+    // 计算网格大小
+    var maxGridW = W * 0.85;
+    var maxGridH = H * 0.55;
+    var cellW = (maxGridW - CONFIG.CELL_PAD * (cols + 1)) / cols;
+    var cellH = (maxGridH - CONFIG.CELL_PAD * (rows + 1)) / rows;
+    G.cellSize = Math.min(cellW, cellH, 120);
+    G.cellSize = Math.max(G.cellSize, 40);
+
+    var gridW = G.cellSize * cols + CONFIG.CELL_PAD * (cols + 1);
+    var gridH = G.cellSize * rows + CONFIG.CELL_PAD * (rows + 1);
+    G.gridX = (W - gridW) / 2;
+    G.gridY = H * 0.28;
+}
+
+// ============================================================
+// 7. 初始化
+// ============================================================
+function init() {
+    var saved = localStorage.getItem('colorEliminate_highScore');
+    G.highScore = saved ? parseInt(saved) : 0;
+
+    initMenuParticles();
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    setupInput();
+    G.lastFrameTime = performance.now();
+    requestAnimationFrame(gameLoop);
+}
+
+function initMenuParticles() {
+    G.menuParticles = [];
+    for (var i = 0; i < 60; i++) {
+        G.menuParticles.push({
+            x: rand(0, canvas.width),
+            y: rand(0, canvas.height),
+            r: rand(2, 6),
+            vx: rand(-0.5, 0.5),
+            vy: rand(-0.3, -1.5),
+            color: COLORS[randInt(0, COLORS.length - 1)].hex,
+            alpha: rand(0.2, 0.7),
+            life: rand(100, 400)
+        });
+    }
+}
+
+function startGame(levelIdx) {
+    G.level = levelIdx || 0;
+    G.score = 0;
+    G.combo = 0;
+    G.maxCombo = 0;
+    G.correct = 0;
+    G.wrong = 0;
+    G.totalCorrect = 0;
+    G.particles = [];
+    G.streakParticles = [];
+    G.wisdom = '';
+    G.wisdomTimer = 0;
+    G.shakeTimer = 0;
+    G.selectedCell = -1;
+
+    var level = CONFIG.LEVELS[G.level];
+    G.timeLeft = level.time;
+    G.totalTime = level.time;
+    G.gameStartTime = Date.now();
+
+    generateGrid(level.cols, level.rows);
+    generateTarget();
+    recalcLayout();
+
+    G.state = 'playing';
+    G.roundStartTime = Date.now();
+    startFadeIn();
+}
+
+function generateGrid(cols, rows) {
+    G.grid = [];
+    var total = cols * rows;
+    var indices = [];
+    for (var i = 0; i < COLORS.length; i++) indices.push(i);
+
+    // 保证至少有目标颜色
+    var targetIdx = randInt(0, COLORS.length - 1);
+    var targetPos = randInt(0, total - 1);
+
+    for (var i = 0; i < total; i++) {
+        if (i === targetPos) {
+            G.grid.push(targetIdx);
+        } else {
+            // 随机选一个不是目标的颜色，但有一定概率是目标颜色
+            var colorIdx;
+            if (Math.random() < 0.3) {
+                colorIdx = targetIdx;
+            } else {
+                do {
+                    colorIdx = randInt(0, COLORS.length - 1);
+                } while (colorIdx === targetIdx);
+            }
+            G.grid.push(colorIdx);
+        }
+    }
+}
+
+function generateTarget() {
+    var level = CONFIG.LEVELS[G.level];
+    var cols = level.cols, rows = level.rows;
+    var total = cols * rows;
+
+    // Stroop效应：文字颜色与文字内容不匹配
+    var textIdx = randInt(0, COLORS.length - 1);
+    var colorIdx;
+    do {
+        colorIdx = randInt(0, COLORS.length - 1);
+    } while (colorIdx === textIdx);
+
+    G.targetColor = {
+        name: COLORS[textIdx].name,
+        textHex: COLORS[colorIdx].hex,
+        matchIdx: textIdx  // 需要匹配的是文字内容对应的颜色
+    };
+
+    // 确保网格中有匹配的颜色
+    var hasMatch = false;
+    for (var i = 0; i < G.grid.length; i++) {
+        if (G.grid[i] === textIdx) {
+            hasMatch = true;
+            break;
+        }
+    }
+    if (!hasMatch) {
+        var pos = randInt(0, total - 1);
+        G.grid[pos] = textIdx;
+    }
+
+    G.targetIndex = textIdx;
+}
+
+// ============================================================
+// 8. 粒子系统
+// ============================================================
+function spawnParticles(x, y, color, count, opts) {
+    opts = opts || {};
+    for (var i = 0; i < count; i++) {
+        var angle = rand(0, Math.PI * 2);
+        var speed = rand(opts.speedMin || 2, opts.speedMax || 8);
+        G.particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            r: rand(opts.rMin || 3, opts.rMax || 8),
+            color: color,
+            alpha: 1,
+            life: rand(opts.lifeMin || 30, opts.lifeMax || 80),
+            maxLife: 0,
+            gravity: opts.gravity || 0.1,
+            type: opts.type || 'circle'
+        });
+        G.particles[G.particles.length - 1].maxLife = G.particles[G.particles.length - 1].life;
+    }
+}
+
+function spawnTextParticle(x, y, text, color, size) {
+    G.particles.push({
+        x: x,
+        y: y,
+        vx: rand(-1, 1),
+        vy: -3,
+        r: size || 20,
+        color: color,
+        alpha: 1,
+        life: 60,
+        maxLife: 60,
+        gravity: 0,
+        type: 'text',
+        text: text
+    });
+}
+
+function updateParticles() {
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.gravity;
+        p.life--;
+        p.alpha = clamp(p.life / p.maxLife, 0, 1);
+        if (p.r > 1 && p.type !== 'text') p.r *= 0.97;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+
+function renderParticles() {
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        if (p.type === 'text') {
+            ctx.fillStyle = p.color;
+            ctx.font = 'bold ' + p.r + 'px "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(p.text, p.x, p.y);
+        } else if (p.type === 'star') {
+            ctx.fillStyle = p.color;
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.life * 0.1);
+            drawStar(0, 0, p.r, p.r * 0.5, 5);
+        } else {
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+function drawStar(cx, cy, outerR, innerR, points) {
+    ctx.beginPath();
+    for (var i = 0; i < points * 2; i++) {
+        var r = i % 2 === 0 ? outerR : innerR;
+        var angle = (i * Math.PI / points) - Math.PI / 2;
+        var x = cx + Math.cos(angle) * r;
+        var y = cy + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
+// ============================================================
+// 9. 游戏逻辑
+// ============================================================
+function handleCellClick(idx) {
+    if (G.state !== 'playing') return;
+    if (idx < 0 || idx >= G.grid.length) return;
+
+    var level = CONFIG.LEVELS[G.level];
+    var cols = level.cols;
+    var row = Math.floor(idx / cols);
+    var col = idx % cols;
+    var cx = G.gridX + CONFIG.CELL_PAD + col * (G.cellSize + CONFIG.CELL_PAD) + G.cellSize / 2;
+    var cy = G.gridY + CONFIG.CELL_PAD + row * (G.cellSize + CONFIG.CELL_PAD) + G.cellSize / 2;
+
+    if (G.grid[idx] === G.targetIndex) {
+        // 正确
+        var now = Date.now();
+        var timeSinceLast = now - G.lastCorrectTime;
+        var speedBonus = 0;
+
+        // 连击
+        if (timeSinceLast < CONFIG.COMBO_WINDOW) {
+            G.combo++;
+        } else {
+            G.combo = 1;
+        }
+        G.lastCorrectTime = now;
+        if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+
+        // 速度奖励
+        if (timeSinceLast < CONFIG.SPEED_BONUS_WINDOW && G.correct > 0) {
+            speedBonus = Math.floor(CONFIG.SPEED_BONUS_MAX * (1 - timeSinceLast / CONFIG.SPEED_BONUS_WINDOW));
+        }
+
+        // 计算得分
+        var comboBonus = Math.floor(CONFIG.CORRECT_BASE_SCORE * (G.combo - 1) * CONFIG.COMBO_MULTIPLIER);
+        var totalScore = CONFIG.CORRECT_BASE_SCORE + comboBonus + speedBonus;
+        G.score += totalScore;
+        G.correct++;
+        G.totalCorrect++;
+
+        // 粒子效果
+        var color = COLORS[G.targetIndex].hex;
+        spawnParticles(cx, cy, color, CONFIG.PARTICLE_COUNT, {
+            speedMin: 3, speedMax: 10, rMin: 4, rMax: 10
+        });
+        spawnTextParticle(cx, cy - 20, '+' + totalScore, '#fff', 24);
+
+        // 连击里程碑
+        for (var t = 0; t < CONFIG.STREAK_THRESHOLDS.length; t++) {
+            if (G.combo === CONFIG.STREAK_THRESHOLDS[t]) {
+                spawnTextParticle(cx, cy - 50, G.combo + '连击!', '#ffd700', 32);
+                spawnParticles(cx, cy, '#ffd700', 20, {
+                    speedMin: 5, speedMax: 15, rMin: 5, rMax: 12, type: 'star'
+                });
+                break;
+            }
+        }
+
+        // 随机显示智慧语
+        if (Math.random() < 0.15) {
+            G.wisdom = randPick(WISDOM_DATA);
+            G.wisdomTimer = 120;
+        }
+
+        // 检查是否过关
+        var levelData = CONFIG.LEVELS[G.level];
+        if (G.correct >= levelData.target) {
+            if (G.level < CONFIG.LEVELS.length - 1) {
+                G.state = 'levelComplete';
+                spawnParticles(canvas.width / 2, canvas.height / 2, '#ffd700', 50, {
+                    speedMin: 5, speedMax: 20, rMin: 5, rMax: 15, type: 'star'
+                });
+            } else {
+                endGame(true);
+            }
+            return;
+        }
+
+        // 生成新目标
+        generateGrid(levelData.cols, levelData.rows);
+        generateTarget();
+    } else {
+        // 错误
+        G.wrong++;
+        G.combo = 0;
+        G.timeLeft = Math.max(0, G.timeLeft - CONFIG.WRONG_PENALTY);
+        G.shakeTimer = 15;
+        G.shakeIntensity = 8;
+
+        spawnParticles(cx, cy, '#ff0000', 15, {
+            speedMin: 2, speedMax: 6, rMin: 3, rMax: 7
+        });
+        spawnTextParticle(cx, cy - 20, '-' + CONFIG.WRONG_PENALTY + '秒', '#ff4444', 20);
+
+        if (G.timeLeft <= 0) {
+            endGame(false);
+        }
+    }
+}
+
+function endGame(win) {
+    G.state = 'gameover';
+    if (G.score > G.highScore) {
+        G.highScore = G.score;
+        localStorage.setItem('colorEliminate_highScore', G.highScore.toString());
+    }
+}
+
+function nextLevel() {
+    G.level = Math.min(G.level + 1, CONFIG.LEVELS.length - 1);
+    G.correct = 0;
+    G.wrong = 0;
+    G.combo = 0;
+    G.particles = [];
+    G.selectedCell = -1;
+
+    var level = CONFIG.LEVELS[G.level];
+    G.timeLeft = level.time;
+    G.totalTime = level.time;
+
+    generateGrid(level.cols, level.rows);
+    generateTarget();
+    recalcLayout();
+
+    G.state = 'playing';
+    G.roundStartTime = Date.now();
+    startFadeIn();
+}
+
+function startFadeIn() {
+    G.fadeAlpha = 0;
+    G.fadeDir = 1;
+}
+
+// ============================================================
+// 10. 输入处理
+// ============================================================
+function setupInput() {
+    // 鼠标点击
+    canvas.addEventListener('click', function(e) {
+        handleClick(e.clientX, e.clientY);
+    });
+
+    // 触屏
+    canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        var touch = e.touches[0];
+        handleClick(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    // 键盘
+    document.addEventListener('keydown', function(e) {
+        if (G.state === 'menu') {
+            if (e.key === 'Enter' || e.key === ' ') {
+                startGame(0);
+            }
+        } else if (G.state === 'playing') {
+            var level = CONFIG.LEVELS[G.level];
+            var cols = level.cols, rows = level.rows;
+            var num = parseInt(e.key);
+            if (num >= 1 && num <= G.grid.length) {
+                handleCellClick(num - 1);
+            }
+            // 方向键选择
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+                e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                var sel = G.selectedCell < 0 ? 0 : G.selectedCell;
+                var row = Math.floor(sel / cols);
+                var col = sel % cols;
+                if (e.key === 'ArrowUp') row = (row - 1 + rows) % rows;
+                if (e.key === 'ArrowDown') row = (row + 1) % rows;
+                if (e.key === 'ArrowLeft') col = (col - 1 + cols) % cols;
+                if (e.key === 'ArrowRight') col = (col + 1) % cols;
+                G.selectedCell = row * cols + col;
+            }
+            if (e.key === 'Enter' || e.key === ' ') {
+                if (G.selectedCell >= 0) {
+                    handleCellClick(G.selectedCell);
+                }
+            }
+            if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+                G.state = 'paused';
+            }
+        } else if (G.state === 'paused') {
+            if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+                G.state = 'playing';
+            }
+        } else if (G.state === 'gameover') {
+            if (e.key === 'Enter' || e.key === ' ') {
+                G.state = 'menu';
+            }
+        } else if (G.state === 'levelComplete') {
+            if (e.key === 'Enter' || e.key === ' ') {
+                nextLevel();
+            }
+        }
+    });
+}
+
+function handleClick(mx, my) {
+    if (G.state === 'menu') {
+        handleMenuClick(mx, my);
+    } else if (G.state === 'playing') {
+        handlePlayingClick(mx, my);
+    } else if (G.state === 'paused') {
+        handlePausedClick(mx, my);
+    } else if (G.state === 'gameover') {
+        handleGameoverClick(mx, my);
+    } else if (G.state === 'levelComplete') {
+        handleLevelCompleteClick(mx, my);
+    }
+}
+
+function pointInRect(px, py, rx, ry, rw, rh) {
+    return px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
+}
+
+function handleMenuClick(mx, my) {
+    var W = canvas.width, H = canvas.height;
+    // 开始按钮
+    var btnW = Math.min(280, W * 0.6);
+    var btnH = 56;
+    var btnX = (W - btnW) / 2;
+    var btnY = H * 0.6;
+    if (pointInRect(mx, my, btnX, btnY, btnW, btnH)) {
+        startGame(0);
+        return;
+    }
+    // 无尽模式按钮
+    btnY = H * 0.6 + 70;
+    if (pointInRect(mx, my, btnX, btnY, btnW, btnH)) {
+        startGame(CONFIG.LEVELS.length - 1);
+        return;
+    }
+}
+
+function handlePlayingClick(mx, my) {
+    var level = CONFIG.LEVELS[G.level];
+    var cols = level.cols, rows = level.rows;
+
+    for (var i = 0; i < G.grid.length; i++) {
+        var row = Math.floor(i / cols);
+        var col = i % cols;
+        var cx = G.gridX + CONFIG.CELL_PAD + col * (G.cellSize + CONFIG.CELL_PAD);
+        var cy = G.gridY + CONFIG.CELL_PAD + row * (G.cellSize + CONFIG.CELL_PAD);
+        if (pointInRect(mx, my, cx, cy, G.cellSize, G.cellSize)) {
+            handleCellClick(i);
+            return;
+        }
+    }
+
+    // 暂停按钮
+    var pauseBtnSize = 44;
+    var pauseBtnX = canvas.width - pauseBtnSize - 12;
+    var pauseBtnY = 12;
+    if (pointInRect(mx, my, pauseBtnX, pauseBtnY, pauseBtnSize, pauseBtnSize)) {
+        G.state = 'paused';
+    }
+}
+
+function handlePausedClick(mx, my) {
+    var W = canvas.width, H = canvas.height;
+    var btnW = Math.min(240, W * 0.5);
+    var btnH = 50;
+    var btnX = (W - btnW) / 2;
+
+    // 继续
+    if (pointInRect(mx, my, btnX, H * 0.45, btnW, btnH)) {
+        G.state = 'playing';
+        return;
+    }
+    // 重新开始
+    if (pointInRect(mx, my, btnX, H * 0.45 + 65, btnW, btnH)) {
+        G.state = 'menu';
+        return;
+    }
+}
+
+function handleGameoverClick(mx, my) {
+    var W = canvas.width, H = canvas.height;
+    var btnW = Math.min(260, W * 0.55);
+    var btnH = 52;
+    var btnX = (W - btnW) / 2;
+    var btnY = H * 0.72;
+    if (pointInRect(mx, my, btnX, btnY, btnW, btnH)) {
+        G.state = 'menu';
+        return;
+    }
+}
+
+function handleLevelCompleteClick(mx, my) {
+    var W = canvas.width, H = canvas.height;
+    var btnW = Math.min(260, W * 0.55);
+    var btnH = 52;
+    var btnX = (W - btnW) / 2;
+    var btnY = H * 0.65;
+    if (pointInRect(mx, my, btnX, btnY, btnW, btnH)) {
+        nextLevel();
+        return;
+    }
+}
+
+// ============================================================
+// 11. 游戏循环
+// ============================================================
+function gameLoop(timestamp) {
+    var dt = (timestamp - G.lastFrameTime) / 1000;
+    G.lastFrameTime = timestamp;
+    dt = Math.min(dt, 0.05);
+    G.animFrame++;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(gameLoop);
+}
+
+function update(dt) {
+    // 淡入淡出
+    if (G.fadeDir === 1) {
+        G.fadeAlpha = Math.min(1, G.fadeAlpha + dt * 3);
+        if (G.fadeAlpha >= 1) G.fadeDir = 0;
+    } else if (G.fadeDir === -1) {
+        G.fadeAlpha = Math.max(0, G.fadeAlpha - dt * 3);
+        if (G.fadeAlpha <= 0) {
+            G.fadeDir = 0;
+            if (G.fadeCallback) {
+                G.fadeCallback();
+                G.fadeCallback = null;
+            }
+        }
+    }
+
+    // 更新粒子
+    updateParticles();
+
+    // 更新菜单粒子
+    updateMenuParticles(dt);
+
+    // 震动衰减
+    if (G.shakeTimer > 0) {
+        G.shakeTimer--;
+        G.shakeIntensity *= 0.9;
+    }
+
+    // 智慧语计时
+    if (G.wisdomTimer > 0) G.wisdomTimer--;
+
+    if (G.state === 'playing') {
+        G.timeLeft -= dt;
+        if (G.timeLeft <= 0) {
+            G.timeLeft = 0;
+            endGame(false);
+        }
+    }
+}
+
+function updateMenuParticles(dt) {
+    for (var i = 0; i < G.menuParticles.length; i++) {
+        var p = G.menuParticles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        if (p.life <= 0 || p.y < -10) {
+            p.x = rand(0, canvas.width);
+            p.y = canvas.height + 10;
+            p.life = rand(100, 400);
+            p.color = COLORS[randInt(0, COLORS.length - 1)].hex;
+        }
+    }
+}
+
+// ============================================================
+// 12. 渲染
+// ============================================================
+function render() {
+    var W = canvas.width, H = canvas.height;
+
+    // 震动偏移
+    var sx = 0, sy = 0;
+    if (G.shakeTimer > 0) {
+        sx = rand(-G.shakeIntensity, G.shakeIntensity);
+        sy = rand(-G.shakeIntensity, G.shakeIntensity);
+    }
+
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // 背景
+    drawBackground(W, H);
+
+    switch (G.state) {
+        case 'menu': renderMenu(W, H); break;
+        case 'playing': renderPlaying(W, H); break;
+        case 'paused': renderPaused(W, H); break;
+        case 'gameover': renderGameover(W, H); break;
+        case 'levelComplete': renderLevelComplete(W, H); break;
+    }
+
+    // 粒子
+    renderParticles();
+
+    // 淡入淡出遮罩
+    if (G.fadeAlpha < 1) {
+        ctx.fillStyle = 'rgba(26,26,46,' + (1 - G.fadeAlpha) + ')';
+        ctx.fillRect(0, 0, W, H);
+    }
+
+    ctx.restore();
+}
+
+function drawBackground(W, H) {
+    // 动态渐变背景
+    var t = G.animFrame * 0.005;
+    var gradient = ctx.createLinearGradient(0, 0, W, H);
+    gradient.addColorStop(0, '#1a1a2e');
+    gradient.addColorStop(0.5, '#16213e');
+    gradient.addColorStop(1, '#0f3460');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // 装饰圆
+    ctx.globalAlpha = 0.03;
+    var colors = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6'];
+    for (var i = 0; i < 5; i++) {
+        var cx = W * 0.5 + Math.sin(t + i * 1.3) * W * 0.3;
+        var cy = H * 0.5 + Math.cos(t + i * 0.9) * H * 0.3;
+        ctx.fillStyle = colors[i];
+        ctx.beginPath();
+        ctx.arc(cx, cy, 150 + Math.sin(t * 2 + i) * 50, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+function renderMenu(W, H) {
+    // 菜单粒子
+    ctx.save();
+    for (var i = 0; i < G.menuParticles.length; i++) {
+        var p = G.menuParticles[i];
+        ctx.globalAlpha = p.alpha * (p.life / 200);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+
+    // 标题
+    var titleY = H * 0.22;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 标题阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.font = 'bold ' + Math.min(56, W * 0.1) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText('颜色消除', W / 2 + 3, titleY + 3);
+
+    // 标题
+    var titleGrad = ctx.createLinearGradient(W / 2 - 150, titleY, W / 2 + 150, titleY);
+    titleGrad.addColorStop(0, '#e74c3c');
+    titleGrad.addColorStop(0.25, '#f1c40f');
+    titleGrad.addColorStop(0.5, '#2ecc71');
+    titleGrad.addColorStop(0.75, '#3498db');
+    titleGrad.addColorStop(1, '#9b59b6');
+    ctx.fillStyle = titleGrad;
+    ctx.fillText('颜色消除', W / 2, titleY);
+
+    // 副标题
+    ctx.font = Math.min(18, W * 0.035) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('Stroop效应挑战 - 快速匹配颜色名称消除', W / 2, titleY + 50);
+
+    // 最高分
+    if (G.highScore > 0) {
+        ctx.font = Math.min(16, W * 0.03) + 'px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('最高分: ' + G.highScore, W / 2, titleY + 85);
+    }
+
+    // 开始按钮
+    var btnW = Math.min(280, W * 0.6);
+    var btnH = 56;
+    var btnX = (W - btnW) / 2;
+    var btnY = H * 0.6;
+    drawButton(btnX, btnY, btnW, btnH, '开始游戏', '#2ecc71', '#27ae60', 22);
+
+    // 无尽模式按钮
+    btnY = H * 0.6 + 70;
+    drawButton(btnX, btnY, btnW, btnH, '无尽模式', '#3498db', '#2980b9', 22);
+
+    // 操作说明
+    ctx.font = Math.min(14, W * 0.028) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#777';
+    ctx.fillText('点击/触摸色块匹配颜色名称 | 键盘: 数字键/方向键+回车', W / 2, H * 0.88);
+    ctx.fillText('Stroop效应: 文字颜色≠文字内容，考验你的反应速度', W / 2, H * 0.92);
+
+    ctx.restore();
+}
+
+function renderPlaying(W, H) {
+    var level = CONFIG.LEVELS[G.level];
+    var cols = level.cols, rows = level.rows;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 顶部信息栏
+    renderTopBar(W, H);
+
+    // 目标颜色名称
+    var targetY = H * 0.16;
+    ctx.font = 'bold ' + Math.min(36, W * 0.07) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = G.targetColor.textHex;
+    ctx.fillText('找到: ' + G.targetColor.name, W / 2, targetY);
+
+    // 连击显示
+    if (G.combo > 1) {
+        ctx.font = 'bold ' + Math.min(22, W * 0.04) + 'px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText(G.combo + '连击!', W / 2, targetY + 35);
+    }
+
+    // 网格
+    for (var i = 0; i < G.grid.length; i++) {
+        var row = Math.floor(i / cols);
+        var col = i % cols;
+        var cx = G.gridX + CONFIG.CELL_PAD + col * (G.cellSize + CONFIG.CELL_PAD);
+        var cy = G.gridY + CONFIG.CELL_PAD + row * (G.cellSize + CONFIG.CELL_PAD);
+        var color = COLORS[G.grid[i]];
+
+        // 阴影
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        roundRect(cx + 3, cy + 3, G.cellSize, G.cellSize, 12, true, false);
+
+        // 色块
+        var gradient = ctx.createLinearGradient(cx, cy, cx, cy + G.cellSize);
+        gradient.addColorStop(0, color.hex);
+        gradient.addColorStop(1, color.darkHex);
+        ctx.fillStyle = gradient;
+        roundRect(cx, cy, G.cellSize, G.cellSize, 12, true, false);
+
+        // 选中高亮
+        if (i === G.selectedCell) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            roundRect(cx, cy, G.cellSize, G.cellSize, 12, false, true);
+        }
+
+        // 键盘提示
+        if (G.grid.length <= 25) {
+            ctx.font = 'bold ' + Math.min(14, G.cellSize * 0.2) + 'px "Microsoft YaHei", sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.fillText((i + 1).toString(), cx + G.cellSize / 2, cy + G.cellSize - 12);
+        }
+    }
+
+    // 智慧语
+    if (G.wisdomTimer > 0) {
+        var wAlpha = Math.min(1, G.wisdomTimer / 30);
+        ctx.globalAlpha = wAlpha;
+        ctx.font = Math.min(18, W * 0.035) + 'px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText(G.wisdom, W / 2, G.gridY + rows * (G.cellSize + CONFIG.CELL_PAD) + 40);
+        ctx.globalAlpha = 1;
+    }
+
+    // 暂停按钮
+    renderPauseButton();
+
+    ctx.restore();
+}
+
+function renderTopBar(W, H) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    var level = CONFIG.LEVELS[G.level];
+    var barY = 10;
+    var barH = 40;
+
+    // 半透明背景
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, barY, W, barH);
+
+    // 关卡
+    ctx.font = 'bold ' + Math.min(16, W * 0.03) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.textAlign = 'left';
+    ctx.fillText('关卡 ' + (G.level + 1) + ': ' + level.name, 12, barY + barH / 2);
+
+    // 得分
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText('得分: ' + G.score, W / 2, barY + barH / 2);
+
+    // 时间
+    ctx.textAlign = 'right';
+    var timeColor = G.timeLeft > 10 ? '#2ecc71' : G.timeLeft > 5 ? '#f39c12' : '#e74c3c';
+    ctx.fillStyle = timeColor;
+    ctx.fillText(formatTime(G.timeLeft), W - 60, barY + barH / 2);
+
+    // 时间条
+    var barW = W - 24;
+    var barX = 12;
+    var timeBarY = barY + barH + 4;
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillRect(barX, timeBarY, barW, 4);
+    var ratio = G.timeLeft / G.totalTime;
+    var timeGrad = ctx.createLinearGradient(barX, 0, barX + barW * ratio, 0);
+    timeGrad.addColorStop(0, '#2ecc71');
+    timeGrad.addColorStop(1, ratio > 0.3 ? '#3498db' : '#e74c3c');
+    ctx.fillStyle = timeGrad;
+    ctx.fillRect(barX, timeBarY, barW * ratio, 4);
+
+    // 进度
+    ctx.textAlign = 'left';
+    ctx.font = Math.min(13, W * 0.025) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#888';
+    ctx.fillText('进度: ' + G.correct + '/' + (level.target === Infinity ? '∞' : level.target), 12, barY + barH + 18);
+
+    ctx.restore();
+}
+
+function renderPauseButton() {
+    var size = 44;
+    var x = canvas.width - size - 12;
+    var y = 12;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    roundRect(x, y, size, size, 8, true, false);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x + 14, y + 10, 6, 24);
+    ctx.fillRect(x + 24, y + 10, 6, 24);
+}
+
+function renderPaused(W, H) {
+    // 遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.font = 'bold ' + Math.min(42, W * 0.08) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('游戏暂停', W / 2, H * 0.35);
+
+    var btnW = Math.min(240, W * 0.5);
+    var btnH = 50;
+    var btnX = (W - btnW) / 2;
+
+    drawButton(btnX, H * 0.45, btnW, btnH, '继续游戏', '#2ecc71', '#27ae60', 20);
+    drawButton(btnX, H * 0.45 + 65, btnW, btnH, '返回菜单', '#e74c3c', '#c0392b', 20);
+
+    ctx.restore();
+}
+
+function renderGameover(W, H) {
+    // 遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    var titleY = H * 0.2;
+    ctx.font = 'bold ' + Math.min(48, W * 0.09) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillText('游戏结束', W / 2, titleY);
+
+    // 统计
+    var stats = [
+        '最终得分: ' + G.score,
+        '正确: ' + G.correct + '  错误: ' + G.wrong,
+        '最高连击: ' + G.maxCombo,
+        '通关数: ' + (G.level + (G.correct >= (CONFIG.LEVELS[G.level].target === Infinity ? 0 : CONFIG.LEVELS[G.level].target) ? 1 : 0))
+    ];
+
+    var statsY = H * 0.35;
+    ctx.font = Math.min(20, W * 0.04) + 'px "Microsoft YaHei", sans-serif';
+    for (var i = 0; i < stats.length; i++) {
+        ctx.fillStyle = i === 0 ? '#ffd700' : '#ccc';
+        ctx.fillText(stats[i], W / 2, statsY + i * 36);
+    }
+
+    // 新纪录
+    if (G.score >= G.highScore && G.score > 0) {
+        ctx.font = 'bold ' + Math.min(24, W * 0.045) + 'px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('新纪录!', W / 2, statsY + stats.length * 36 + 10);
+    }
+
+    // 按钮
+    var btnW = Math.min(260, W * 0.55);
+    var btnH = 52;
+    var btnX = (W - btnW) / 2;
+    var btnY = H * 0.72;
+    drawButton(btnX, btnY, btnW, btnH, '返回菜单', '#3498db', '#2980b9', 22);
+
+    ctx.restore();
+}
+
+function renderLevelComplete(W, H) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.font = 'bold ' + Math.min(42, W * 0.08) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText('关卡通过!', W / 2, H * 0.28);
+
+    var level = CONFIG.LEVELS[G.level];
+    ctx.font = Math.min(22, W * 0.04) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('得分: ' + G.score + '  连击: ' + G.maxCombo, W / 2, H * 0.4);
+
+    if (G.level + 1 < CONFIG.LEVELS.length) {
+        var nextLevel = CONFIG.LEVELS[G.level + 1];
+        ctx.font = Math.min(18, W * 0.035) + 'px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#aaa';
+        ctx.fillText('下一关: ' + nextLevel.name, W / 2, H * 0.48);
+    }
+
+    var btnW = Math.min(260, W * 0.55);
+    var btnH = 52;
+    var btnX = (W - btnW) / 2;
+    var btnY = H * 0.65;
+    drawButton(btnX, btnY, btnW, btnH, '下一关', '#2ecc71', '#27ae60', 22);
+
+    ctx.restore();
+}
+
+// ============================================================
+// 13. 绘图辅助
+// ============================================================
+function roundRect(x, y, w, h, r, fill, stroke) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+}
+
+function drawButton(x, y, w, h, text, color, darkColor, fontSize) {
+    // 阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    roundRect(x + 2, y + 2, w, h, 12, true, false);
+
+    // 按钮
+    var grad = ctx.createLinearGradient(x, y, x, y + h);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, darkColor);
+    ctx.fillStyle = grad;
+    roundRect(x, y, w, h, 12, true, false);
+
+    // 边框高光
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    roundRect(x + 1, y + 1, w - 2, h - 2, 11, false, true);
+
+    // 文字
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + fontSize + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + w / 2, y + h / 2);
+}
+
+// ============================================================
+// 14. 启动
+// ============================================================
+init();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

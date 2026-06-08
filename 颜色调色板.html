@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>颜色调色板</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+    "use strict";
+
+    // ==================== CONFIG ====================
+    var CONFIG = {
+        SLIDER_COUNT: 3,          // R, G, B 三个滑块
+        ROUNDS_PER_GAME: 15,      // 每局游戏轮数
+        TIME_LIMIT: 120,          // 总时间限制（秒）
+        PERFECT_THRESHOLD: 15,    // 完美匹配阈值
+        GREAT_THRESHOLD: 35,      // 优秀阈值
+        GOOD_THRESHOLD: 65,       // 良好阈色
+        BONUS_PERFECT: 100,       // 完美加分
+        BONUS_GREAT: 60,          // 优秀加分
+        BONUS_GOOD: 30,           // 良好加分
+        COMBO_MULTIPLIER: 0.1,   // 连击倍率
+        MAX_COMBO_BONUS: 5,       // 最大连击加成倍数
+        SLIDER_HEIGHT: 28,        // 滑块高度
+        SLIDER_WIDTH_RATIO: 0.65, // 滑块宽度占画布比例
+        COLOR_PREVIEW_SIZE: 0.22, // 预览色块大小占画布短边比例
+        PARTICLE_COUNT: 20,       // 粒子数量
+        DIFFICULTY_LEVELS: [
+            { name: "简单", range: 80, time: 150, rounds: 10 },
+            { name: "普通", range: 50, time: 120, rounds: 15 },
+            { name: "困难", range: 25, time: 90, rounds: 15 }
+        ]
+    };
+
+    // ==================== CANVAS SETUP ====================
+    var canvas = document.getElementById("c");
+    var ctx = canvas.getContext("2d");
+    var W, H, dpr;
+
+    function resizeCanvas() {
+        dpr = window.devicePixelRatio || 1;
+        W = window.innerWidth;
+        H = window.innerHeight;
+        canvas.width = W * dpr;
+        canvas.height = H * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    // ==================== AUDIO ====================
+    var audioCtx = null;
+    function ensureAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === "suspended") audioCtx.resume();
+    }
+
+    function playTone(freq, dur, vol, type) {
+        if (!audioCtx) return;
+        try {
+            var osc = audioCtx.createOscillator();
+            var gain = audioCtx.createGain();
+            osc.type = type || "sine";
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + dur);
+        } catch(e) {}
+    }
+
+    function sfxSelect() { playTone(600, 0.08, 0.1); }
+    function sfxConfirm() { playTone(800, 0.12, 0.12); playTone(1000, 0.12, 0.1); }
+    function sfxPerfect() {
+        playTone(523, 0.15, 0.15);
+        setTimeout(function() { playTone(659, 0.15, 0.15); }, 80);
+        setTimeout(function() { playTone(784, 0.2, 0.15); }, 160);
+    }
+    function sfxGreat() { playTone(660, 0.15, 0.12); playTone(880, 0.15, 0.1); }
+    function sfxGood() { playTone(440, 0.12, 0.1); }
+    function sfxMiss() { playTone(250, 0.2, 0.12, "sawtooth"); }
+    function sfxClick() { playTone(500, 0.06, 0.08); }
+
+    // ==================== GAME STATE ====================
+    var STATE = {
+        MENU: 0,
+        PLAYING: 1,
+        ROUND_RESULT: 2,
+        GAME_OVER: 3,
+        PAUSED: 4
+    };
+
+    var G = {
+        state: STATE.MENU,
+        difficulty: 1,
+        score: 0,
+        highScore: 0,
+        combo: 0,
+        maxCombo: 0,
+        round: 0,
+        totalRounds: CONFIG.ROUNDS_PER_GAME,
+        timeLeft: CONFIG.TIME_LIMIT,
+        lastTime: 0,
+        targetColor: { r: 0, g: 0, b: 0 },
+        playerColor: { r: 128, g: 128, b: 128 },
+        sliders: [128, 128, 128], // R, G, B values 0-255
+        activeSlider: -1,
+        resultTimer: 0,
+        resultRating: "",
+        resultDiff: 0,
+        roundResults: [],
+        particles: [],
+        menuParticles: [],
+        bgStars: [],
+        titlePulse: 0,
+        fadeAlpha: 0,
+        shakeTimer: 0,
+        shakeIntensity: 0,
+        perfectCount: 0,
+        greatCount: 0,
+        goodCount: 0,
+        missCount: 0
+    };
+
+    // Load high score
+    try {
+        var saved = localStorage.getItem("colorPalette_highScore");
+        if (saved) G.highScore = parseInt(saved) || 0;
+    } catch(e) {}
+
+    // ==================== UTILITY ====================
+    function rand(a, b) { return Math.random() * (b - a) + a; }
+    function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function colorDist(c1, c2) {
+        var dr = c1.r - c2.r;
+        var dg = c1.g - c2.g;
+        var db = c1.b - c2.b;
+        return Math.sqrt(dr * dr + dg * dg + db * db);
+    }
+    function rgbStr(c, a) {
+        if (a !== undefined) return "rgba(" + c.r + "," + c.g + "," + c.b + "," + a + ")";
+        return "rgb(" + c.r + "," + c.g + "," + c.b + ")";
+    }
+    function hexStr(c) {
+        return "#" + ((1 << 24) + (c.r << 16) + (c.g << 8) + c.b).toString(16).slice(1);
+    }
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+    // ==================== PARTICLES ====================
+    function spawnParticles(x, y, color, count, speed) {
+        for (var i = 0; i < (count || CONFIG.PARTICLE_COUNT); i++) {
+            var angle = rand(0, Math.PI * 2);
+            var spd = rand(1, speed || 4);
+            G.particles.push({
+                x: x, y: y,
+                vx: Math.cos(angle) * spd,
+                vy: Math.sin(angle) * spd,
+                life: 1,
+                decay: rand(0.015, 0.04),
+                size: rand(2, 6),
+                color: color || { r: 255, g: 255, b: 255 }
+            });
+        }
+    }
+
+    function spawnMenuParticles() {
+        for (var i = 0; i < 3; i++) {
+            G.menuParticles.push({
+                x: rand(0, W),
+                y: rand(0, H),
+                vx: rand(-0.3, 0.3),
+                vy: rand(-0.5, -0.1),
+                life: 1,
+                decay: rand(0.003, 0.008),
+                size: rand(15, 40),
+                color: { r: randInt(80, 255), g: randInt(80, 255), b: randInt(80, 255) },
+                alpha: rand(0.03, 0.12)
+            });
+        }
+    }
+
+    function initBgStars() {
+        G.bgStars = [];
+        for (var i = 0; i < 60; i++) {
+            G.bgStars.push({
+                x: rand(0, W),
+                y: rand(0, H),
+                size: rand(0.5, 2),
+                alpha: rand(0.2, 0.7),
+                pulse: rand(0, Math.PI * 2)
+            });
+        }
+    }
+
+    function updateParticles(arr) {
+        for (var i = arr.length - 1; i >= 0; i--) {
+            var p = arr[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= p.decay;
+            if (p.life <= 0) arr.splice(i, 1);
+        }
+    }
+
+    function drawParticles(arr) {
+        for (var i = 0; i < arr.length; i++) {
+            var p = arr[i];
+            ctx.globalAlpha = p.life * (p.alpha || 1);
+            ctx.fillStyle = rgbStr(p.color);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // ==================== DRAWING HELPERS ====================
+    function drawGradientBg() {
+        var grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, "#0f0c29");
+        grad.addColorStop(0.5, "#302b63");
+        grad.addColorStop(1, "#24243e");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+    }
+
+    function drawStars(time) {
+        for (var i = 0; i < G.bgStars.length; i++) {
+            var s = G.bgStars[i];
+            var a = s.alpha + Math.sin(time * 0.001 + s.pulse) * 0.15;
+            ctx.globalAlpha = clamp(a, 0.05, 0.9);
+            ctx.fillStyle = "#fff";
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawRoundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.arcTo(x + w, y, x + w, y + r, r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+        ctx.lineTo(x + r, y + h);
+        ctx.arcTo(x, y + h, x, y + h - r, r);
+        ctx.lineTo(x, y + r);
+        ctx.arcTo(x, y, x + r, y, r);
+        ctx.closePath();
+    }
+
+    function drawButton(x, y, w, h, text, hover, fontSize) {
+        var r = Math.min(h * 0.3, 12);
+        drawRoundRect(x, y, w, h, r);
+        var grad = ctx.createLinearGradient(x, y, x, y + h);
+        if (hover) {
+            grad.addColorStop(0, "#6c63ff");
+            grad.addColorStop(1, "#4834d4");
+        } else {
+            grad.addColorStop(0, "#5a52d5");
+            grad.addColorStop(1, "#3d35a0");
+        }
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.strokeStyle = hover ? "#8b83ff" : "#6c63ff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold " + (fontSize || Math.min(h * 0.45, 20)) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, x + w / 2, y + h / 2 + 1);
+    }
+
+    function isInRect(mx, my, x, y, w, h) {
+        return mx >= x && mx <= x + w && my >= y && my <= y + h;
+    }
+
+    // ==================== LAYOUT ====================
+    var layout = {};
+    function calcLayout() {
+        var isPortrait = H > W;
+        var previewSize = Math.min(W, H) * CONFIG.COLOR_PREVIEW_SIZE;
+        var sliderW = W * CONFIG.SLIDER_WIDTH_RATIO;
+        var sliderH = CONFIG.SLIDER_HEIGHT;
+        var gap = 18;
+
+        if (isPortrait) {
+            // Portrait: target on top, sliders in middle, player below
+            var topY = H * 0.08;
+            layout.target = {
+                x: W / 2 - previewSize / 2,
+                y: topY,
+                w: previewSize,
+                h: previewSize
+            };
+            layout.player = {
+                x: W / 2 - previewSize / 2,
+                y: topY + previewSize + 20,
+                w: previewSize,
+                h: previewSize
+            };
+            var sliderStartY = topY + previewSize * 2 + 50;
+            layout.sliders = [];
+            for (var i = 0; i < 3; i++) {
+                layout.sliders.push({
+                    x: W / 2 - sliderW / 2,
+                    y: sliderStartY + i * (sliderH + gap + 8),
+                    w: sliderW,
+                    h: sliderH
+                });
+            }
+            layout.submitY = sliderStartY + 3 * (sliderH + gap + 8) + 10;
+            layout.submitW = 140;
+            layout.submitH = 44;
+            layout.submitX = W / 2 - 70;
+        } else {
+            // Landscape: side by side
+            var leftX = W * 0.08;
+            var centerY = H * 0.18;
+            layout.target = {
+                x: leftX,
+                y: centerY,
+                w: previewSize * 1.2,
+                h: previewSize * 1.2
+            };
+            layout.player = {
+                x: leftX + previewSize * 1.2 + 30,
+                y: centerY,
+                w: previewSize * 1.2,
+                h: previewSize * 1.2
+            };
+            var sliderStartX = W * 0.08;
+            var sliderStartY = centerY + previewSize * 1.2 + 40;
+            layout.sliders = [];
+            for (var i = 0; i < 3; i++) {
+                layout.sliders.push({
+                    x: sliderStartX,
+                    y: sliderStartY + i * (sliderH + gap + 8),
+                    w: sliderW,
+                    h: sliderH
+                });
+            }
+            layout.submitY = sliderStartY + 3 * (sliderH + gap + 8) + 10;
+            layout.submitW = 140;
+            layout.submitH = 44;
+            layout.submitX = sliderStartX + sliderW / 2 - 70;
+        }
+    }
+
+    // ==================== GAME LOGIC ====================
+    function generateTargetColor() {
+        var diff = CONFIG.DIFFICULTY_LEVELS[G.difficulty];
+        var range = diff.range;
+        // Generate a random target color with some saturation
+        var r = randInt(0, 255);
+        var g = randInt(0, 255);
+        var b = randInt(0, 255);
+        // Ensure some color variety
+        var maxC = Math.max(r, g, b);
+        var minC = Math.min(r, g, b);
+        if (maxC - minC < 40) {
+            // Boost one channel
+            var ch = randInt(0, 2);
+            if (ch === 0) r = clamp(r + randInt(50, 100), 0, 255);
+            else if (ch === 1) g = clamp(g + randInt(50, 100), 0, 255);
+            else b = clamp(b + randInt(50, 100), 0, 255);
+        }
+        G.targetColor = { r: r, g: g, b: b };
+    }
+
+    function startNewRound() {
+        G.round++;
+        if (G.round > G.totalRounds) {
+            endGame();
+            return;
+        }
+        generateTargetColor();
+        // Randomize starting player color
+        G.sliders = [randInt(0, 255), randInt(0, 255), randInt(0, 255)];
+        G.playerColor = { r: G.sliders[0], g: G.sliders[1], b: G.sliders[2] };
+        G.activeSlider = -1;
+        G.state = STATE.PLAYING;
+        calcLayout();
+    }
+
+    function submitColor() {
+        var dist = colorDist(G.targetColor, G.playerColor);
+        var rating, points;
+
+        if (dist <= CONFIG.PERFECT_THRESHOLD) {
+            rating = "PERFECT!";
+            points = CONFIG.BONUS_PERFECT;
+            G.perfectCount++;
+            sfxPerfect();
+            spawnParticles(W / 2, H / 2, G.targetColor, 40, 6);
+        } else if (dist <= CONFIG.GREAT_THRESHOLD) {
+            rating = "GREAT!";
+            points = CONFIG.BONUS_GREAT;
+            G.greatCount++;
+            sfxGreat();
+            spawnParticles(W / 2, H / 2, G.targetColor, 25, 4);
+        } else if (dist <= CONFIG.GOOD_THRESHOLD) {
+            rating = "GOOD";
+            points = CONFIG.BONUS_GOOD;
+            G.goodCount++;
+            sfxGood();
+            spawnParticles(W / 2, H / 2, { r: 100, g: 200, b: 100 }, 15, 3);
+        } else {
+            rating = "MISS";
+            points = 0;
+            G.missCount++;
+            G.combo = 0;
+            sfxMiss();
+            G.shakeTimer = 0.3;
+            G.shakeIntensity = 5;
+        }
+
+        if (dist <= CONFIG.GOOD_THRESHOLD) {
+            G.combo++;
+            if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+            var comboBonus = 1 + Math.min(G.combo * CONFIG.COMBO_MULTIPLIER, CONFIG.MAX_COMBO_BONUS);
+            points = Math.floor(points * comboBonus);
+        }
+
+        G.score += points;
+        G.resultRating = rating;
+        G.resultDiff = Math.floor(dist);
+        G.resultTimer = 1.8;
+        G.state = STATE.ROUND_RESULT;
+        G.roundResults.push({ rating: rating, diff: Math.floor(dist), points: points });
+    }
+
+    function endGame() {
+        G.state = STATE.GAME_OVER;
+        if (G.score > G.highScore) {
+            G.highScore = G.score;
+            try { localStorage.setItem("colorPalette_highScore", G.highScore); } catch(e) {}
+        }
+    }
+
+    function startGame() {
+        var diff = CONFIG.DIFFICULTY_LEVELS[G.difficulty];
+        G.score = 0;
+        G.combo = 0;
+        G.maxCombo = 0;
+        G.round = 0;
+        G.totalRounds = diff.rounds;
+        G.timeLeft = diff.time;
+        G.roundResults = [];
+        G.particles = [];
+        G.perfectCount = 0;
+        G.greatCount = 0;
+        G.goodCount = 0;
+        G.missCount = 0;
+        G.fadeAlpha = 0;
+        startNewRound();
+    }
+
+    function resetToMenu() {
+        G.state = STATE.MENU;
+        G.particles = [];
+        G.fadeAlpha = 0;
+    }
+
+    // ==================== DRAW: MENU ====================
+    var menuButtons = [];
+
+    function drawMenu(time) {
+        drawGradientBg();
+        drawStars(time);
+        spawnMenuParticles();
+        updateParticles(G.menuParticles);
+        drawParticles(G.menuParticles);
+
+        G.titlePulse += 0.03;
+
+        // Title
+        var titleY = H * 0.18;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        // Glow effect
+        ctx.shadowColor = "#6c63ff";
+        ctx.shadowBlur = 20 + Math.sin(G.titlePulse) * 8;
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold " + Math.min(W * 0.08, 48) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("颜色调色板", W / 2, titleY);
+        ctx.shadowBlur = 0;
+
+        // Subtitle
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = Math.min(W * 0.035, 18) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("RGB调色匹配 · 训练色彩感知", W / 2, titleY + 40);
+
+        // Color wheel preview
+        var wheelR = Math.min(W, H) * 0.08;
+        var wheelY = titleY + 90;
+        for (var i = 0; i < 360; i += 3) {
+            var hue = i;
+            ctx.strokeStyle = "hsl(" + hue + ", 80%, 55%)";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            var a1 = (hue - 90) * Math.PI / 180;
+            var a2 = (hue + 3 - 90) * Math.PI / 180;
+            ctx.arc(W / 2, wheelY, wheelR, a1, a2);
+            ctx.stroke();
+        }
+
+        // Difficulty buttons
+        var btnW = Math.min(W * 0.55, 240);
+        var btnH = 48;
+        var btnGap = 16;
+        var startY = H * 0.48;
+        menuButtons = [];
+
+        for (var i = 0; i < CONFIG.DIFFICULTY_LEVELS.length; i++) {
+            var bx = W / 2 - btnW / 2;
+            var by = startY + i * (btnH + btnGap);
+            menuButtons.push({ x: bx, y: by, w: btnW, h: btnH, id: i });
+            var hover = (G.activeSlider === 100 + i);
+            var label = CONFIG.DIFFICULTY_LEVELS[i].name;
+            drawButton(bx, by, btnW, btnH, label, hover);
+        }
+
+        // High score
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = Math.min(W * 0.035, 16) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("最高分: " + G.highScore, W / 2, startY + 3 * (btnH + btnGap) + 20);
+
+        // Instructions
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.font = Math.min(W * 0.028, 13) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("拖动滑块调整RGB值，匹配目标颜色", W / 2, H - 40);
+    }
+
+    // ==================== DRAW: PLAYING ====================
+    function drawPlaying(time) {
+        drawGradientBg();
+        drawStars(time);
+
+        calcLayout();
+        var isPortrait = H > W;
+
+        // Shake effect
+        var sx = 0, sy = 0;
+        if (G.shakeTimer > 0) {
+            sx = (Math.random() - 0.5) * G.shakeIntensity * 2;
+            sy = (Math.random() - 0.5) * G.shakeIntensity * 2;
+            ctx.save();
+            ctx.translate(sx, sy);
+        }
+
+        // Top info bar
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.font = "bold " + Math.min(W * 0.04, 20) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText("第 " + G.round + "/" + G.totalRounds + " 轮", 16, 28);
+        ctx.textAlign = "center";
+        ctx.fillText("分数: " + G.score, W / 2, 28);
+        ctx.textAlign = "right";
+        var timeColor = G.timeLeft < 15 ? "#ff6b6b" : "#fff";
+        ctx.fillStyle = timeColor;
+        ctx.fillText("时间: " + Math.ceil(G.timeLeft) + "s", W - 16, 28);
+
+        // Combo display
+        if (G.combo > 1) {
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#ffd700";
+            ctx.font = "bold " + Math.min(W * 0.035, 16) + "px 'Microsoft YaHei', sans-serif";
+            ctx.fillText("连击 x" + G.combo, W / 2, 52);
+        }
+
+        // Difficulty label
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.font = Math.min(W * 0.028, 12) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText(CONFIG.DIFFICULTY_LEVELS[G.difficulty].name, W - 16, 50);
+
+        // Target color label
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = Math.min(W * 0.032, 15) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("目标颜色", layout.target.x + layout.target.w / 2, layout.target.y - 12);
+
+        // Target color block
+        drawRoundRect(layout.target.x, layout.target.y, layout.target.w, layout.target.h, 10);
+        ctx.fillStyle = rgbStr(G.targetColor);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Hex code under target
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = Math.min(W * 0.028, 13) + "px monospace";
+        ctx.fillText(hexStr(G.targetColor), layout.target.x + layout.target.w / 2, layout.target.y + layout.target.h + 18);
+
+        // Player color label
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = Math.min(W * 0.032, 15) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("你的颜色", layout.player.x + layout.player.w / 2, layout.player.y - 12);
+
+        // Player color block
+        drawRoundRect(layout.player.x, layout.player.y, layout.player.w, layout.player.h, 10);
+        ctx.fillStyle = rgbStr(G.playerColor);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Hex code under player
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = Math.min(W * 0.028, 13) + "px monospace";
+        ctx.fillText(hexStr(G.playerColor), layout.player.x + layout.player.w / 2, layout.player.y + layout.player.h + 18);
+
+        // RGB Sliders
+        var sliderColors = [
+            { label: "R", color: { r: 255, g: 80, b: 80 }, val: G.sliders[0] },
+            { label: "G", color: { r: 80, g: 220, b: 80 }, val: G.sliders[1] },
+            { label: "B", color: { r: 80, g: 120, b: 255 }, val: G.sliders[2] }
+        ];
+
+        for (var i = 0; i < 3; i++) {
+            var sl = layout.sliders[i];
+            var sc = sliderColors[i];
+
+            // Label
+            ctx.fillStyle = rgbStr(sc.color);
+            ctx.font = "bold " + Math.min(W * 0.035, 16) + "px monospace";
+            ctx.textAlign = "right";
+            ctx.fillText(sc.label, sl.x - 10, sl.y + sl.h / 2 + 1);
+
+            // Track background
+            drawRoundRect(sl.x, sl.y, sl.w, sl.h, sl.h / 2);
+            ctx.fillStyle = "rgba(255,255,255,0.08)";
+            ctx.fill();
+
+            // Filled portion
+            var fillW = (sc.val / 255) * sl.w;
+            if (fillW > 0) {
+                ctx.save();
+                ctx.beginPath();
+                drawRoundRect(sl.x, sl.y, sl.w, sl.h, sl.h / 2);
+                ctx.clip();
+                var grad = ctx.createLinearGradient(sl.x, 0, sl.x + sl.w, 0);
+                grad.addColorStop(0, rgbStr(sc.color, 0.3));
+                grad.addColorStop(1, rgbStr(sc.color, 0.8));
+                ctx.fillStyle = grad;
+                ctx.fillRect(sl.x, sl.y, fillW, sl.h);
+                ctx.restore();
+            }
+
+            // Thumb
+            var thumbX = sl.x + (sc.val / 255) * sl.w;
+            var thumbR = sl.h * 0.7;
+            ctx.beginPath();
+            ctx.arc(thumbX, sl.y + sl.h / 2, thumbR, 0, Math.PI * 2);
+            ctx.fillStyle = "#fff";
+            ctx.fill();
+            ctx.strokeStyle = rgbStr(sc.color);
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            // Value text
+            ctx.fillStyle = "rgba(255,255,255,0.7)";
+            ctx.font = Math.min(W * 0.03, 13) + "px monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(sc.val, sl.x + sl.w + 10, sl.y + sl.h / 2 + 1);
+        }
+
+        // Submit button
+        var submitHover = (G.activeSlider === 99);
+        drawButton(layout.submitX, layout.submitY, layout.submitW, layout.submitH, "确认颜色", submitHover);
+
+        // Distance indicator
+        var dist = colorDist(G.targetColor, G.playerColor);
+        var maxDist = Math.sqrt(3 * 255 * 255);
+        var accuracy = Math.max(0, 1 - dist / maxDist);
+        var barW = 160;
+        var barH = 8;
+        var barX = layout.submitX + layout.submitW / 2 - barW / 2;
+        var barY = layout.submitY + layout.submitH + 12;
+
+        drawRoundRect(barX, barY, barW, barH, barH / 2);
+        ctx.fillStyle = "rgba(255,255,255,0.1)";
+        ctx.fill();
+
+        drawRoundRect(barX, barY, barW * accuracy, barH, barH / 2);
+        var barColor = accuracy > 0.85 ? "#4cd137" : accuracy > 0.6 ? "#ffa502" : "#ff6b6b";
+        ctx.fillStyle = barColor;
+        ctx.fill();
+
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.font = Math.min(W * 0.025, 11) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("匹配度: " + Math.floor(accuracy * 100) + "%", barX + barW / 2, barY + barH + 14);
+
+        if (G.shakeTimer > 0) {
+            ctx.restore();
+        }
+    }
+
+    // ==================== DRAW: ROUND RESULT ====================
+    function drawRoundResult(time) {
+        drawPlaying(time);
+
+        // Overlay
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(0, 0, W, H);
+
+        var scale = easeOutCubic(Math.min(1, (1.8 - G.resultTimer) * 3));
+        ctx.save();
+        ctx.translate(W / 2, H / 2);
+        ctx.scale(scale, scale);
+
+        // Rating text
+        var ratingColors = {
+            "PERFECT!": "#ffd700",
+            "GREAT!": "#4cd137",
+            "GOOD": "#ffa502",
+            "MISS": "#ff6b6b"
+        };
+        ctx.fillStyle = ratingColors[G.resultRating] || "#fff";
+        ctx.font = "bold " + Math.min(W * 0.12, 56) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = ratingColors[G.resultRating];
+        ctx.shadowBlur = 20;
+        ctx.fillText(G.resultRating, 0, -40);
+        ctx.shadowBlur = 0;
+
+        // Color comparison
+        var boxSize = Math.min(W * 0.1, 50);
+        ctx.fillStyle = rgbStr(G.targetColor);
+        ctx.fillRect(-boxSize - 10, 10, boxSize, boxSize);
+        ctx.strokeStyle = "rgba(255,255,255,0.5)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-boxSize - 10, 10, boxSize, boxSize);
+
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = Math.min(W * 0.04, 18) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("→", 0, boxSize / 2 + 10);
+
+        ctx.fillStyle = rgbStr(G.playerColor);
+        ctx.fillRect(10, 10, boxSize, boxSize);
+        ctx.strokeRect(10, 10, boxSize, boxSize);
+
+        // Points
+        var lastResult = G.roundResults[G.roundResults.length - 1];
+        ctx.fillStyle = "#fff";
+        ctx.font = Math.min(W * 0.05, 22) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("+" + lastResult.points + " 分", 0, boxSize + 30);
+
+        // Distance
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = Math.min(W * 0.03, 14) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("色差: " + G.resultDiff, 0, boxSize + 55);
+
+        ctx.restore();
+
+        updateParticles(G.particles);
+        drawParticles(G.particles);
+    }
+
+    // ==================== DRAW: GAME OVER ====================
+    var gameOverButtons = [];
+
+    function drawGameOver(time) {
+        drawGradientBg();
+        drawStars(time);
+        updateParticles(G.particles);
+        drawParticles(G.particles);
+
+        var scale = easeOutCubic(Math.min(1, (2 - G.fadeAlpha) * 1.5));
+        ctx.save();
+        ctx.translate(W / 2, 0);
+        ctx.scale(scale, scale);
+        ctx.translate(-W / 2, 0);
+
+        // Title
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold " + Math.min(W * 0.07, 40) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("游戏结束", W / 2, H * 0.1);
+
+        // Score
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "bold " + Math.min(W * 0.1, 52) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText(G.score, W / 2, H * 0.2);
+
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = Math.min(W * 0.035, 16) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("最终得分", W / 2, H * 0.2 + 35);
+
+        // New high score?
+        if (G.score >= G.highScore && G.score > 0) {
+            ctx.fillStyle = "#ff6b6b";
+            ctx.font = "bold " + Math.min(W * 0.04, 18) + "px 'Microsoft YaHei', sans-serif";
+            ctx.fillText("新纪录!", W / 2, H * 0.2 + 60);
+        }
+
+        // Stats
+        var statY = H * 0.38;
+        var statGap = 28;
+        ctx.font = Math.min(W * 0.032, 15) + "px 'Microsoft YaHei', sans-serif";
+
+        var stats = [
+            { label: "难度", value: CONFIG.DIFFICULTY_LEVELS[G.difficulty].name },
+            { label: "最高连击", value: "x" + G.maxCombo },
+            { label: "PERFECT", value: G.perfectCount + " 次", color: "#ffd700" },
+            { label: "GREAT", value: G.greatCount + " 次", color: "#4cd137" },
+            { label: "GOOD", value: G.goodCount + " 次", color: "#ffa502" },
+            { label: "MISS", value: G.missCount + " 次", color: "#ff6b6b" }
+        ];
+
+        for (var i = 0; i < stats.length; i++) {
+            ctx.fillStyle = "rgba(255,255,255,0.5)";
+            ctx.textAlign = "right";
+            ctx.fillText(stats[i].label, W / 2 - 10, statY + i * statGap);
+            ctx.fillStyle = stats[i].color || "#fff";
+            ctx.textAlign = "left";
+            ctx.fillText(stats[i].value, W / 2 + 10, statY + i * statGap);
+        }
+
+        // Buttons
+        var btnW = Math.min(W * 0.5, 200);
+        var btnH = 44;
+        var btnY = statY + stats.length * statGap + 25;
+        gameOverButtons = [];
+
+        gameOverButtons.push({ x: W / 2 - btnW / 2, y: btnY, w: btnW, h: btnH, id: 0 });
+        drawButton(W / 2 - btnW / 2, btnY, btnW, btnH, "再玩一次", G.activeSlider === 200);
+
+        gameOverButtons.push({ x: W / 2 - btnW / 2, y: btnY + btnH + 12, w: btnW, h: btnH, id: 1 });
+        drawButton(W / 2 - btnW / 2, btnY + btnH + 12, btnW, btnH, "返回菜单", G.activeSlider === 201);
+
+        // High score
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.font = Math.min(W * 0.028, 13) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("最高分: " + G.highScore, W / 2, btnY + btnH * 2 + 40);
+
+        ctx.restore();
+    }
+
+    // ==================== DRAW: PAUSED ====================
+    function drawPaused(time) {
+        drawPlaying(time);
+        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold " + Math.min(W * 0.08, 40) + "px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("已暂停", W / 2, H / 2 - 30);
+
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = Math.min(W * 0.035, 16) + "px 'Microsoft YaHei', sans-serif";
+        ctx.fillText("点击任意位置继续", W / 2, H / 2 + 20);
+    }
+
+    // ==================== MAIN LOOP ====================
+    function gameLoop(time) {
+        requestAnimationFrame(gameLoop);
+
+        var dt = Math.min((time - G.lastTime) / 1000, 0.1);
+        G.lastTime = time;
+
+        // Update timer
+        if (G.state === STATE.PLAYING) {
+            G.timeLeft -= dt;
+            if (G.timeLeft <= 0) {
+                G.timeLeft = 0;
+                endGame();
+            }
+        }
+
+        // Update shake
+        if (G.shakeTimer > 0) {
+            G.shakeTimer -= dt;
+            if (G.shakeTimer <= 0) {
+                G.shakeTimer = 0;
+            }
+        }
+
+        // Round result timer
+        if (G.state === STATE.ROUND_RESULT) {
+            G.resultTimer -= dt;
+            if (G.resultTimer <= 0) {
+                startNewRound();
+            }
+        }
+
+        // Fade alpha for game over
+        if (G.state === STATE.GAME_OVER) {
+            G.fadeAlpha += dt;
+        }
+
+        // Draw
+        ctx.clearRect(0, 0, W, H);
+        switch (G.state) {
+            case STATE.MENU: drawMenu(time); break;
+            case STATE.PLAYING: drawPlaying(time); break;
+            case STATE.ROUND_RESULT: drawRoundResult(time); break;
+            case STATE.GAME_OVER: drawGameOver(time); break;
+            case STATE.PAUSED: drawPaused(time); break;
+        }
+    }
+
+    // ==================== INPUT HANDLING ====================
+    var mouseX = 0, mouseY = 0;
+    var isMouseDown = false;
+
+    function getPos(e) {
+        if (e.touches && e.touches.length > 0) {
+            return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+        return { x: e.clientX, y: e.clientY };
+    }
+
+    function handleHover(x, y) {
+        G.activeSlider = -1;
+        if (G.state === STATE.MENU) {
+            for (var i = 0; i < menuButtons.length; i++) {
+                var b = menuButtons[i];
+                if (isInRect(x, y, b.x, b.y, b.w, b.h)) {
+                    G.activeSlider = 100 + b.id;
+                    return;
+                }
+            }
+        } else if (G.state === STATE.PLAYING) {
+            calcLayout();
+            // Check sliders
+            for (var i = 0; i < 3; i++) {
+                var sl = layout.sliders[i];
+                var expanded = { x: sl.x - 15, y: sl.y - 15, w: sl.w + 30, h: sl.h + 30 };
+                if (isInRect(x, y, expanded.x, expanded.y, expanded.w, expanded.h)) {
+                    G.activeSlider = i;
+                    return;
+                }
+            }
+            // Check submit button
+            if (isInRect(x, y, layout.submitX, layout.submitY, layout.submitW, layout.submitH)) {
+                G.activeSlider = 99;
+            }
+        } else if (G.state === STATE.GAME_OVER) {
+            for (var i = 0; i < gameOverButtons.length; i++) {
+                var b = gameOverButtons[i];
+                if (isInRect(x, y, b.x, b.y, b.w, b.h)) {
+                    G.activeSlider = 200 + b.id;
+                    return;
+                }
+            }
+        }
+    }
+
+    function updateSliderValue(x) {
+        if (G.activeSlider < 0 || G.activeSlider >= 3) return;
+        calcLayout();
+        var sl = layout.sliders[G.activeSlider];
+        var ratio = clamp((x - sl.x) / sl.w, 0, 1);
+        G.sliders[G.activeSlider] = Math.round(ratio * 255);
+        G.playerColor = { r: G.sliders[0], g: G.sliders[1], b: G.sliders[2] };
+    }
+
+    function handleClick(x, y) {
+        ensureAudio();
+
+        if (G.state === STATE.MENU) {
+            for (var i = 0; i < menuButtons.length; i++) {
+                var b = menuButtons[i];
+                if (isInRect(x, y, b.x, b.y, b.w, b.h)) {
+                    G.difficulty = b.id;
+                    sfxConfirm();
+                    startGame();
+                    return;
+                }
+            }
+        } else if (G.state === STATE.PLAYING) {
+            // Check slider area
+            if (G.activeSlider >= 0 && G.activeSlider < 3) {
+                updateSliderValue(x);
+                sfxClick();
+                return;
+            }
+            // Check submit
+            if (isInRect(x, y, layout.submitX, layout.submitY, layout.submitW, layout.submitH)) {
+                sfxConfirm();
+                submitColor();
+                return;
+            }
+        } else if (G.state === STATE.ROUND_RESULT) {
+            // Click to skip
+            G.resultTimer = 0;
+            return;
+        } else if (G.state === STATE.GAME_OVER) {
+            for (var i = 0; i < gameOverButtons.length; i++) {
+                var b = gameOverButtons[i];
+                if (isInRect(x, y, b.x, b.y, b.w, b.h)) {
+                    sfxConfirm();
+                    if (b.id === 0) {
+                        startGame();
+                    } else {
+                        resetToMenu();
+                    }
+                    return;
+                }
+            }
+        } else if (G.state === STATE.PAUSED) {
+            G.state = STATE.PLAYING;
+        }
+    }
+
+    // Mouse events
+    canvas.addEventListener("mousedown", function(e) {
+        isMouseDown = true;
+        var p = getPos(e);
+        mouseX = p.x; mouseY = p.y;
+        if (G.state === STATE.PLAYING && G.activeSlider >= 0 && G.activeSlider < 3) {
+            updateSliderValue(p.x);
+        }
+        handleClick(p.x, p.y);
+    });
+
+    canvas.addEventListener("mousemove", function(e) {
+        var p = getPos(e);
+        mouseX = p.x; mouseY = p.y;
+        handleHover(p.x, p.y);
+        if (isMouseDown && G.state === STATE.PLAYING) {
+            updateSliderValue(p.x);
+        }
+    });
+
+    canvas.addEventListener("mouseup", function() {
+        isMouseDown = false;
+    });
+
+    // Touch events
+    canvas.addEventListener("touchstart", function(e) {
+        e.preventDefault();
+        isMouseDown = true;
+        var p = getPos(e);
+        mouseX = p.x; mouseY = p.y;
+        handleHover(p.x, p.y);
+        if (G.state === STATE.PLAYING && G.activeSlider >= 0 && G.activeSlider < 3) {
+            updateSliderValue(p.x);
+        }
+        handleClick(p.x, p.y);
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", function(e) {
+        e.preventDefault();
+        var p = getPos(e);
+        mouseX = p.x; mouseY = p.y;
+        handleHover(p.x, p.y);
+        if (isMouseDown && G.state === STATE.PLAYING) {
+            updateSliderValue(p.x);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", function(e) {
+        e.preventDefault();
+        isMouseDown = false;
+    }, { passive: false });
+
+    // Keyboard
+    document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape") {
+            if (G.state === STATE.PLAYING) {
+                G.state = STATE.PAUSED;
+            } else if (G.state === STATE.PAUSED) {
+                G.state = STATE.PLAYING;
+            } else if (G.state === STATE.GAME_OVER) {
+                resetToMenu();
+            }
+        }
+        if (e.key === " " || e.key === "Enter") {
+            if (G.state === STATE.MENU) {
+                ensureAudio();
+                G.difficulty = 1;
+                sfxConfirm();
+                startGame();
+            } else if (G.state === STATE.PLAYING) {
+                ensureAudio();
+                sfxConfirm();
+                submitColor();
+            } else if (G.state === STATE.ROUND_RESULT) {
+                G.resultTimer = 0;
+            } else if (G.state === STATE.GAME_OVER) {
+                ensureAudio();
+                sfxConfirm();
+                startGame();
+            }
+        }
+        // Arrow keys for slider control
+        if (G.state === STATE.PLAYING) {
+            var step = e.shiftKey ? 10 : 1;
+            if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                var idx = G.activeSlider >= 0 && G.activeSlider < 3 ? G.activeSlider : 0;
+                if (e.key === "ArrowLeft") G.sliders[idx] = clamp(G.sliders[idx] - step, 0, 255);
+                else G.sliders[idx] = clamp(G.sliders[idx] + step, 0, 255);
+                G.playerColor = { r: G.sliders[0], g: G.sliders[1], b: G.sliders[2] };
+                sfxClick();
+            }
+            if (e.key === "Tab") {
+                e.preventDefault();
+                G.activeSlider = (G.activeSlider + 1) % 3;
+                sfxClick();
+            }
+        }
+    });
+
+    // ==================== INIT ====================
+    initBgStars();
+    requestAnimationFrame(gameLoop);
+})();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

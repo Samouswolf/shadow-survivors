@@ -163,6 +163,35 @@ var G = {
     flashTimer: 0
 };
 
+// ==================== AUDIO ====================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+}
+function sfxBrick() { playTone(520 + Math.random() * 200, 0.08, 0.18, 'square'); }
+function sfxPaddle() { playTone(220, 0.1, 0.12, 'triangle'); }
+function sfxWall() { playTone(180, 0.06, 0.08, 'sine'); }
+function sfxLose() { playTone(120, 0.3, 0.2, 'sawtooth'); }
+function sfxPowerup() { playTone(660, 0.12, 0.15, 'sine'); playTone(880, 0.15, 0.1, 'sine'); }
+function sfxVictory() {
+    [0,100,200,300].forEach(function(d,i) {
+        setTimeout(function() { playTone(440 + i * 110, 0.2, 0.15, 'sine'); }, d);
+    });
+}
+
 // ==================== INPUT ====================
 var keys = {};
 var mouseX = -1;
@@ -323,9 +352,9 @@ function update() {
         b.y += b.vy;
 
         // Wall collisions
-        if (b.x - b.r < 0) { b.x = b.r; b.vx = Math.abs(b.vx); }
-        if (b.x + b.r > CFG.W) { b.x = CFG.W - b.r; b.vx = -Math.abs(b.vx); }
-        if (b.y - b.r < 0) { b.y = b.r; b.vy = Math.abs(b.vy); }
+        if (b.x - b.r < 0) { b.x = b.r; b.vx = Math.abs(b.vx); sfxWall(); }
+        if (b.x + b.r > CFG.W) { b.x = CFG.W - b.r; b.vx = -Math.abs(b.vx); sfxWall(); }
+        if (b.y - b.r < 0) { b.y = b.r; b.vy = Math.abs(b.vy); sfxWall(); }
 
         // Bottom - lose ball
         if (b.y > CFG.H + b.r) {
@@ -333,8 +362,9 @@ function update() {
             if (G.balls.length === 0) {
                 G.lives--;
                 G.shakeTimer = 15;
+                sfxLose();
                 if (G.lives <= 0) {
-                    G.state = 'gameOver';
+                    setHighScore(G.score);G.state = 'gameOver';
                 } else {
                     G.balls = [createBall()];
                     G.combo = 0;
@@ -357,6 +387,7 @@ function update() {
             b.vy = Math.sin(angle) * speed;
             b.y = CFG.PADDLE_Y - b.r - 1;
             spawnParticles(b.x, b.y, COL.paddle, 5);
+            sfxPaddle();
         }
 
         // Brick collision
@@ -377,9 +408,11 @@ function update() {
                     spawnParticles(br.x + br.w / 2, br.y + br.h / 2,
                         br.type === BRICK.HARD ? COL.brickHard[0] : COL.brickNorm[0], 12);
                     tryDropPowerup(br);
+                    sfxBrick();
                     if (G.bricksLeft <= 0) {
                         G.state = 'levelClear';
                         G.levelClearTimer = 150;
+                        sfxVictory();
                     }
                 } else {
                     spawnParticles(b.x, b.y, COL.brickMetal, 4);
@@ -459,6 +492,7 @@ function applyPowerup(type) {
     }
     G.flashMsg = POWERUP_NAMES[type] + '!';
     G.flashTimer = 60;
+    sfxPowerup();
 }
 
 // ==================== RENDER ====================
@@ -810,6 +844,7 @@ canvas.addEventListener('touchend', function() {
 });
 
 function handleAction() {
+    initAudio();
     if (G.state === 'menu') {
         initLevel(0);
         return;
@@ -855,7 +890,7 @@ function gameLoop() {
             if (G.level + 1 < LEVELS.length) {
                 initLevel(G.level + 1);
             } else {
-                G.state = 'victory';
+                setHighScore(G.score);G.state = 'victory';
             }
         }
     }
@@ -970,6 +1005,16 @@ const GameMonetize = {
 	},
 };
 GameMonetize.init();
+
+// ===== 最高分系统 =====
+const HIGH_SCORE_KEY = 'brick_breaker';
+function getHighScore() { return parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0'); }
+function setHighScore(score) {
+  const high = getHighScore();
+  if (score > high) { localStorage.setItem(HIGH_SCORE_KEY, score); return true; }
+  return false;
+}
+
 </script>
 <!-- 游戏工坊统一广告系统 -->
 <div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>

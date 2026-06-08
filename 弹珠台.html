@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>弹珠台</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; touch-action: none; }
+canvas { display: block; width: 100%; height: 100%; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ========== 弹珠台 ==========
+// 物理弹射得分，多场景，挡板+弹球+得分区
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// ========== 响应式画布 ==========
+let W, H, scale;
+function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    scale = Math.min(W / 400, H / 700);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ========== 常量 ==========
+const GRAVITY = 0.15;
+const FRICTION = 0.999;
+const BOUNCE_WALL = 0.7;
+const BOUNCE_BUMPER = 1.2;
+const BOUNCE_FLIPPER = 1.5;
+const BALL_RADIUS = 8;
+const FLIPPER_LENGTH = 60;
+const FLIPPER_WIDTH = 10;
+const MAX_BALLS = 3;
+
+// ========== 场景定义 ==========
+const SCENES = [
+    {
+        name: '经典弹珠台',
+        bgColors: ['#1a0a2e', '#16213e', '#0f3460'],
+        bumperColor: '#ff6b6b',
+        accentColor: '#ffd93d',
+        bumpers: [
+            { x: 0.3, y: 0.25, r: 20, score: 100 },
+            { x: 0.5, y: 0.2, r: 25, score: 150 },
+            { x: 0.7, y: 0.25, r: 20, score: 100 },
+            { x: 0.4, y: 0.35, r: 18, score: 120 },
+            { x: 0.6, y: 0.35, r: 18, score: 120 }
+        ],
+        targets: [
+            { x: 0.2, y: 0.15, w: 30, h: 8, score: 50 },
+            { x: 0.5, y: 0.1, w: 40, h: 8, score: 80 },
+            { x: 0.8, y: 0.15, w: 30, h: 50, score: 50 }
+        ],
+        walls: [
+            { x1: 0.15, y1: 0.45, x2: 0.3, y2: 0.5 },
+            { x1: 0.7, y1: 0.45, x2: 0.85, y2: 0.5 }
+        ],
+        multiplier: 1
+    },
+    {
+        name: '星际迷航',
+        bgColors: ['#0d0221', '#150734', '#1a0a3e'],
+        bumperColor: '#00d2ff',
+        accentColor: '#ff00ff',
+        bumpers: [
+            { x: 0.25, y: 0.2, r: 22, score: 200 },
+            { x: 0.5, y: 0.15, r: 28, score: 300 },
+            { x: 0.75, y: 0.2, r: 22, score: 200 },
+            { x: 0.35, y: 0.3, r: 16, score: 150 },
+            { x: 0.65, y: 0.3, r: 16, score: 150 },
+            { x: 0.5, y: 0.4, r: 20, score: 250 }
+        ],
+        targets: [
+            { x: 0.15, y: 0.12, w: 25, h: 40, score: 100 },
+            { x: 0.85, y: 0.12, w: 25, h: 40, score: 100 },
+            { x: 0.4, y: 0.08, w: 35, h: 8, score: 150 },
+            { x: 0.6, y: 0.08, w: 35, h: 8, score: 150 }
+        ],
+        walls: [
+            { x1: 0.2, y1: 0.42, x2: 0.35, y2: 0.48 },
+            { x1: 0.65, y1: 0.42, x2: 0.8, y2: 0.48 }
+        ],
+        multiplier: 1.5
+    },
+    {
+        name: '龙之宝藏',
+        bgColors: ['#1a0000', '#2d0a0a', '#4a1a1a'],
+        bumperColor: '#ff4444',
+        accentColor: '#ffd700',
+        bumpers: [
+            { x: 0.3, y: 0.22, r: 24, score: 300 },
+            { x: 0.5, y: 0.18, r: 30, score: 500 },
+            { x: 0.7, y: 0.22, r: 24, score: 300 },
+            { x: 0.2, y: 0.32, r: 18, score: 200 },
+            { x: 0.4, y: 0.35, r: 20, score: 250 },
+            { x: 0.6, y: 0.35, r: 20, score: 250 },
+            { x: 0.8, y: 0.32, r: 18, score: 200 }
+        ],
+        targets: [
+            { x: 0.15, y: 0.1, w: 30, h: 50, score: 200 },
+            { x: 0.85, y: 0.1, w: 30, h: 50, score: 200 },
+            { x: 0.45, y: 0.05, w: 50, h: 10, score: 400 }
+        ],
+        walls: [
+            { x1: 0.25, y1: 0.4, x2: 0.4, y2: 0.46 },
+            { x1: 0.6, y1: 0.4, x2: 0.75, y2: 0.46 },
+            { x1: 0.4, y1: 0.5, x2: 0.6, y2: 0.52 }
+        ],
+        multiplier: 2
+    }
+];
+
+// ========== 游戏状态 ==========
+let G = {
+    state: 'menu', // menu, playing, gameOver, paused
+    scene: 0,
+    score: 0,
+    highScore: parseInt(localStorage.getItem('pinball_high') || '0'),
+    balls: MAX_BALLS,
+    ball: null,
+    flippers: { left: { angle: 0.4 }, right: { angle: -0.4 } },
+    bumpers: [],
+    targets: [],
+    walls: [],
+    particles: [],
+    combo: 0,
+    comboTimer: 0,
+    shakeTimer: 0,
+    shakeX: 0,
+    shakeY: 0,
+    launchPower: 0,
+    launching: false,
+    animFrame: 0
+};
+
+// ========== 输入状态 ==========
+let input = {
+    left: false,
+    right: false,
+    launch: false,
+    touchLeft: false,
+    touchRight: false,
+    touchLaunch: false,
+    mouseX: 0,
+    mouseY: 0
+};
+
+// ========== 粒子系统 ==========
+class Particle {
+    constructor(x, y, color, vx, vy, life, size) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.vx = vx || (Math.random() - 0.5) * 6;
+        this.vy = vy || (Math.random() - 0.5) * 6;
+        this.life = life || 30;
+        this.maxLife = this.life;
+        this.size = size || 3;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.05;
+        this.life--;
+        return this.life > 0;
+    }
+    draw() {
+        const alpha = this.life / this.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+function spawnParticles(x, y, color, count, spread) {
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * (spread || 4) + 1;
+        G.particles.push(new Particle(x, y, color,
+            Math.cos(angle) * speed,
+            Math.sin(angle) * speed,
+            20 + Math.random() * 20,
+            2 + Math.random() * 3
+        ));
+    }
+}
+
+// ========== 初始化场景 ==========
+function initScene(idx) {
+    const sc = SCENES[idx];
+    G.scene = idx;
+    G.bumpers = sc.bumpers.map(b => ({
+        x: b.x * W,
+        y: b.y * H,
+        r: b.r * scale,
+        score: b.score,
+        hitTimer: 0,
+        color: sc.bumperColor
+    }));
+    G.targets = sc.targets.map(t => ({
+        x: t.x * W,
+        y: t.y * H,
+        w: t.w * scale,
+        h: t.h * scale,
+        score: t.score,
+        hit: false,
+        hitTimer: 0,
+        color: sc.accentColor
+    }));
+    G.walls = sc.walls.map(w => ({
+        x1: w.x1 * W,
+        y1: w.y1 * H,
+        x2: w.x2 * W,
+        y2: w.y2 * H
+    }));
+}
+
+// ========== 初始化游戏 ==========
+function initGame() {
+    G.score = 0;
+    G.balls = MAX_BALLS;
+    G.combo = 0;
+    G.comboTimer = 0;
+    G.particles = [];
+    G.shakeTimer = 0;
+    G.launchPower = 0;
+    G.launching = false;
+    initScene(0);
+    spawnBall();
+}
+
+function spawnBall() {
+    G.ball = {
+        x: W * 0.92,
+        y: H * 0.8,
+        vx: 0,
+        vy: 0,
+        r: BALL_RADIUS * scale,
+        launched: false
+    };
+}
+
+// ========== 物理更新 ==========
+function updateBall() {
+    if (!G.ball || !G.ball.launched) return;
+
+    const b = G.ball;
+
+    // 重力
+    b.vy += GRAVITY;
+
+    // 摩擦
+    b.vx *= FRICTION;
+    b.vy *= FRICTION;
+
+    // 移动
+    b.x += b.vx;
+    b.y += b.vy;
+
+    // 墙壁碰撞
+    if (b.x - b.r < 0) {
+        b.x = b.r;
+        b.vx = Math.abs(b.vx) * BOUNCE_WALL;
+    }
+    if (b.x + b.r > W) {
+        b.x = W - b.r;
+        b.vx = -Math.abs(b.vx) * BOUNCE_WALL;
+    }
+    if (b.y - b.r < 0) {
+        b.y = b.r;
+        b.vy = Math.abs(b.vy) * BOUNCE_WALL;
+    }
+
+    // 挡板碰撞（底部左右两侧）
+    const flipperY = H * 0.85;
+    const flipperGap = W * 0.15;
+
+    // 左挡板
+    if (checkFlipperCollision(b, W * 0.3, flipperY, true)) {
+        return;
+    }
+    // 右挡板
+    if (checkFlipperCollision(b, W * 0.7, flipperY, false)) {
+        return;
+    }
+
+    // 弹射器区域碰撞
+    const launcherX = W * 0.92;
+    const launcherY = H * 0.75;
+    const launcherW = W * 0.06;
+    const launcherH = H * 0.2;
+    if (b.x + b.r > launcherX && b.x - b.r < launcherX + launcherW &&
+        b.y + b.r > launcherY && b.y - b.r < launcherY + launcherH) {
+        b.x = launcherX - b.r;
+        b.vx = -Math.abs(b.vx) * BOUNCE_WALL;
+    }
+
+    // 保险杠碰撞
+    for (let bumper of G.bumpers) {
+        const dx = b.x - bumper.x;
+        const dy = b.y - bumper.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const minDist = b.r + bumper.r;
+
+        if (dist < minDist) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const relVel = b.vx * nx + b.vy * ny;
+
+            if (relVel < 0) {
+                b.vx -= (1 + BOUNCE_BUMPER) * relVel * nx;
+                b.vy -= (1 + BOUNCE_BUMPER) * relVel * ny;
+            }
+
+            b.x = bumper.x + nx * minDist;
+            b.y = bumper.y + ny * minDist;
+
+            // 得分
+            const sc = SCENES[G.scene];
+            addScore(bumper.score * sc.multiplier);
+            bumper.hitTimer = 15;
+            G.combo++;
+            G.comboTimer = 120;
+
+            // 粒子
+            spawnParticles(bumper.x, bumper.y, bumper.color, 12, 5);
+            G.shakeTimer = 5;
+        }
+    }
+
+    // 目标碰撞
+    for (let target of G.targets) {
+        if (target.hit) continue;
+        if (b.x + b.r > target.x && b.x - b.r < target.x + target.w &&
+            b.y + b.r > target.y && b.y - b.r < target.y + target.h) {
+            target.hit = true;
+            target.hitTimer = 30;
+            const sc = SCENES[G.scene];
+            addScore(target.score * sc.multiplier);
+            spawnParticles(target.x + target.w / 2, target.y + target.h / 2, target.color, 20, 6);
+            G.shakeTimer = 8;
+
+            // 反弹
+            if (Math.abs(b.x - (target.x + target.w / 2)) > Math.abs(b.y - (target.y + target.h / 2))) {
+                b.vx = -b.vx;
+            } else {
+                b.vy = -b.vy;
+            }
+        }
+    }
+
+    // 墙壁碰撞
+    for (let wall of G.walls) {
+        if (lineCircleCollision(wall.x1, wall.y1, wall.x2, wall.y2, b.x, b.y, b.r)) {
+            const dx = wall.x2 - wall.x1;
+            const dy = wall.y2 - wall.y1;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            const nx = -dy / len;
+            const ny = dx / len;
+            const dot = b.vx * nx + b.vy * ny;
+            b.vx -= 2 * dot * nx;
+            b.vy -= 2 * dot * ny;
+            b.vx *= 0.8;
+            b.vy *= 0.8;
+        }
+    }
+
+    // 出界
+    if (b.y > H + 50) {
+        G.balls--;
+        if (G.balls <= 0) {
+            gameOver();
+        } else {
+            spawnBall();
+        }
+    }
+}
+
+function checkFlipperCollision(b, fx, fy, isLeft) {
+    const angle = isLeft ? G.flippers.left.angle : G.flippers.right.angle;
+    const len = FLIPPER_LENGTH * scale;
+    const endX = fx + Math.cos(angle) * (isLeft ? len : -len);
+    const endY = fy + Math.sin(angle) * len;
+
+    if (lineCircleCollision(fx, fy, endX, endY, b.x, b.y, b.r + FLIPPER_WIDTH * scale / 2)) {
+        const dx = endX - fx;
+        const dy = endY - fy;
+        const len2 = Math.sqrt(dx * dx + dy * dy);
+        const nx = -dy / len2;
+        const ny = dx / len2;
+        const dot = b.vx * nx + b.vy * ny;
+
+        if (dot < 0) {
+            const power = isLeft ?
+                (input.left || input.touchLeft ? BOUNCE_FLIPPER * 1.5 : BOUNCE_FLIPPER) :
+                (input.right || input.touchRight ? BOUNCE_FLIPPER * 1.5 : BOUNCE_FLIPPER);
+
+            b.vx -= (1 + power) * dot * nx;
+            b.vy -= (1 + power) * dot * ny;
+
+            // 给予向上推力
+            if (isLeft) {
+                b.vy -= 3 * scale;
+                b.vx += 2 * scale;
+            } else {
+                b.vy -= 3 * scale;
+                b.vx -= 2 * scale;
+            }
+
+            spawnParticles(b.x, b.y, '#ffffff', 8, 3);
+            return true;
+        }
+    }
+    return false;
+}
+
+function lineCircleCollision(x1, y1, x2, y2, cx, cy, r) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const fx = x1 - cx;
+    const fy = y1 - cy;
+    const a = dx * dx + dy * dy;
+    const b = 2 * (fx * dx + fy * dy);
+    const c = fx * fx + fy * fy - r * r;
+    let disc = b * b - 4 * a * c;
+    if (disc < 0) return false;
+    disc = Math.sqrt(disc);
+    const t1 = (-b - disc) / (2 * a);
+    const t2 = (-b + disc) / (2 * a);
+    return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1) || (t1 < 0 && t2 > 1);
+}
+
+// ========== 挡板更新 ==========
+function updateFlippers() {
+    const speed = 0.15;
+    const maxAngle = 0.5;
+    const restAngle = 0.4;
+
+    // 左挡板
+    if (input.left || input.touchLeft) {
+        G.flippers.left.angle = Math.max(-maxAngle, G.flippers.left.angle - speed);
+    } else {
+        G.flippers.left.angle = Math.min(restAngle, G.flippers.left.angle + speed * 0.5);
+    }
+
+    // 右挡板
+    if (input.right || input.touchRight) {
+        G.flippers.right.angle = Math.min(maxAngle, G.flippers.right.angle + speed);
+    } else {
+        G.flippers.right.angle = Math.max(-restAngle, G.flippers.right.angle - speed * 0.5);
+    }
+}
+
+// ========== 弹射器 ==========
+function updateLauncher() {
+    if (G.ball && !G.ball.launched) {
+        if (input.launch || input.touchLaunch) {
+            G.launching = true;
+            G.launchPower = Math.min(1, G.launchPower + 0.02);
+        } else if (G.launching) {
+            // 发射
+            G.ball.launched = true;
+            G.ball.vy = -G.launchPower * 15 * scale;
+            G.ball.vx = -2 * scale;
+            G.launching = false;
+            G.launchPower = 0;
+            spawnParticles(G.ball.x, G.ball.y, '#ffdd57', 15, 4);
+        }
+    }
+}
+
+// ========== 得分 ==========
+function addScore(points) {
+    const comboBonus = Math.floor(points * (G.combo * 0.1));
+    G.score += points + comboBonus;
+}
+
+// ========== 游戏结束 ==========
+function gameOver() {
+    G.state = 'gameOver';
+    if (G.score > G.highScore) {
+        G.highScore = G.score;
+        localStorage.setItem('pinball_high', G.highScore.toString());
+    }
+}
+
+// ========== 绘制函数 ==========
+function drawBackground() {
+    const sc = SCENES[G.scene];
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, sc.bgColors[0]);
+    grad.addColorStop(0.5, sc.bgColors[1]);
+    grad.addColorStop(1, sc.bgColors[2]);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // 星星背景
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    for (let i = 0; i < 30; i++) {
+        const x = (Math.sin(i * 137.5 + G.animFrame * 0.001) * 0.5 + 0.5) * W;
+        const y = (Math.cos(i * 97.3 + G.animFrame * 0.002) * 0.5 + 0.5) * H;
+        const s = 1 + Math.sin(G.animFrame * 0.02 + i) * 0.5;
+        ctx.beginPath();
+        ctx.arc(x, y, s, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function drawBumpers() {
+    for (let bumper of G.bumpers) {
+        const glow = bumper.hitTimer > 0 ? 1 : 0;
+        const r = bumper.r * (1 + glow * 0.2);
+
+        // 发光效果
+        if (glow) {
+            ctx.shadowColor = bumper.color;
+            ctx.shadowBlur = 20;
+        }
+
+        // 外圈
+        ctx.fillStyle = bumper.color;
+        ctx.beginPath();
+        ctx.arc(bumper.x, bumper.y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 内圈
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.arc(bumper.x, bumper.y, r * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 分数文字
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${12 * scale}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText(bumper.score, bumper.x, bumper.y + 4 * scale);
+
+        ctx.shadowBlur = 0;
+
+        if (bumper.hitTimer > 0) bumper.hitTimer--;
+    }
+}
+
+function drawTargets() {
+    for (let target of G.targets) {
+        if (target.hit && target.hitTimer <= 0) continue;
+
+        const alpha = target.hit ? target.hitTimer / 30 : 1;
+        ctx.globalAlpha = alpha;
+
+        ctx.fillStyle = target.color;
+        ctx.fillRect(target.x, target.y, target.w, target.h);
+
+        // 发光边框
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(target.x, target.y, target.w, target.h);
+
+        ctx.globalAlpha = 1;
+
+        if (target.hitTimer > 0) target.hitTimer--;
+    }
+}
+
+function drawWalls() {
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 4 * scale;
+    ctx.lineCap = 'round';
+
+    for (let wall of G.walls) {
+        ctx.beginPath();
+        ctx.moveTo(wall.x1, wall.y1);
+        ctx.lineTo(wall.x2, wall.y2);
+        ctx.stroke();
+    }
+}
+
+function drawFlippers() {
+    const flipperY = H * 0.85;
+    const len = FLIPPER_LENGTH * scale;
+    const w = FLIPPER_WIDTH * scale;
+
+    // 左挡板
+    ctx.save();
+    ctx.translate(W * 0.3, flipperY);
+    ctx.rotate(G.flippers.left.angle);
+    ctx.fillStyle = '#4ecdc4';
+    ctx.shadowColor = '#4ecdc4';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(0, -w / 2);
+    ctx.lineTo(len, -w / 3);
+    ctx.lineTo(len, w / 3);
+    ctx.lineTo(0, w / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // 右挡板
+    ctx.save();
+    ctx.translate(W * 0.7, flipperY);
+    ctx.rotate(G.flippers.right.angle);
+    ctx.fillStyle = '#4ecdc4';
+    ctx.shadowColor = '#4ecdc4';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(0, -w / 2);
+    ctx.lineTo(-len, -w / 3);
+    ctx.lineTo(-len, w / 3);
+    ctx.lineTo(0, w / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.shadowBlur = 0;
+}
+
+function drawBall() {
+    if (!G.ball) return;
+
+    const b = G.ball;
+
+    // 球体发光
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = 15;
+
+    // 球体
+    const grad = ctx.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.3, 0, b.x, b.y, b.r);
+    grad.addColorStop(0, '#fff');
+    grad.addColorStop(0.5, '#ddd');
+    grad.addColorStop(1, '#aaa');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+}
+
+function drawLauncher() {
+    const lx = W * 0.92;
+    const ly = H * 0.75;
+    const lw = W * 0.06;
+    const lh = H * 0.2;
+
+    // 弹射器槽
+    ctx.fillStyle = '#333';
+    ctx.fillRect(lx, ly, lw, lh);
+
+    // 弹射器边框
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(lx, ly, lw, lh);
+
+    // 弹簧
+    if (G.launching) {
+        const springH = lh * (1 - G.launchPower);
+        ctx.fillStyle = '#ff6b6b';
+        ctx.fillRect(lx + 2, ly + springH, lw - 4, lh - springH);
+
+        // 能量指示
+        ctx.fillStyle = '#ffdd57';
+        ctx.font = `bold ${14 * scale}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.floor(G.launchPower * 100) + '%', lx + lw / 2, ly - 10);
+    }
+
+    // 发射提示
+    if (G.ball && !G.ball.launched) {
+        ctx.fillStyle = '#ffdd57';
+        ctx.font = `${12 * scale}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText('按住发射', lx + lw / 2, ly + lh + 20 * scale);
+    }
+}
+
+function drawUI() {
+    // 分数
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${24 * scale}px Arial`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`分数: ${G.score}`, 20, 35 * scale);
+
+    // 最高分
+    ctx.font = `${14 * scale}px Arial`;
+    ctx.fillText(`最高: ${G.highScore}`, 20, 55 * scale);
+
+    // 连击
+    if (G.combo > 1 && G.comboTimer > 0) {
+        ctx.fillStyle = '#ffdd57';
+        ctx.font = `bold ${18 * scale}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${G.combo}连击!`, W / 2, 40 * scale);
+    }
+
+    // 剩余球数
+    ctx.fillStyle = '#fff';
+    ctx.font = `${14 * scale}px Arial`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`球: ${G.balls}`, W - 20, 35 * scale);
+
+    // 场景名称
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = `${12 * scale}px Arial`;
+    ctx.fillText(SCENES[G.scene].name, W - 20, 55 * scale);
+}
+
+function drawParticles() {
+    G.particles = G.particles.filter(p => {
+        p.update();
+        p.draw();
+        return p.life > 0;
+    });
+}
+
+// ========== 菜单界面 ==========
+function drawMenu() {
+    // 渐变背景
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0a0a2e');
+    grad.addColorStop(0.5, '#1a1a4e');
+    grad.addColorStop(1, '#0a0a2e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // 动态粒子背景
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    for (let i = 0; i < 50; i++) {
+        const x = (Math.sin(i * 73.7 + G.animFrame * 0.003) * 0.5 + 0.5) * W;
+        const y = (Math.cos(i * 47.3 + G.animFrame * 0.004) * 0.5 + 0.5) * H;
+        const s = 1 + Math.sin(G.animFrame * 0.03 + i * 0.5) * 0.8;
+        ctx.beginPath();
+        ctx.arc(x, y, s, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 标题
+    ctx.fillStyle = '#ffdd57';
+    ctx.font = `bold ${48 * scale}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#ffdd57';
+    ctx.shadowBlur = 20;
+    ctx.fillText('弹珠台', W / 2, H * 0.25);
+    ctx.shadowBlur = 0;
+
+    // 副标题
+    ctx.fillStyle = '#4ecdc4';
+    ctx.font = `${18 * scale}px Arial`;
+    ctx.fillText('物理弹射得分', W / 2, H * 0.32);
+
+    // 场景选择
+    ctx.fillStyle = '#fff';
+    ctx.font = `${16 * scale}px Arial`;
+    ctx.fillText('选择场景:', W / 2, H * 0.42);
+
+    for (let i = 0; i < SCENES.length; i++) {
+        const y = H * 0.48 + i * 50 * scale;
+        const hover = Math.sin(G.animFrame * 0.05 + i) * 3;
+
+        // 场景按钮
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.strokeStyle = SCENES[i].bumperColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(W * 0.2, y - 15 * scale, W * 0.6, 40 * scale, 10);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = `${14 * scale}px Arial`;
+        ctx.fillText(SCENES[i].name + ` (x${SCENES[i].multiplier})`, W / 2, y + 8 * scale + hover);
+    }
+
+    // 开始按钮
+    const btnY = H * 0.75;
+    ctx.fillStyle = '#ff6b6b';
+    ctx.shadowColor = '#ff6b6b';
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.roundRect(W * 0.3, btnY - 25 * scale, W * 0.4, 50 * scale, 25 * scale);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${20 * scale}px Arial`;
+    ctx.fillText('开始游戏', W / 2, btnY + 7 * scale);
+
+    // 操作说明
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = `${12 * scale}px Arial`;
+    ctx.fillText('键盘: A/D或←/→控制挡板 | 空格发射', W / 2, H * 0.85);
+    ctx.fillText('触屏: 左右半屏控制挡板 | 底部发射', W / 2, H * 0.88);
+
+    // 最高分
+    if (G.highScore > 0) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = `${14 * scale}px Arial`;
+        ctx.fillText(`最高分: ${G.highScore}`, W / 2, H * 0.93);
+    }
+}
+
+// ========== 游戏结束界面 ==========
+function drawGameOver() {
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, W, H);
+
+    // 游戏结束文字
+    ctx.fillStyle = '#ff6b6b';
+    ctx.font = `bold ${36 * scale}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', W / 2, H * 0.3);
+
+    // 分数
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${24 * scale}px Arial`;
+    ctx.fillText(`最终分数: ${G.score}`, W / 2, H * 0.4);
+
+    // 最高分
+    if (G.score >= G.highScore) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = `bold ${18 * scale}px Arial`;
+        ctx.fillText('新纪录!', W / 2, H * 0.47);
+    } else {
+        ctx.fillStyle = '#aaa';
+        ctx.font = `${16 * scale}px Arial`;
+        ctx.fillText(`最高分: ${G.highScore}`, W / 2, H * 0.47);
+    }
+
+    // 重新开始按钮
+    const btnY = H * 0.6;
+    ctx.fillStyle = '#4ecdc4';
+    ctx.shadowColor = '#4ecdc4';
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.roundRect(W * 0.3, btnY - 20 * scale, W * 0.4, 40 * scale, 20 * scale);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${18 * scale}px Arial`;
+    ctx.fillText('再来一局', W / 2, btnY + 6 * scale);
+
+    // 返回菜单按钮
+    const btn2Y = H * 0.7;
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(W * 0.3, btn2Y - 20 * scale, W * 0.4, 40 * scale, 20 * scale);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `${16 * scale}px Arial`;
+    ctx.fillText('返回菜单', W / 2, btn2Y + 5 * scale);
+}
+
+// ========== 暂停界面 ==========
+function drawPaused() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${32 * scale}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('暂停', W / 2, H * 0.4);
+
+    ctx.font = `${16 * scale}px Arial`;
+    ctx.fillText('按 P 或点击继续', W / 2, H * 0.5);
+}
+
+// ========== 主游戏循环 ==========
+function gameLoop() {
+    G.animFrame++;
+
+    // 抖动效果
+    ctx.save();
+    if (G.shakeTimer > 0) {
+        G.shakeX = (Math.random() - 0.5) * 5;
+        G.shakeY = (Math.random() - 0.5) * 5;
+        ctx.translate(G.shakeX, G.shakeY);
+        G.shakeTimer--;
+    }
+
+    // 清屏
+    ctx.clearRect(-10, -10, W + 20, H + 20);
+
+    if (G.state === 'menu') {
+        drawMenu();
+        // 检测场景选择点击
+    } else if (G.state === 'playing') {
+        // 更新
+        updateFlippers();
+        updateLauncher();
+        updateBall();
+
+        // 连击计时
+        if (G.comboTimer > 0) {
+            G.comboTimer--;
+            if (G.comboTimer <= 0) {
+                G.combo = 0;
+            }
+        }
+
+        // 绘制
+        drawBackground();
+        drawWalls();
+        drawTargets();
+        drawBumpers();
+        drawFlippers();
+        drawLauncher();
+        drawBall();
+        drawParticles();
+        drawUI();
+    } else if (G.state === 'gameOver') {
+        drawBackground();
+        drawBumpers();
+        drawTargets();
+        drawParticles();
+        drawGameOver();
+    } else if (G.state === 'paused') {
+        drawBackground();
+        drawWalls();
+        drawTargets();
+        drawBumpers();
+        drawFlippers();
+        drawLauncher();
+        drawBall();
+        drawParticles();
+        drawUI();
+        drawPaused();
+    }
+
+    ctx.restore();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ========== 输入处理 ==========
+// 键盘
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') input.left = true;
+    if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') input.right = true;
+    if (e.key === ' ' || e.key === 'ArrowUp') input.launch = true;
+    if (e.key === 'p' || e.key === 'P') {
+        if (G.state === 'playing') G.state = 'paused';
+        else if (G.state === 'paused') G.state = 'playing';
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') input.left = false;
+    if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') input.right = false;
+    if (e.key === ' ' || e.key === 'ArrowUp') input.launch = false;
+});
+
+// 鼠标/触摸
+function handlePointerDown(x, y) {
+    if (G.state === 'menu') {
+        // 检测场景选择
+        for (let i = 0; i < SCENES.length; i++) {
+            const btnY = H * 0.48 + i * 50 * scale;
+            if (x > W * 0.2 && x < W * 0.8 && y > btnY - 15 * scale && y < btnY + 25 * scale) {
+                G.scene = i;
+                return;
+            }
+        }
+        // 检测开始按钮
+        const btnY = H * 0.75;
+        if (x > W * 0.3 && x < W * 0.7 && y > btnY - 25 * scale && y < btnY + 25 * scale) {
+            G.state = 'playing';
+            initGame();
+            return;
+        }
+    } else if (G.state === 'gameOver') {
+        // 再来一局
+        const btnY = H * 0.6;
+        if (x > W * 0.3 && x < W * 0.7 && y > btnY - 20 * scale && y < btnY + 20 * scale) {
+            G.state = 'playing';
+            initGame();
+            return;
+        }
+        // 返回菜单
+        const btn2Y = H * 0.7;
+        if (x > W * 0.3 && x < W * 0.7 && y > btn2Y - 20 * scale && y < btn2Y + 20 * scale) {
+            G.state = 'menu';
+            return;
+        }
+    } else if (G.state === 'paused') {
+        G.state = 'playing';
+        return;
+    } else if (G.state === 'playing') {
+        // 挡板控制
+        if (x < W * 0.4) input.touchLeft = true;
+        if (x > W * 0.6) input.touchRight = true;
+
+        // 弹射器
+        const lx = W * 0.88;
+        const ly = H * 0.7;
+        if (x > lx && y > ly) input.touchLaunch = true;
+    }
+}
+
+function handlePointerUp() {
+    input.touchLeft = false;
+    input.touchRight = false;
+    input.touchLaunch = false;
+}
+
+canvas.addEventListener('mousedown', (e) => handlePointerDown(e.clientX, e.clientY));
+canvas.addEventListener('mouseup', handlePointerUp);
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    for (let t of e.touches) {
+        handlePointerDown(t.clientX, t.clientY);
+    }
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 0) handlePointerUp();
+}, { passive: false });
+
+// ========== roundRect polyfill ==========
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        const [tl, tr, br, bl] = r;
+        this.moveTo(x + tl, y);
+        this.lineTo(x + w - tr, y);
+        this.quadraticCurveTo(x + w, y, x + w, y + tr);
+        this.lineTo(x + w, y + h - br);
+        this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+        this.lineTo(x + bl, y + h);
+        this.quadraticCurveTo(x, y + h, x, y + h - bl);
+        this.lineTo(x, y + tl);
+        this.quadraticCurveTo(x, y, x + tl, y);
+        this.closePath();
+        return this;
+    };
+}
+
+// ========== 启动 ==========
+gameLoop();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

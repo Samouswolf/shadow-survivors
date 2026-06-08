@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>美食街</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a0a2e}
+canvas{display:block;touch-action:none}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(function(){
+"use strict";
+
+/* ===== Canvas Setup ===== */
+var cv=document.getElementById("cv"),cx=cv.getContext("2d");
+var W,H,SCALE=1;
+function resize(){
+    W=cv.width=window.innerWidth;
+    H=cv.height=window.innerHeight;
+    SCALE=Math.min(W/800,H/600);
+}
+resize();
+window.addEventListener("resize",resize);
+
+/* ===== Constants ===== */
+var FPS=60;
+var FOOD_TYPES=[
+    {name:"煎饼果子",icon:"🥞",basePrice:8,cookTime:3,baseCost:3,color:"#f5a623",desc:"经典街头小吃"},
+    {name:"臭豆腐",icon:"🧈",basePrice:12,cookTime:4,baseCost:5,color:"#8b6914",desc:"闻着臭吃着香"},
+    {name:"糖葫芦",icon:"🍡",basePrice:10,cookTime:2,baseCost:4,color:"#e74c3c",desc:"酸甜可口"},
+    {name:"烤冷面",icon:"🍜",basePrice:15,cookTime:5,baseCost:6,color:"#e67e22",desc:"东北特色美食"},
+    {name:"奶茶",icon:"🧋",basePrice:18,cookTime:3,baseCost:7,color:"#d4a574",desc:"年轻人最爱"},
+    {name:"炸鸡排",icon:"🍗",basePrice:20,cookTime:6,baseCost:8,color:"#f39c12",desc:"酥脆多汁"}
+];
+
+/* ===== Game State ===== */
+var G={
+    state:"menu", // menu, playing, paused, gameover
+    money:100,
+    day:1,
+    maxDay:30,
+    dayTime:0,
+    dayDuration:60, // seconds per day
+    customersServed:0,
+    totalEarnings:0,
+    score:0,
+    bestScore:parseInt(localStorage.getItem("foodStreet_best")||"0"),
+    // Stalls
+    stalls:[],
+    maxStalls:3,
+    stallCost:200,
+    // Customers
+    customers:[],
+    customerSpawnTimer:0,
+    customerSpawnRate:3, // seconds
+    customerQueue:[],
+    maxQueue:5,
+    // Upgrades
+    upgradeLevels:{speed:1,quality:1,capacity:1},
+    upgradeCosts:{speed:50,quality:80,capacity:60},
+    // Particles
+    particles:[],
+    // Floating texts
+    floatingTexts:[],
+    // Cooking
+    cookingSlots:[],
+    // Stats
+    dayCustomers:0,
+    dayEarnings:0,
+    dayTips:0,
+    // UI
+    selectedStall:-1,
+    notification:"",
+    notifyTimer:0,
+    // Tutorial
+    tutorialDone:false,
+    tutorialStep:0,
+    // Combo
+    combo:0,
+    comboTimer:0,
+    maxCombo:0
+};
+
+/* ===== Stall Class ===== */
+function Stall(x,y,typeIdx){
+    this.x=x;
+    this.y=y;
+    this.typeIdx=typeIdx;
+    this.level=1;
+    this.cooking=false;
+    this.cookProgress=0;
+    this.cookTime=FOOD_TYPES[typeIdx].cookTime;
+    this.queuedCustomers=[];
+    this.earnings=0;
+    this.served=0;
+    this.maxQueue=3;
+    this.prestige=0;
+}
+
+/* ===== Customer Class ===== */
+function Customer(){
+    this.x=-50;
+    this.y=H*0.65+Math.random()*40;
+    this.targetX=0;
+    this.targetY=0;
+    this.speed=1.5+Math.random()*1;
+    this.patience=100;
+    this.maxPatience=100;
+    this.patienceDecay=0.3+Math.random()*0.2;
+    this.wantedFood=Math.floor(Math.random()*FOOD_TYPES.length);
+    this.state="walking"; // walking, waiting, eating, leaving
+    this.served=false;
+    this.tipMultiplier=1;
+    this.size=20+Math.random()*8;
+    this.happiness=50;
+    this.waitTime=0;
+    // Appearance
+    this.bodyColor=["#ff6b6b","#4ecdc4","#45b7d1","#96ceb4","#ffeaa7","#dfe6e9","#fd79a8","#6c5ce7"][Math.floor(Math.random()*8)];
+    this.hatType=Math.floor(Math.random()*4);
+}
+
+/* ===== Initialize Game ===== */
+function initGame(){
+    G.state="playing";
+    G.money=100;
+    G.day=1;
+    G.dayTime=0;
+    G.customersServed=0;
+    G.totalEarnings=0;
+    G.score=0;
+    G.stalls=[];
+    G.customers=[];
+    G.customerQueue=[];
+    G.particles=[];
+    G.floatingTexts=[];
+    G.cookingSlots=[];
+    G.upgradeLevels={speed:1,quality:1,capacity:1};
+    G.dayCustomers=0;
+    G.dayEarnings=0;
+    G.dayTips=0;
+    G.selectedStall=-1;
+    G.notification="";
+    G.notifyTimer=0;
+    G.combo=0;
+    G.comboTimer=0;
+    G.maxCombo=0;
+    G.customerSpawnRate=3;
+    // Start with 2 stalls
+    G.stalls.push(new Stall(W*0.2,H*0.45,0));
+    G.stalls.push(new Stall(W*0.5,H*0.45,1));
+}
+
+/* ===== Particles ===== */
+function addParticle(x,y,color,count){
+    for(var i=0;i<(count||5);i++){
+        G.particles.push({
+            x:x,y:y,
+            vx:(Math.random()-0.5)*4,
+            vy:-Math.random()*4-1,
+            life:1,
+            decay:0.02+Math.random()*0.02,
+            size:3+Math.random()*4,
+            color:color
+        });
+    }
+}
+
+function addFloatingText(x,y,text,color){
+    G.floatingTexts.push({
+        x:x,y:y,text:text,color:color,
+        life:1,vy:-1.5
+    });
+}
+
+/* ===== Customer Spawning ===== */
+function spawnCustomer(){
+    if(G.customerQueue.length>=G.maxQueue+G.upgradeLevels.capacity)return;
+    var c=new Customer();
+    var queueX=W*0.15+G.customerQueue.length*60;
+    c.targetX=queueX;
+    c.targetY=H*0.72;
+    G.customerQueue.push(c);
+}
+
+/* ===== Serve Customer ===== */
+function serveCustomer(stallIdx){
+    var stall=G.stalls[stallIdx];
+    if(!stall.cooking||stall.cookProgress<stall.cookTime)return;
+    if(stall.queuedCustomers.length===0)return;
+    var customer=stall.queuedCustomers.shift();
+    var food=FOOD_TYPES[stall.typeIdx];
+    var price=food.basePrice*stall.level;
+    var qualityBonus=G.upgradeLevels.quality*0.2;
+    var tip=Math.floor(price*0.2*(1+qualityBonus)*customer.tipMultiplier);
+    var total=price+tip;
+    G.money+=total;
+    G.totalEarnings+=total;
+    G.dayEarnings+=total;
+    G.dayTips+=tip;
+    G.customersServed++;
+    G.dayCustomers++;
+    G.combo++;
+    G.comboTimer=3;
+    if(G.combo>G.maxCombo)G.maxCombo=G.combo;
+    var comboBonus=G.combo>=3?G.combo*2:0;
+    if(comboBonus>0){
+        G.money+=comboBonus;
+        addFloatingText(stall.x,stall.y-30,"连击x"+G.combo+"! +"+comboBonus,"#ffd700");
+    }
+    G.score+=total+comboBonus;
+    addFloatingText(stall.x,stall.y-10,"+"+total,"#4ecdc4");
+    addParticle(stall.x,stall.y,food.color,8);
+    customer.state="eating";
+    customer.served=true;
+    customer.happiness=100;
+    // Update best score
+    if(G.score>G.bestScore){
+        G.bestScore=G.score;
+        localStorage.setItem("foodStreet_best",G.bestScore.toString());
+    }
+}
+
+/* ===== Day Management ===== */
+function endDay(){
+    G.day++;
+    G.dayTime=0;
+    G.dayCustomers=0;
+    G.dayEarnings=0;
+    G.dayTips=0;
+    G.combo=0;
+    // Increase difficulty
+    G.customerSpawnRate=Math.max(1,3-(G.day-1)*0.08);
+    G.maxQueue=Math.min(8,5+Math.floor(G.day/5));
+    // Check game over
+    if(G.day>G.maxDay){
+        G.state="gameover";
+        G.score+=G.money;
+        if(G.score>G.bestScore){
+            G.bestScore=G.score;
+            localStorage.setItem("foodStreet_best",G.bestScore.toString());
+        }
+    }
+    showNotification("第"+(G.day-1)+"天结束！今日收入："+G.dayEarnings+"金币");
+}
+
+/* ===== Notifications ===== */
+function showNotification(text){
+    G.notification=text;
+    G.notifyTimer=3;
+}
+
+/* ===== Upgrade Functions ===== */
+function buyUpgrade(type){
+    var cost=G.upgradeCosts[type]*(G.upgradeLevels[type]);
+    if(G.money>=cost&&G.upgradeLevels[type]<5){
+        G.money-=cost;
+        G.upgradeLevels[type]++;
+        addFloatingText(W/2,H/2,type+"升级到Lv"+G.upgradeLevels[type]+"!","#4ecdc4");
+        addParticle(W/2,H/2,"#4ecdc4",10);
+    }
+}
+
+function buyStall(){
+    if(G.money>=G.stallCost&&G.stalls.length<G.maxStalls){
+        G.money-=G.stallCost;
+        var positions=[
+            {x:W*0.8,y:H*0.45},
+            {x:W*0.35,y:H*0.5},
+            {x:W*0.65,y:H*0.5}
+        ];
+        var pos=positions[G.stalls.length]||{x:W*0.5,y:H*0.5};
+        var typeIdx=G.stalls.length%FOOD_TYPES.length;
+        G.stalls.push(new Stall(pos.x,pos.y,typeIdx));
+        G.stallCost=Math.floor(G.stallCost*1.5);
+        addFloatingText(pos.x,pos.y-20,"新摊位开张！","#ffd700");
+        addParticle(pos.x,pos.y,"#ffd700",12);
+    }
+}
+
+/* ===== Input Handling ===== */
+var mouseX=0,mouseY=0,touchActive=false;
+
+function handleClick(x,y){
+    if(G.state==="menu"){
+        var btnX=W/2,btnY=H*0.65;
+        if(Math.abs(x-btnX)<100*SCALE&&Math.abs(y-btnY)<30*SCALE){
+            initGame();
+        }
+        return;
+    }
+    if(G.state==="gameover"){
+        var btnX=W/2,btnY=H*0.7;
+        if(Math.abs(x-btnX)<100*SCALE&&Math.abs(y-btnY)<30*SCALE){
+            G.state="menu";
+        }
+        return;
+    }
+    if(G.state!=="playing")return;
+    // Check stall clicks
+    for(var i=0;i<G.stalls.length;i++){
+        var s=G.stalls[i];
+        var dist=Math.hypot(x-s.x,y-s.y);
+        if(dist<40*SCALE){
+            G.selectedStall=i;
+            serveCustomer(i);
+            return;
+        }
+    }
+    // Check upgrade buttons
+    var upgradeY=H*0.15;
+    var upgradeX=W*0.82;
+    if(x>upgradeX-50*SCALE&&x<upgradeX+50*SCALE){
+        if(y>upgradeY-10*SCALE&&y<upgradeY+20*SCALE){
+            buyUpgrade("speed");
+            return;
+        }
+        if(y>upgradeY+30*SCALE&&y<upgradeY+60*SCALE){
+            buyUpgrade("quality");
+            return;
+        }
+        if(y>upgradeY+70*SCALE&&y<upgradeY+100*SCALE){
+            buyUpgrade("capacity");
+            return;
+        }
+    }
+    // Check buy stall button
+    var stallBtnY=H*0.9;
+    var stallBtnX=W*0.82;
+    if(x>stallBtnX-60*SCALE&&x<stallBtnX+60*SCALE&&y>stallBtnY-15*SCALE&&y<stallBtnY+15*SCALE){
+        buyStall();
+        return;
+    }
+    // Check pause button
+    if(x>W-50*SCALE&&y<40*SCALE){
+        G.state="paused";
+        return;
+    }
+}
+
+cv.addEventListener("mousedown",function(e){
+    handleClick(e.clientX,e.clientY);
+});
+cv.addEventListener("touchstart",function(e){
+    e.preventDefault();
+    var t=e.touches[0];
+    handleClick(t.clientX,t.clientY);
+    touchActive=true;
+});
+
+/* ===== Keyboard ===== */
+document.addEventListener("keydown",function(e){
+    if(G.state==="menu"&&(e.key==="Enter"||e.key===" ")){
+        initGame();
+        return;
+    }
+    if(G.state==="gameover"&&(e.key==="Enter"||e.key===" ")){
+        G.state="menu";
+        return;
+    }
+    if(G.state==="paused"&&e.key==="Escape"){
+        G.state="playing";
+        return;
+    }
+    if(G.state==="playing"){
+        if(e.key==="Escape"){
+            G.state="paused";
+            return;
+        }
+        // Number keys to select/serve stalls
+        if(e.key>="1"&&e.key<="3"){
+            var idx=parseInt(e.key)-1;
+            if(idx<G.stalls.length){
+                G.selectedStall=idx;
+                serveCustomer(idx);
+            }
+        }
+        // U for upgrade menu
+        if(e.key==="u"||e.key==="U"){
+            // Toggle upgrade display
+        }
+    }
+    if(G.state==="paused"){
+        if(e.key==="Escape"||e.key===" "){
+            G.state="playing";
+        }
+    }
+});
+
+/* ===== Update ===== */
+function update(dt){
+    if(G.state!=="playing")return;
+    // Day timer
+    G.dayTime+=dt;
+    if(G.dayTime>=G.dayDuration){
+        endDay();
+    }
+    // Customer spawning
+    G.customerSpawnTimer+=dt;
+    if(G.customerSpawnTimer>=G.customerSpawnRate){
+        G.customerSpawnTimer=0;
+        spawnCustomer();
+    }
+    // Combo timer
+    if(G.comboTimer>0){
+        G.comboTimer-=dt;
+        if(G.comboTimer<=0)G.combo=0;
+    }
+    // Notification timer
+    if(G.notifyTimer>0){
+        G.notifyTimer-=dt;
+        if(G.notifyTimer<=0)G.notification="";
+    }
+    // Update customers in queue
+    for(var i=G.customerQueue.length-1;i>=0;i--){
+        var c=G.customerQueue[i];
+        // Move to queue position
+        var targetX=W*0.15+i*60*SCALE;
+        var targetY=H*0.72;
+        var dx=targetX-c.x,dy=targetY-c.y;
+        var dist=Math.hypot(dx,dy);
+        if(dist>2){
+            c.x+=dx/dist*c.speed*60*dt;
+            c.y+=dy/dist*c.speed*60*dt;
+        }
+        c.patience-=c.patienceDecay*dt*10;
+        if(c.patience<=0){
+            // Customer leaves angry
+            G.customerQueue.splice(i,1);
+            addFloatingText(c.x,c.y-20,"生气离开！","#e74c3c");
+            G.combo=0;
+            // Rearrange queue
+            for(var j=i;j<G.customerQueue.length;j++){
+                G.customerQueue[j].targetX=W*0.15+j*60*SCALE;
+            }
+        }
+    }
+    // Assign customers to stalls
+    for(var si=0;si<G.stalls.length;si++){
+        var stall=G.stalls[si];
+        if(!stall.cooking&&stall.queuedCustomers.length<stall.maxQueue){
+            // Find matching customer
+            for(var ci=0;ci<G.customerQueue.length;ci++){
+                var cust=G.customerQueue[ci];
+                if(cust.wantedFood===stall.typeIdx&&cust.state==="walking"){
+                    // Assign to stall
+                    cust.state="waiting";
+                    stall.queuedCustomers.push(cust);
+                    G.customerQueue.splice(ci,1);
+                    // Rearrange remaining queue
+                    for(var j=ci;j<G.customerQueue.length;j++){
+                        G.customerQueue[j].targetX=W*0.15+j*60*SCALE;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    // Cooking progress
+    for(var i=0;i<G.stalls.length;i++){
+        var stall=G.stalls[i];
+        if(stall.queuedCustomers.length>0&&!stall.cooking){
+            stall.cooking=true;
+            stall.cookProgress=0;
+        }
+        if(stall.cooking){
+            stall.cookProgress+=dt*(1+G.upgradeLevels.speed*0.3);
+            if(stall.cookProgress>=stall.cookTime){
+                stall.cookProgress=stall.cookTime;
+                // Ready to serve - auto serve after small delay
+                serveCustomer(i);
+                stall.cooking=false;
+                stall.cookProgress=0;
+            }
+        }
+    }
+    // Update eating customers
+    for(var i=G.customers.length-1;i>=0;i--){
+        var c=G.customers[i];
+        if(c.state==="eating"){
+            c.waitTime+=dt;
+            if(c.waitTime>1.5){
+                c.state="leaving";
+                c.targetX=W+50;
+            }
+        }
+        if(c.state==="leaving"){
+            c.x+=c.speed*60*dt;
+            if(c.x>W+50){
+                G.customers.splice(i,1);
+            }
+        }
+    }
+    // Update particles
+    for(var i=G.particles.length-1;i>=0;i--){
+        var p=G.particles[i];
+        p.x+=p.vx;
+        p.y+=p.vy;
+        p.vy+=0.1;
+        p.life-=p.decay;
+        if(p.life<=0)G.particles.splice(i,1);
+    }
+    // Update floating texts
+    for(var i=G.floatingTexts.length-1;i>=0;i--){
+        var ft=G.floatingTexts[i];
+        ft.y+=ft.vy;
+        ft.life-=0.02;
+        if(ft.life<=0)G.floatingTexts.splice(i,1);
+    }
+    // Auto assign customers that match stall type
+    for(var i=G.customerQueue.length-1;i>=0;i--){
+        var c=G.customerQueue[i];
+        if(c.state!=="walking")continue;
+        // Find a stall that matches this customer's wanted food
+        for(var si=0;si<G.stalls.length;si++){
+            var stall=G.stalls[si];
+            if(stall.typeIdx===c.wantedFood&&stall.queuedCustomers.length<stall.maxQueue){
+                c.state="waiting";
+                c.targetX=stall.x;
+                c.targetY=stall.y+30*SCALE;
+                stall.queuedCustomers.push(c);
+                G.customerQueue.splice(i,1);
+                for(var j=i;j<G.customerQueue.length;j++){
+                    G.customerQueue[j].targetX=W*0.15+j*60*SCALE;
+                }
+                break;
+            }
+        }
+    }
+}
+
+/* ===== Draw Functions ===== */
+function drawBackground(){
+    // Sky gradient
+    var skyGrd=cx.createLinearGradient(0,0,0,H*0.6);
+    skyGrd.addColorStop(0,"#1a0a2e");
+    skyGrd.addColorStop(0.5,"#16213e");
+    skyGrd.addColorStop(1,"#0f3460");
+    cx.fillStyle=skyGrd;
+    cx.fillRect(0,0,W,H*0.6);
+    // Stars
+    cx.fillStyle="rgba(255,255,255,0.3)";
+    for(var i=0;i<30;i++){
+        var sx=(i*137.5)%W;
+        var sy=(i*73.1)%(H*0.5);
+        cx.beginPath();
+        cx.arc(sx,sy,1+Math.sin(Date.now()/1000+i)*0.5,0,Math.PI*2);
+        cx.fill();
+    }
+    // Ground
+    var groundGrd=cx.createLinearGradient(0,H*0.6,0,H);
+    groundGrd.addColorStop(0,"#2d1b69");
+    groundGrd.addColorStop(1,"#1a0a2e");
+    cx.fillStyle=groundGrd;
+    cx.fillRect(0,H*0.6,W,H*0.4);
+    // Street
+    cx.fillStyle="#1e1e2f";
+    cx.fillRect(0,H*0.65,W,H*0.35);
+    // Street lines
+    cx.strokeStyle="#3a3a5c";
+    cx.lineWidth=2;
+    cx.setLineDash([20,15]);
+    cx.beginPath();
+    cx.moveTo(0,H*0.75);
+    cx.lineTo(W,H*0.75);
+    cx.stroke();
+    cx.setLineDash([]);
+    // Lanterns
+    var lanternColors=["#e74c3c","#f39c12","#e74c3c"];
+    for(var i=0;i<3;i++){
+        var lx=W*0.2+i*W*0.3;
+        var ly=H*0.15;
+        // String
+        cx.strokeStyle="#666";
+        cx.lineWidth=1;
+        cx.beginPath();
+        cx.moveTo(lx,0);
+        cx.lineTo(lx,ly);
+        cx.stroke();
+        // Lantern body
+        cx.fillStyle=lanternColors[i];
+        cx.beginPath();
+        cx.ellipse(lx,ly+15,12,18,0,0,Math.PI*2);
+        cx.fill();
+        // Lantern light
+        cx.fillStyle="rgba(255,200,100,0.3)";
+        cx.beginPath();
+        cx.arc(lx,ly+15,25,0,Math.PI*2);
+        cx.fill();
+        // Gold trim
+        cx.strokeStyle="#ffd700";
+        cx.lineWidth=1.5;
+        cx.beginPath();
+        cx.moveTo(lx-12,ly+5);
+        cx.lineTo(lx+12,ly+5);
+        cx.stroke();
+        cx.beginPath();
+        cx.moveTo(lx-12,ly+25);
+        cx.lineTo(lx+12,ly+25);
+        cx.stroke();
+    }
+}
+
+function drawStall(stall,idx){
+    var x=stall.x,y=stall.y;
+    var food=FOOD_TYPES[stall.typeIdx];
+    var s=SCALE;
+    // Stall base
+    cx.fillStyle="#8B4513";
+    cx.fillRect(x-35*s,y-5*s,70*s,30*s);
+    // Roof
+    cx.fillStyle=food.color;
+    cx.beginPath();
+    cx.moveTo(x-40*s,y-5*s);
+    cx.lineTo(x,y-25*s);
+    cx.lineTo(x+40*s,y-5*s);
+    cx.closePath();
+    cx.fill();
+    cx.strokeStyle="#ffd700";
+    cx.lineWidth=1.5;
+    cx.stroke();
+    // Food icon
+    cx.font=Math.floor(24*s)+"px serif";
+    cx.textAlign="center";
+    cx.fillText(food.icon,x,y+12*s);
+    // Name
+    cx.font=Math.floor(10*s)+"px sans-serif";
+    cx.fillStyle="#fff";
+    cx.fillText(food.name,x,y+28*s);
+    // Level
+    cx.font=Math.floor(9*s)+"px sans-serif";
+    cx.fillStyle="#ffd700";
+    cx.fillText("Lv"+stall.level,x,y-8*s);
+    // Cooking progress bar
+    if(stall.cooking){
+        var bw=50*s,bh=6*s;
+        var bx=x-bw/2,by=y+32*s;
+        cx.fillStyle="#333";
+        cx.fillRect(bx,by,bw,bh);
+        var prog=stall.cookProgress/stall.cookTime;
+        cx.fillStyle="#4ecdc4";
+        cx.fillRect(bx,by,bw*prog,bh);
+        cx.strokeStyle="#666";
+        cx.lineWidth=1;
+        cx.strokeRect(bx,by,bw,bh);
+    }
+    // Queue indicator
+    if(stall.queuedCustomers.length>0){
+        cx.font=Math.floor(12*s)+"px sans-serif";
+        cx.fillStyle="#ffd700";
+        cx.fillText(stall.queuedCustomers.length+"人等候",x,y+45*s);
+    }
+    // Selection highlight
+    if(idx===G.selectedStall){
+        cx.strokeStyle="#ffd700";
+        cx.lineWidth=2;
+        cx.strokeRect(x-42*s,y-30*s,84*s,80*s);
+    }
+}
+
+function drawCustomer(c){
+    var x=c.x,y=c.y;
+    var s=SCALE;
+    var sz=c.size*s;
+    // Shadow
+    cx.fillStyle="rgba(0,0,0,0.2)";
+    cx.beginPath();
+    cx.ellipse(x,y+sz*0.8,sz*0.5,sz*0.15,0,0,Math.PI*2);
+    cx.fill();
+    // Body
+    cx.fillStyle=c.bodyColor;
+    cx.beginPath();
+    cx.arc(x,y,sz*0.4,0,Math.PI*2);
+    cx.fill();
+    // Face
+    cx.fillStyle="#ffecd2";
+    cx.beginPath();
+    cx.arc(x,y-sz*0.15,sz*0.25,0,Math.PI*2);
+    cx.fill();
+    // Eyes
+    cx.fillStyle="#333";
+    cx.beginPath();
+    cx.arc(x-sz*0.08,y-sz*0.18,sz*0.04,0,Math.PI*2);
+    cx.fill();
+    cx.beginPath();
+    cx.arc(x+sz*0.08,y-sz*0.18,sz*0.04,0,Math.PI*2);
+    cx.fill();
+    // Hat
+    if(c.hatType===0){
+        cx.fillStyle="#e74c3c";
+        cx.fillRect(x-sz*0.2,y-sz*0.45,sz*0.4,sz*0.1);
+    }else if(c.hatType===1){
+        cx.fillStyle="#3498db";
+        cx.beginPath();
+        cx.moveTo(x,y-sz*0.55);
+        cx.lineTo(x-sz*0.15,y-sz*0.35);
+        cx.lineTo(x+sz*0.15,y-sz*0.35);
+        cx.closePath();
+        cx.fill();
+    }
+    // Wanted food bubble
+    if(c.state==="walking"||c.state==="waiting"){
+        var bubbleX=x+sz*0.4;
+        var bubbleY=y-sz*0.5;
+        cx.fillStyle="rgba(255,255,255,0.9)";
+        cx.beginPath();
+        cx.arc(bubbleX,bubbleY,sz*0.2,0,Math.PI*2);
+        cx.fill();
+        cx.font=Math.floor(sz*0.25)+"px serif";
+        cx.textAlign="center";
+        cx.fillText(FOOD_TYPES[c.wantedFood].icon,bubbleX,bubbleY+sz*0.07);
+    }
+    // Patience bar
+    if(c.state==="waiting"){
+        var barW=sz*0.6;
+        var barH=sz*0.08;
+        var barX=x-barW/2;
+        var barY=y+sz*0.5;
+        cx.fillStyle="#333";
+        cx.fillRect(barX,barY,barW,barH);
+        var pct=c.patience/c.maxPatience;
+        cx.fillStyle=pct>0.5?"#4ecdc4":pct>0.25?"#f39c12":"#e74c3c";
+        cx.fillRect(barX,barY,barW*pct,barH);
+    }
+    // Happiness indicator when served
+    if(c.state==="eating"){
+        cx.font=Math.floor(sz*0.35)+"px serif";
+        cx.textAlign="center";
+        cx.fillText("😊",x,y-sz*0.55);
+    }
+}
+
+function drawParticles(){
+    for(var i=0;i<G.particles.length;i++){
+        var p=G.particles[i];
+        cx.globalAlpha=p.life;
+        cx.fillStyle=p.color;
+        cx.beginPath();
+        cx.arc(p.x,p.y,p.size*SCALE,0,Math.PI*2);
+        cx.fill();
+    }
+    cx.globalAlpha=1;
+}
+
+function drawFloatingTexts(){
+    for(var i=0;i<G.floatingTexts.length;i++){
+        var ft=G.floatingTexts[i];
+        cx.globalAlpha=ft.life;
+        cx.font=Math.floor(16*SCALE)+"px sans-serif";
+        cx.fillStyle=ft.color;
+        cx.textAlign="center";
+        cx.fillText(ft.text,ft.x,ft.y);
+    }
+    cx.globalAlpha=1;
+}
+
+function drawUI(){
+    var s=SCALE;
+    // Top bar background
+    cx.fillStyle="rgba(0,0,0,0.6)";
+    cx.fillRect(0,0,W,50*s);
+    // Money
+    cx.font=Math.floor(16*s)+"px sans-serif";
+    cx.fillStyle="#ffd700";
+    cx.textAlign="left";
+    cx.fillText("💰 "+G.money,15*s,30*s);
+    // Day
+    cx.fillStyle="#fff";
+    cx.textAlign="center";
+    cx.fillText("第"+G.day+"/"+G.maxDay+"天",W/2,20*s);
+    // Day timer bar
+    var timerW=150*s;
+    var timerH=6*s;
+    var timerX=W/2-timerW/2;
+    var timerY=28*s;
+    cx.fillStyle="#333";
+    cx.fillRect(timerX,timerY,timerW,timerH);
+    var dayProg=G.dayTime/G.dayDuration;
+    cx.fillStyle="#4ecdc4";
+    cx.fillRect(timerX,timerY,timerW*dayProg,timerH);
+    // Score
+    cx.fillStyle="#fff";
+    cx.textAlign="right";
+    cx.fillText("分数:"+G.score,W-55*s,20*s);
+    // Best score
+    cx.font=Math.floor(10*s)+"px sans-serif";
+    cx.fillStyle="#aaa";
+    cx.fillText("最高:"+G.bestScore,W-55*s,35*s);
+    // Combo
+    if(G.combo>=3){
+        cx.font=Math.floor(20*s)+"px sans-serif";
+        cx.fillStyle="#ffd700";
+        cx.textAlign="center";
+        cx.fillText("连击 x"+G.combo,W/2,60*s);
+    }
+    // Pause button
+    cx.fillStyle="rgba(255,255,255,0.2)";
+    cx.fillRect(W-45*s,5*s,35*s,30*s);
+    cx.fillStyle="#fff";
+    cx.font=Math.floor(18*s)+"px sans-serif";
+    cx.textAlign="center";
+    cx.fillText("⏸",W-28*s,27*s);
+    // Upgrade panel
+    var panelX=W*0.82;
+    var panelY=H*0.12;
+    cx.fillStyle="rgba(0,0,0,0.6)";
+    cx.fillRect(panelX-55*s,panelY-15*s,110*s,135*s);
+    cx.fillStyle="#fff";
+    cx.font=Math.floor(12*s)+"px sans-serif";
+    cx.textAlign="center";
+    cx.fillText("升级",panelX,panelY);
+    // Speed upgrade
+    drawUpgradeButton(panelX,panelY+25*s,"speed","速度 Lv"+G.upgradeLevels.speed,s);
+    // Quality upgrade
+    drawUpgradeButton(panelX,panelY+65*s,"quality","品质 Lv"+G.upgradeLevels.quality,s);
+    // Capacity upgrade
+    drawUpgradeButton(panelX,panelY+105*s,"capacity","容量 Lv"+G.upgradeLevels.capacity,s);
+    // Buy stall button
+    if(G.stalls.length<G.maxStalls){
+        var stallBtnY=H*0.9;
+        cx.fillStyle="rgba(0,0,0,0.6)";
+        cx.fillRect(panelX-60*s,stallBtnY-18*s,120*s,36*s);
+        cx.fillStyle=G.money>=G.stallCost?"#4ecdc4":"#666";
+        cx.font=Math.floor(12*s)+"px sans-serif";
+        cx.textAlign="center";
+        cx.fillText("新摊位 "+G.stallCost+"💰",panelX,stallBtnY+5*s);
+    }
+    // Notification
+    if(G.notification){
+        cx.fillStyle="rgba(0,0,0,0.7)";
+        cx.fillRect(W/2-200*s,H*0.55,400*s,40*s);
+        cx.fillStyle="#4ecdc4";
+        cx.font=Math.floor(14*s)+"px sans-serif";
+        cx.textAlign="center";
+        cx.fillText(G.notification,W/2,H*0.55+25*s);
+    }
+    // Customer queue display
+    cx.fillStyle="rgba(0,0,0,0.4)";
+    cx.fillRect(W*0.05,H*0.65,W*0.9,55*s);
+    cx.fillStyle="#aaa";
+    cx.font=Math.floor(10*s)+"px sans-serif";
+    cx.textAlign="left";
+    cx.fillText("顾客队列 ("+G.customerQueue.length+"/"+G.maxQueue+")",W*0.06,H*0.65+12*s);
+}
+
+function drawUpgradeButton(x,y,type,label,s){
+    var cost=G.upgradeCosts[type]*(G.upgradeLevels[type]);
+    var canBuy=G.money>=cost&&G.upgradeLevels[type]<5;
+    cx.fillStyle=canBuy?"rgba(78,205,196,0.3)":"rgba(100,100,100,0.3)";
+    cx.fillRect(x-45*s,y-10*s,90*s,22*s);
+    cx.strokeStyle=canBuy?"#4ecdc4":"#555";
+    cx.lineWidth=1;
+    cx.strokeRect(x-45*s,y-10*s,90*s,22*s);
+    cx.fillStyle=canBuy?"#fff":"#888";
+    cx.font=Math.floor(9*s)+"px sans-serif";
+    cx.textAlign="center";
+    cx.fillText(label,x,y-1*s);
+    if(G.upgradeLevels[type]<5){
+        cx.fillStyle=canBuy?"#ffd700":"#666";
+        cx.fillText(cost+"💰",x,y+9*s);
+    }else{
+        cx.fillStyle="#4ecdc4";
+        cx.fillText("MAX",x,y+9*s);
+    }
+}
+
+/* ===== Draw Screens ===== */
+function drawMenuScreen(){
+    // Background
+    var grd=cx.createLinearGradient(0,0,0,H);
+    grd.addColorStop(0,"#1a0a2e");
+    grd.addColorStop(0.5,"#16213e");
+    grd.addColorStop(1,"#0f3460");
+    cx.fillStyle=grd;
+    cx.fillRect(0,0,W,H);
+    // Decorative food icons
+    var foods=["🥞","🧈","🍡","🍜","🧋","🍗"];
+    cx.font=Math.floor(30*SCALE)+"px serif";
+    cx.textAlign="center";
+    for(var i=0;i<foods.length;i++){
+        var fx=W*0.15+i*W*0.14;
+        var fy=H*0.25+Math.sin(Date.now()/500+i)*10;
+        cx.fillText(foods[i],fx,fy);
+    }
+    // Title
+    cx.font=Math.floor(48*SCALE)+"px sans-serif";
+    cx.fillStyle="#ffd700";
+    cx.textAlign="center";
+    cx.fillText("美食街",W/2,H*0.42);
+    // Subtitle
+    cx.font=Math.floor(16*SCALE)+"px sans-serif";
+    cx.fillStyle="#aaa";
+    cx.fillText("经营你的美食帝国",W/2,H*0.49);
+    // Start button
+    var btnX=W/2,btnY=H*0.65;
+    cx.fillStyle="#4ecdc4";
+    roundRect(cx,btnX-100*SCALE,btnY-25*SCALE,200*SCALE,50*SCALE,10*SCALE);
+    cx.fill();
+    cx.fillStyle="#fff";
+    cx.font=Math.floor(22*SCALE)+"px sans-serif";
+    cx.fillText("开始游戏",btnX,btnY+8*SCALE);
+    // Best score
+    if(G.bestScore>0){
+        cx.font=Math.floor(14*SCALE)+"px sans-serif";
+        cx.fillStyle="#ffd700";
+        cx.fillText("最高分: "+G.bestScore,W/2,H*0.78);
+    }
+    // Instructions
+    cx.font=Math.floor(12*SCALE)+"px sans-serif";
+    cx.fillStyle="#888";
+    cx.fillText("点击摊位制作美食 | 满足顾客需求 | 赚取金币升级",W/2,H*0.88);
+    cx.fillText("按1-3键快速操作 | ESC暂停",W/2,H*0.92);
+}
+
+function drawPauseScreen(){
+    cx.fillStyle="rgba(0,0,0,0.7)";
+    cx.fillRect(0,0,W,H);
+    cx.font=Math.floor(40*SCALE)+"px sans-serif";
+    cx.fillStyle="#fff";
+    cx.textAlign="center";
+    cx.fillText("游戏暂停",W/2,H*0.4);
+    cx.font=Math.floor(18*SCALE)+"px sans-serif";
+    cx.fillStyle="#aaa";
+    cx.fillText("按ESC或空格键继续",W/2,H*0.55);
+}
+
+function drawGameOverScreen(){
+    cx.fillStyle="rgba(0,0,0,0.85)";
+    cx.fillRect(0,0,W,H);
+    cx.font=Math.floor(42*SCALE)+"px sans-serif";
+    cx.fillStyle="#ffd700";
+    cx.textAlign="center";
+    cx.fillText("经营结束！",W/2,H*0.3);
+    // Stats
+    cx.font=Math.floor(18*SCALE)+"px sans-serif";
+    cx.fillStyle="#fff";
+    cx.fillText("经营天数: "+(G.day-1)+"天",W/2,H*0.42);
+    cx.fillText("服务顾客: "+G.customersServed+"人",W/2,H*0.48);
+    cx.fillText("总收入: "+G.totalEarnings+"金币",W/2,H*0.54);
+    cx.fillText("最高连击: x"+G.maxCombo,W/2,H*0.6);
+    // Final score
+    cx.font=Math.floor(28*SCALE)+"px sans-serif";
+    cx.fillStyle="#4ecdc4";
+    cx.fillText("最终分数: "+G.score,W/2,H*0.68);
+    if(G.score>=G.bestScore){
+        cx.fillStyle="#ffd700";
+        cx.font=Math.floor(16*SCALE)+"px sans-serif";
+        cx.fillText("新纪录！",W/2,H*0.73);
+    }
+    // Restart button
+    var btnX=W/2,btnY=H*0.82;
+    cx.fillStyle="#e74c3c";
+    roundRect(cx,btnX-100*SCALE,btnY-25*SCALE,200*SCALE,50*SCALE,10*SCALE);
+    cx.fill();
+    cx.fillStyle="#fff";
+    cx.font=Math.floor(20*SCALE)+"px sans-serif";
+    cx.fillText("返回菜单",btnX,btnY+7*SCALE);
+}
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+/* ===== Main Render ===== */
+function render(){
+    cx.clearRect(0,0,W,H);
+    if(G.state==="menu"){
+        drawMenuScreen();
+        return;
+    }
+    // Game view
+    drawBackground();
+    // Draw stalls
+    for(var i=0;i<G.stalls.length;i++){
+        drawStall(G.stalls[i],i);
+    }
+    // Draw customers
+    for(var i=0;i<G.customers.length;i++){
+        drawCustomer(G.customers[i]);
+    }
+    for(var i=0;i<G.customerQueue.length;i++){
+        drawCustomer(G.customerQueue[i]);
+    }
+    // Draw particles & floating texts
+    drawParticles();
+    drawFloatingTexts();
+    // Draw UI
+    drawUI();
+    // Draw overlays
+    if(G.state==="paused")drawPauseScreen();
+    if(G.state==="gameover")drawGameOverScreen();
+}
+
+/* ===== Game Loop ===== */
+var lastTime=0;
+function gameLoop(ts){
+    var dt=Math.min((ts-lastTime)/1000,0.05);
+    lastTime=ts;
+    update(dt);
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+/* ===== Start ===== */
+lastTime=performance.now();
+requestAnimationFrame(gameLoop);
+
+})();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

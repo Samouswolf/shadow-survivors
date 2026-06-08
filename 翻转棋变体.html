@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>翻转棋变体 - 六角形翻转棋</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #0a0a2e;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    font-family: 'Microsoft YaHei', sans-serif;
+}
+canvas { display: block; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+// ==================== 配置 ====================
+var CONFIG = {
+    FPS: 60,
+    GRID_SIZE: 5,           // 六角网格半径(5=直径11)
+    HEX_RADIUS: 28,         // 六角格基准半径
+    ANIM_SPEED: 0.08,       // 翻转动画速度
+    AI_DELAY: 600,          // AI思考延迟(ms)
+    COLORS: {
+        bg1: '#0a0a2e',
+        bg2: '#1a1a4e',
+        empty: '#2a2a5e',
+        emptyStroke: '#3a3a7e',
+        player: '#4fc3f7',
+        playerStroke: '#81d4fa',
+        ai: '#ef5350',
+        aiStroke: '#ff8a80',
+        highlight: '#ffeb3b',
+        valid: '#66bb6a',
+        validStroke: '#a5d6a7',
+        text: '#ffffff',
+        gold: '#ffd700',
+        panel: 'rgba(20,20,60,0.9)',
+        panelStroke: 'rgba(100,100,200,0.5)'
+    },
+    AI_NAMES: ['新手', '棋士', '大师'],
+    AI_DEPTH: [1, 3, 5]
+};
+
+// ==================== 游戏状态 ====================
+var canvas = document.getElementById('cv');
+var ctx = canvas.getContext('2d');
+var W, H, SCALE, HEX_W, HEX_H, BOARD_OFFSET_X, BOARD_OFFSET_Y;
+
+var G = {
+    state: 'menu',          // menu/difficulty/playing/gameover
+    board: [],              // 六角棋盘 [q][r] -> 0=空, 1=玩家, 2=AI
+    currentPlayer: 1,       // 1=玩家, 2=AI
+    playerScore: 0,
+    aiScore: 0,
+    totalCells: 0,
+    difficulty: 1,          // 0/1/2
+    selectedHex: null,      // {q, r}
+    validMoves: [],         // [{q,r}]
+    animating: false,
+    flipAnim: [],           // [{q,r,from,to,progress}]
+    aiThinking: false,
+    particles: [],
+    highScore: 0,
+    gameStartTime: 0,
+    moveCount: 0,
+    hoverHex: null,
+    lastFlipSound: 0,
+    comboCount: 0,
+    showScorePop: null,     // {x,y,text,color,life}
+    moveHistory: [],        // 历史走法（悔棋用）
+    stars: [],              // 背景星尘
+    timer: 0,               // 游戏计时（秒）
+    timerInterval: null,
+    paused: false,
+    soundEnabled: true
+};
+
+// ==================== 初始化 ====================
+function resizeCanvas() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+    SCALE = Math.min(W / 800, H / 900, 1.5);
+    HEX_RADIUS = 28 * SCALE;
+    HEX_W = HEX_RADIUS * Math.sqrt(3);
+    HEX_H = HEX_RADIUS * 2;
+    var boardW = HEX_W * (CONFIG.GRID_SIZE * 2 + 1);
+    BOARD_OFFSET_X = W / 2;
+    BOARD_OFFSET_Y = H / 2 + 30 * SCALE;
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ==================== Web Audio 音效系统 ====================
+var audioCtx = null;
+function initAudio() {
+    if (audioCtx) return;
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+}
+function playTone(freq, duration, type, volume) {
+    if (!audioCtx || !G.soundEnabled) return;
+    try {
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = type || 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(volume || 0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (duration || 0.2));
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + (duration || 0.2));
+    } catch(e) {}
+}
+function playFlipSound(count) {
+    for (var i = 0; i < Math.min(count, 6); i++) {
+        setTimeout(function() { playTone(520 + Math.random()*200, 0.12, 'sine', 0.1); }, i * 50);
+    }
+}
+function playPlaceSound() { playTone(330, 0.15, 'triangle', 0.12); }
+function playWinSound() {
+    var notes = [523, 659, 784, 1047];
+    for (var i = 0; i < notes.length; i++) {
+        setTimeout(function(n) { playTone(n, 0.3, 'sine', 0.12); }.bind(null, notes[i]), i * 150);
+    }
+}
+function playLoseSound() {
+    var notes = [400, 350, 300, 250];
+    for (var i = 0; i < notes.length; i++) {
+        setTimeout(function(n) { playTone(n, 0.3, 'sine', 0.1); }.bind(null, notes[i]), i * 200);
+    }
+}
+function playButtonSound() { playTone(800, 0.08, 'square', 0.06); }
+
+// ==================== 背景星尘 ====================
+function initStars() {
+    G.stars = [];
+    for (var i = 0; i < 60; i++) {
+        G.stars.push({
+            x: Math.random() * 2000,
+            y: Math.random() * 2000,
+            size: 0.5 + Math.random() * 2,
+            speed: 0.1 + Math.random() * 0.3,
+            alpha: 0.2 + Math.random() * 0.5,
+            twinkle: Math.random() * Math.PI * 2
+        });
+    }
+}
+initStars();
+
+function drawStars() {
+    for (var i = 0; i < G.stars.length; i++) {
+        var s = G.stars[i];
+        s.twinkle += 0.02;
+        var a = s.alpha * (0.5 + 0.5 * Math.sin(s.twinkle));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(s.x % W, s.y % H, s.size * SCALE, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ==================== 六角坐标系统 ====================
+// 使用轴向坐标(axial coordinates): q, r
+// s = -q - r (立方坐标第三轴)
+
+function hexToPixel(q, r) {
+    var x = HEX_W * (q + r * 0.5);
+    var y = HEX_H * 0.75 * r;
+    return { x: x + BOARD_OFFSET_X, y: y + BOARD_OFFSET_Y };
+}
+
+function pixelToHex(px, py) {
+    var x = px - BOARD_OFFSET_X;
+    var y = py - BOARD_OFFSET_Y;
+    var q = (x * Math.sqrt(3)/3 - y / 3) / HEX_RADIUS;
+    var r = (y * 2/3) / HEX_RADIUS;
+    return hexRound(q, r);
+}
+
+function hexRound(q, r) {
+    var s = -q - r;
+    var rq = Math.round(q);
+    var rr = Math.round(r);
+    var rs = Math.round(s);
+    var dq = Math.abs(rq - q);
+    var dr = Math.abs(rr - r);
+    var ds = Math.abs(rs - s);
+    if (dq > dr && dq > ds) rq = -rr - rs;
+    else if (dr > ds) rr = -rq - rs;
+    return { q: rq, r: rr };
+}
+
+function hexDistance(q1, r1, q2, r2) {
+    return (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2;
+}
+
+function hexNeighbors(q, r) {
+    return [
+        {q:q+1, r:r}, {q:q-1, r:r},
+        {q:q, r:r+1}, {q:q, r:r-1},
+        {q:q+1, r:r-1}, {q:q-1, r:r+1}
+    ];
+}
+
+function isValidHex(q, r) {
+    return hexDistance(0, 0, q, r) <= CONFIG.GRID_SIZE;
+}
+
+// ==================== 绘制六角形 ====================
+function drawHexagon(cx, cy, radius, fillColor, strokeColor, lineWidth) {
+    ctx.beginPath();
+    for (var i = 0; i < 6; i++) {
+        var angle = Math.PI / 3 * i - Math.PI / 6;
+        var hx = cx + radius * Math.cos(angle);
+        var hy = cy + radius * Math.sin(angle);
+        if (i === 0) ctx.moveTo(hx, hy);
+        else ctx.lineTo(hx, hy);
+    }
+    ctx.closePath();
+    if (fillColor) {
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+    }
+    if (strokeColor) {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = lineWidth || 1.5;
+        ctx.stroke();
+    }
+}
+
+function drawPiece(cx, cy, radius, player, scale) {
+    scale = scale || 1;
+    var r = radius * 0.6 * scale;
+    var grad = ctx.createRadialGradient(cx - r*0.3, cy - r*0.3, r*0.1, cx, cy, r);
+    if (player === 1) {
+        grad.addColorStop(0, '#81d4fa');
+        grad.addColorStop(0.7, '#4fc3f7');
+        grad.addColorStop(1, '#0288d1');
+    } else {
+        grad.addColorStop(0, '#ff8a80');
+        grad.addColorStop(0.7, '#ef5350');
+        grad.addColorStop(1, '#c62828');
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = player === 1 ? '#b3e5fc' : '#ffcdd2';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+}
+
+// ==================== 粒子系统 ====================
+function spawnParticles(x, y, color, count) {
+    for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 1 + Math.random() * 3;
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay: 0.01 + Math.random() * 0.02,
+            color: color,
+            size: 2 + Math.random() * 4
+        });
+    }
+}
+
+function spawnFlipParticles(q, r, player) {
+    var pos = hexToPixel(q, r);
+    var color = player === 1 ? '#4fc3f7' : '#ef5350';
+    spawnParticles(pos.x, pos.y, color, 12);
+}
+
+function spawnVictoryParticles() {
+    for (var i = 0; i < 80; i++) {
+        var x = Math.random() * W;
+        var y = -10;
+        G.particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 2,
+            vy: 1 + Math.random() * 3,
+            life: 1,
+            decay: 0.005 + Math.random() * 0.01,
+            color: ['#ffd700','#ff6b6b','#4fc3f7','#66bb6a','#ff9800'][Math.floor(Math.random()*5)],
+            size: 3 + Math.random() * 5
+        });
+    }
+}
+
+function updateParticles() {
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= p.decay;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ==================== 分数弹出 ====================
+function showScorePopup(x, y, text, color) {
+    G.showScorePop = { x: x, y: y, text: text, color: color, life: 1 };
+}
+
+// ==================== 棋盘初始化 ====================
+function initBoard() {
+    G.board = [];
+    var size = CONFIG.GRID_SIZE;
+    for (var q = -size; q <= size; q++) {
+        G.board[q] = [];
+        for (var r = -size; r <= size; r++) {
+            if (isValidHex(q, r)) {
+                G.board[q][r] = 0;
+            }
+        }
+    }
+    // 初始布局：中心十字
+    G.board[0][0] = 1;
+    G.board[1][0] = 2;
+    G.board[-1][0] = 2;
+    G.board[0][1] = 2;
+    G.board[0][-1] = 2;
+    G.board[1][-1] = 1;
+    G.board[-1][1] = 1;
+
+    G.totalCells = 0;
+    for (var q2 = -size; q2 <= size; q2++) {
+        for (var r2 = -size; r2 <= size; r2++) {
+            if (isValidHex(q2, r2)) G.totalCells++;
+        }
+    }
+
+    G.playerScore = 2;
+    G.aiScore = 4;
+    G.currentPlayer = 1;
+    G.selectedHex = null;
+    G.validMoves = [];
+    G.flipAnim = [];
+    G.animating = false;
+    G.aiThinking = false;
+    G.particles = [];
+    G.moveCount = 0;
+    G.comboCount = 0;
+    G.showScorePop = null;
+    G.moveHistory = [];
+    G.gameStartTime = Date.now();
+    G.timer = 0;
+    G.paused = false;
+    if (G.timerInterval) clearInterval(G.timerInterval);
+    G.timerInterval = setInterval(function() {
+        if (G.state === 'playing' && !G.paused) G.timer++;
+    }, 1000);
+}
+
+// ==================== 翻转逻辑 ====================
+function getFlips(q, r, player) {
+    if (!isValidHex(q, r) || (G.board[q] && G.board[q][r] !== 0)) return [];
+    var opponent = player === 1 ? 2 : 1;
+    var flips = [];
+    var dirs = hexNeighbors(0, 0);
+    // 用hexNeighbors获取方向增量
+    var directions = [
+        {dq:1, dr:0}, {dq:-1, dr:0},
+        {dq:0, dr:1}, {dq:0, dr:-1},
+        {dq:1, dr:-1}, {dq:-1, dr:1}
+    ];
+    for (var d = 0; d < 6; d++) {
+        var line = [];
+        var cq = q + directions[d].dq;
+        var cr = r + directions[d].dr;
+        while (isValidHex(cq, cr) && G.board[cq] && G.board[cq][cr] === opponent) {
+            line.push({q: cq, r: cr});
+            cq += directions[d].dq;
+            cr += directions[d].dr;
+        }
+        if (line.length > 0 && isValidHex(cq, cr) && G.board[cq] && G.board[cq][cr] === player) {
+            flips = flips.concat(line);
+        }
+    }
+    return flips;
+}
+
+function getValidMoves(player) {
+    var moves = [];
+    var size = CONFIG.GRID_SIZE;
+    for (var q = -size; q <= size; q++) {
+        for (var r = -size; r <= size; r++) {
+            if (isValidHex(q, r) && G.board[q] && G.board[q][r] === 0) {
+                var flips = getFlips(q, r, player);
+                if (flips.length > 0) moves.push({q: q, r: r});
+            }
+        }
+    }
+    return moves;
+}
+
+function applyMove(q, r, player, animate) {
+    var flips = getFlips(q, r, player);
+    if (flips.length === 0) return false;
+
+    // 记录历史（悔棋用）
+    var savedFlips = [];
+    for (var h = 0; h < flips.length; h++) {
+        savedFlips.push({q: flips[h].q, r: flips[h].r, prev: G.board[flips[h].q][flips[h].r]});
+    }
+    G.moveHistory.push({q: q, r: r, player: player, flips: savedFlips});
+
+    G.board[q][r] = player;
+    var opponent = player === 1 ? 2 : 1;
+
+    if (animate) {
+        G.animating = true;
+        G.flipAnim = [];
+        for (var i = 0; i < flips.length; i++) {
+            G.flipAnim.push({
+                q: flips[i].q, r: flips[i].r,
+                from: opponent, to: player,
+                progress: 0, delay: i * 3
+            });
+        }
+        // 放置动画
+        G.flipAnim.push({
+            q: q, r: r, from: 0, to: player,
+            progress: 0, delay: 0, isPlace: true
+        });
+    } else {
+        for (var j = 0; j < flips.length; j++) {
+            G.board[flips[j].q][flips[j].r] = player;
+        }
+    }
+
+    updateScores();
+    G.moveCount++;
+
+    // 粒子效果
+    spawnFlipParticles(q, r, player);
+    if (animate) {
+        playPlaceSound();
+        if (flips.length > 0) playFlipSound(flips.length);
+    }
+    if (flips.length >= 3) {
+        G.comboCount++;
+        var pos = hexToPixel(q, r);
+        showScorePopup(pos.x, pos.y - 20, '+' + flips.length + ' 连翻!', '#ffd700');
+    } else {
+        G.comboCount = 0;
+    }
+
+    return true;
+}
+
+function updateScores() {
+    var p = 0, a = 0;
+    var size = CONFIG.GRID_SIZE;
+    for (var q = -size; q <= size; q++) {
+        for (var r = -size; r <= size; r++) {
+            if (isValidHex(q, r) && G.board[q]) {
+                if (G.board[q][r] === 1) p++;
+                else if (G.board[q][r] === 2) a++;
+            }
+        }
+    }
+    G.playerScore = p;
+    G.aiScore = a;
+}
+
+function isGameOver() {
+    var moves1 = getValidMoves(1);
+    var moves2 = getValidMoves(2);
+    if (moves1.length === 0 && moves2.length === 0) return true;
+    // 棋盘满了
+    var size = CONFIG.GRID_SIZE;
+    var filled = 0;
+    for (var q = -size; q <= size; q++) {
+        for (var r = -size; r <= size; r++) {
+            if (isValidHex(q, r) && G.board[q] && G.board[q][r] !== 0) filled++;
+        }
+    }
+    if (filled >= G.totalCells) return true;
+    return false;
+}
+
+// ==================== AI ====================
+function evaluateBoard(player) {
+    var score = 0;
+    var opponent = player === 1 ? 2 : 1;
+    var size = CONFIG.GRID_SIZE;
+    var myCount = 0, opCount = 0;
+
+    for (var q = -size; q <= size; q++) {
+        for (var r = -size; r <= size; r++) {
+            if (!isValidHex(q, r) || !G.board[q]) continue;
+            var cell = G.board[q][r];
+            if (cell === player) {
+                myCount++;
+                // 位置权重：边角更有价值
+                var dist = hexDistance(0, 0, q, r);
+                if (dist >= size) score += 15; // 边缘
+                else if (dist >= size - 1) score += 8;
+                else score += 3;
+                // 中心控制
+                if (dist <= 2) score += 5;
+            } else if (cell === opponent) {
+                opCount++;
+                var dist2 = hexDistance(0, 0, q, r);
+                if (dist2 >= size) score -= 15;
+                else if (dist2 >= size - 1) score -= 8;
+                else score -= 3;
+                if (dist2 <= 2) score -= 5;
+            }
+        }
+    }
+
+    // 子数差
+    score += (myCount - opCount) * 10;
+
+    // 行动力
+    var myMoves = 0, opMoves = 0;
+    for (var q2 = -size; q2 <= size; q2++) {
+        for (var r2 = -size; r2 <= size; r2++) {
+            if (isValidHex(q2, r2) && G.board[q2] && G.board[q2][r2] === 0) {
+                if (getFlips(q2, r2, player).length > 0) myMoves++;
+                if (getFlips(q2, r2, opponent).length > 0) opMoves++;
+            }
+        }
+    }
+    score += (myMoves - opMoves) * 6;
+
+    return score;
+}
+
+function minimax(depth, alpha, beta, isMaximizing, aiPlayer) {
+    if (depth === 0 || isGameOver()) {
+        return evaluateBoard(aiPlayer);
+    }
+
+    var currentPlayer = isMaximizing ? aiPlayer : (aiPlayer === 1 ? 2 : 1);
+    var moves = getValidMoves(currentPlayer);
+
+    if (moves.length === 0) {
+        // 跳过
+        return minimax(depth - 1, alpha, beta, !isMaximizing, aiPlayer);
+    }
+
+    // 排序优化：优先考虑翻转多的走法
+    moves.sort(function(a, b) {
+        return getFlips(b.q, b.r, currentPlayer).length - getFlips(a.q, a.r, currentPlayer).length;
+    });
+
+    if (isMaximizing) {
+        var maxEval = -Infinity;
+        for (var i = 0; i < moves.length; i++) {
+            var m = moves[i];
+            // 模拟
+            var flips = getFlips(m.q, m.r, currentPlayer);
+            var savedBoard = [];
+            savedBoard.push({q:m.q, r:m.r, v:G.board[m.q][m.r]});
+            G.board[m.q][m.r] = currentPlayer;
+            for (var f = 0; f < flips.length; f++) {
+                savedBoard.push({q:flips[f].q, r:flips[f].r, v:G.board[flips[f].q][flips[f].r]});
+                G.board[flips[f].q][flips[f].r] = currentPlayer;
+            }
+
+            var eval2 = minimax(depth - 1, alpha, beta, false, aiPlayer);
+
+            // 还原
+            for (var s = 0; s < savedBoard.length; s++) {
+                G.board[savedBoard[s].q][savedBoard[s].r] = savedBoard[s].v;
+            }
+
+            maxEval = Math.max(maxEval, eval2);
+            alpha = Math.max(alpha, eval2);
+            if (beta <= alpha) break;
+        }
+        return maxEval;
+    } else {
+        var minEval = Infinity;
+        for (var i2 = 0; i2 < moves.length; i2++) {
+            var m2 = moves[i2];
+            var flips2 = getFlips(m2.q, m2.r, currentPlayer);
+            var savedBoard2 = [];
+            savedBoard2.push({q:m2.q, r:m2.r, v:G.board[m2.q][m2.r]});
+            G.board[m2.q][m2.r] = currentPlayer;
+            for (var f2 = 0; f2 < flips2.length; f2++) {
+                savedBoard2.push({q:flips2[f2].q, r:flips2[f2].r, v:G.board[flips2[f2].q][flips2[f2].r]});
+                G.board[flips2[f2].q][flips2[f2].r] = currentPlayer;
+            }
+
+            var eval3 = minimax(depth - 1, alpha, beta, true, aiPlayer);
+
+            for (var s2 = 0; s2 < savedBoard2.length; s2++) {
+                G.board[savedBoard2[s2].q][savedBoard2[s2].r] = savedBoard2[s2].v;
+            }
+
+            minEval = Math.min(minEval, eval3);
+            beta = Math.min(beta, eval3);
+            if (beta <= alpha) break;
+        }
+        return minEval;
+    }
+}
+
+function aiMove() {
+    var moves = getValidMoves(2);
+    if (moves.length === 0) return;
+
+    var depth = CONFIG.AI_DEPTH[G.difficulty];
+
+    // 简单模式：随机
+    if (G.difficulty === 0) {
+        var idx = Math.floor(Math.random() * moves.length);
+        applyMove(moves[idx].q, moves[idx].r, 2, true);
+        return;
+    }
+
+    // 中等/困难：minimax
+    var bestMove = null;
+    var bestScore = -Infinity;
+
+    for (var i = 0; i < moves.length; i++) {
+        var m = moves[i];
+        var flips = getFlips(m.q, m.r, 2);
+        var savedBoard = [];
+        savedBoard.push({q:m.q, r:m.r, v:G.board[m.q][m.r]});
+        G.board[m.q][m.r] = 2;
+        for (var f = 0; f < flips.length; f++) {
+            savedBoard.push({q:flips[f].q, r:flips[f].r, v:G.board[flips[f].q][flips[f].r]});
+            G.board[flips[f].q][flips[f].r] = 2;
+        }
+
+        var score = minimax(depth - 1, -Infinity, Infinity, false, 2);
+
+        for (var s = 0; s < savedBoard.length; s++) {
+            G.board[savedBoard[s].q][savedBoard[s].r] = savedBoard[s].v;
+        }
+
+        // 加一点随机性（中等难度）
+        if (G.difficulty === 1) score += (Math.random() - 0.5) * 5;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = m;
+        }
+    }
+
+    if (bestMove) {
+        applyMove(bestMove.q, bestMove.r, 2, true);
+    }
+}
+
+// ==================== 悔棋 ====================
+function undoMove() {
+    if (G.moveHistory.length < 2) return; // 至少需要2步（玩家+AI）
+    if (G.animating || G.aiThinking) return;
+
+    // 撤销AI的走法
+    var aiHist = G.moveHistory.pop();
+    G.board[aiHist.q][aiHist.r] = 0;
+    for (var i = 0; i < aiHist.flips.length; i++) {
+        G.board[aiHist.flips[i].q][aiHist.flips[i].r] = aiHist.flips[i].prev;
+    }
+
+    // 撤销玩家的走法
+    var plHist = G.moveHistory.pop();
+    G.board[plHist.q][plHist.r] = 0;
+    for (var j = 0; j < plHist.flips.length; j++) {
+        G.board[plHist.flips[j].q][plHist.flips[j].r] = plHist.flips[j].prev;
+    }
+
+    G.moveCount -= 2;
+    G.currentPlayer = 1;
+    updateScores();
+    G.validMoves = getValidMoves(1);
+    playButtonSound();
+}
+
+// ==================== 游戏逻辑 ====================
+function startGame(diff) {
+    G.difficulty = diff;
+    G.state = 'playing';
+    initBoard();
+    G.validMoves = getValidMoves(1);
+    initAudio();
+    playButtonSound();
+}
+
+function checkTurnEnd() {
+    if (G.animating) return;
+
+    // 检查游戏结束
+    if (isGameOver()) {
+        G.state = 'gameover';
+        if (G.playerScore > G.highScore) {
+            G.highScore = G.playerScore;
+            localStorage.setItem('hexReversi_highScore', G.highScore);
+        }
+        if (G.timerInterval) { clearInterval(G.timerInterval); G.timerInterval = null; }
+        if (G.playerScore > G.aiScore) playWinSound();
+        else if (G.playerScore < G.aiScore) playLoseSound();
+        else playTone(440, 0.3, 'sine', 0.1);
+        spawnVictoryParticles();
+        return;
+    }
+
+    // 检查当前玩家是否有合法走法
+    var moves = getValidMoves(G.currentPlayer);
+    if (moves.length === 0) {
+        // 跳过
+        G.currentPlayer = G.currentPlayer === 1 ? 2 : 1;
+        moves = getValidMoves(G.currentPlayer);
+        if (moves.length === 0) {
+            G.state = 'gameover';
+            if (G.playerScore > G.highScore) {
+                G.highScore = G.playerScore;
+                localStorage.setItem('hexReversi_highScore', G.highScore);
+            }
+            if (G.timerInterval) { clearInterval(G.timerInterval); G.timerInterval = null; }
+            if (G.playerScore > G.aiScore) playWinSound();
+            else if (G.playerScore < G.aiScore) playLoseSound();
+            else playTone(440, 0.3, 'sine', 0.1);
+            spawnVictoryParticles();
+            return;
+        }
+    }
+
+    if (G.currentPlayer === 1) {
+        G.validMoves = getValidMoves(1);
+    } else {
+        G.aiThinking = true;
+        setTimeout(function() {
+            aiMove();
+            G.aiThinking = false;
+            G.currentPlayer = 1;
+            checkTurnEnd();
+        }, CONFIG.AI_DELAY);
+    }
+}
+
+// ==================== 动画更新 ====================
+function updateAnimations() {
+    if (!G.animating) return;
+
+    var allDone = true;
+    for (var i = 0; i < G.flipAnim.length; i++) {
+        var anim = G.flipAnim[i];
+        if (anim.delay > 0) {
+            anim.delay--;
+            allDone = false;
+            continue;
+        }
+        if (anim.progress < 1) {
+            anim.progress += CONFIG.ANIM_SPEED;
+            if (anim.progress >= 1) {
+                anim.progress = 1;
+                G.board[anim.q][anim.r] = anim.to;
+            }
+            allDone = false;
+        }
+    }
+
+    if (allDone) {
+        G.animating = false;
+        G.flipAnim = [];
+        updateScores();
+        G.currentPlayer = G.currentPlayer === 1 ? 2 : 1;
+        checkTurnEnd();
+    }
+}
+
+// ==================== 渲染 ====================
+function drawBackground() {
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, CONFIG.COLORS.bg1);
+    grad.addColorStop(1, CONFIG.COLORS.bg2);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    drawStars();
+}
+
+function drawMenu() {
+    drawBackground();
+
+    // 标题
+    ctx.fillStyle = CONFIG.COLORS.text;
+    ctx.font = 'bold ' + (48 * SCALE) + 'px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('翻转棋变体', W/2, H * 0.25);
+
+    ctx.font = (20 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('六角形翻转棋 · 人机对战', W/2, H * 0.33);
+
+    // 按钮
+    var btnW = 220 * SCALE;
+    var btnH = 55 * SCALE;
+    var btnY = H * 0.48;
+
+    drawButton(W/2, btnY, btnW, btnH, '开始游戏', '#4fc3f7', '#0288d1');
+
+    // 高分
+    ctx.font = (16 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = CONFIG.COLORS.gold;
+    ctx.fillText('最高分: ' + G.highScore, W/2, H * 0.72);
+
+    // 玩法说明
+    ctx.font = (14 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = '#888';
+    ctx.fillText('点击六角格放置棋子，翻转对手棋子', W/2, H * 0.78);
+    ctx.fillText('占据更多格子即可获胜', W/2, H * 0.83);
+    ctx.font = (12 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = '#666';
+    ctx.fillText('快捷键: U悔棋 R重开 P暂停 S音效 ESC返回', W/2, H * 0.90);
+
+    drawParticles();
+}
+
+function drawDifficultySelect() {
+    drawBackground();
+
+    ctx.fillStyle = CONFIG.COLORS.text;
+    ctx.font = 'bold ' + (36 * SCALE) + 'px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('选择难度', W/2, H * 0.2);
+
+    var btnW = 200 * SCALE;
+    var btnH = 50 * SCALE;
+    var startY = H * 0.38;
+    var gap = 75 * SCALE;
+
+    var colors = ['#66bb6a', '#ffa726', '#ef5350'];
+    var descs = ['随机落子，适合新手', '中等策略，有一定挑战', '深度搜索，高手对决'];
+
+    for (var i = 0; i < 3; i++) {
+        drawButton(W/2, startY + i * gap, btnW, btnH, CONFIG.AI_NAMES[i], colors[i], colors[i]);
+        ctx.font = (13 * SCALE) + 'px Microsoft YaHei';
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(descs[i], W/2, startY + i * gap + 35 * SCALE);
+    }
+
+    // 返回按钮
+    drawButton(W/2, H * 0.85, 120 * SCALE, 40 * SCALE, '返回', '#666', '#444');
+
+    drawParticles();
+}
+
+function drawBoard() {
+    var size = CONFIG.GRID_SIZE;
+    var validSet = {};
+    for (var v = 0; v < G.validMoves.length; v++) {
+        validSet[G.validMoves[v].q + ',' + G.validMoves[v].r] = true;
+    }
+
+    // 绘制所有格子
+    for (var q = -size; q <= size; q++) {
+        for (var r = -size; r <= size; r++) {
+            if (!isValidHex(q, r)) continue;
+            var pos = hexToPixel(q, r);
+            var cell = G.board[q] ? G.board[q][r] : 0;
+
+            var fillColor = CONFIG.COLORS.empty;
+            var strokeColor = CONFIG.COLORS.emptyStroke;
+
+            // 悬停高亮
+            if (G.hoverHex && G.hoverHex.q === q && G.hoverHex.r === r && validSet[q+','+r]) {
+                fillColor = 'rgba(102,187,106,0.4)';
+                strokeColor = CONFIG.COLORS.valid;
+            }
+
+            // 合法走法标记
+            if (validSet[q + ',' + r]) {
+                strokeColor = CONFIG.COLORS.validStroke;
+            }
+
+            drawHexagon(pos.x, pos.y, HEX_RADIUS, fillColor, strokeColor, 1.5);
+
+            // 绘制棋子
+            if (cell !== 0) {
+                // 检查是否有翻转动画
+                var animScale = 1;
+                var animFlip = false;
+                for (var a = 0; a < G.flipAnim.length; a++) {
+                    var fa = G.flipAnim[a];
+                    if (fa.q === q && fa.r === r && fa.progress < 1) {
+                        // 翻转效果：用scaleX模拟
+                        animScale = Math.abs(Math.cos(fa.progress * Math.PI));
+                        animFlip = true;
+                        break;
+                    }
+                }
+
+                if (animFlip && animScale < 0.1) continue; // 翻转中间不画
+
+                ctx.save();
+                if (animFlip) {
+                    ctx.translate(pos.x, pos.y);
+                    ctx.scale(animScale, 1);
+                    ctx.translate(-pos.x, -pos.y);
+                }
+                drawPiece(pos.x, pos.y, HEX_RADIUS, cell);
+                ctx.restore();
+            }
+
+            // 合法走法的小圆点
+            if (cell === 0 && validSet[q + ',' + r] && !G.animating && G.currentPlayer === 1 && !G.aiThinking) {
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, HEX_RADIUS * 0.15, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(102,187,106,0.6)';
+                ctx.fill();
+            }
+        }
+    }
+}
+
+function drawGameUI() {
+    // 顶部信息栏
+    var panelH = 60 * SCALE;
+    ctx.fillStyle = CONFIG.COLORS.panel;
+    ctx.fillRect(0, 0, W, panelH);
+    ctx.strokeStyle = CONFIG.COLORS.panelStroke;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, W, panelH);
+
+    // 玩家分数
+    ctx.font = 'bold ' + (20 * SCALE) + 'px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+
+    // 玩家棋子图标
+    drawPiece(30 * SCALE, panelH/2, 15 * SCALE, 1);
+    ctx.fillStyle = CONFIG.COLORS.player;
+    ctx.fillText(G.playerScore, 50 * SCALE, panelH/2);
+
+    // AI棋子图标
+    drawPiece(W - 70 * SCALE, panelH/2, 15 * SCALE, 2);
+    ctx.fillStyle = CONFIG.COLORS.ai;
+    ctx.textAlign = 'right';
+    ctx.fillText(G.aiScore, W - 30 * SCALE, panelH/2);
+
+    // 计时器
+    var mins = Math.floor(G.timer / 60);
+    var secs = G.timer % 60;
+    ctx.font = (12 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = '#777';
+    ctx.textAlign = 'center';
+    ctx.fillText((mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs, W/2, 12 * SCALE);
+
+    // 中间信息
+    ctx.font = (14 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('AI: ' + CONFIG.AI_NAMES[G.difficulty], W/2, panelH/2 - 10 * SCALE);
+
+    // 当前回合
+    ctx.font = 'bold ' + (16 * SCALE) + 'px Microsoft YaHei';
+    if (G.aiThinking) {
+        ctx.fillStyle = CONFIG.COLORS.ai;
+        ctx.fillText('AI思考中...', W/2, panelH/2 + 12 * SCALE);
+    } else if (G.currentPlayer === 1) {
+        ctx.fillStyle = CONFIG.COLORS.player;
+        ctx.fillText('你的回合', W/2, panelH/2 + 12 * SCALE);
+    } else {
+        ctx.fillStyle = CONFIG.COLORS.ai;
+        ctx.fillText('AI回合', W/2, panelH/2 + 12 * SCALE);
+    }
+
+    // 进度条
+    var total = G.playerScore + G.aiScore;
+    if (total > 0) {
+        var barY = panelH - 4 * SCALE;
+        var barW = W * 0.6;
+        var barX = (W - barW) / 2;
+        ctx.fillStyle = CONFIG.COLORS.ai;
+        ctx.fillRect(barX, barY, barW, 3 * SCALE);
+        ctx.fillStyle = CONFIG.COLORS.player;
+        ctx.fillRect(barX, barY, barW * (G.playerScore / total), 3 * SCALE);
+    }
+
+    // 底部按钮
+    var btnSize = 40 * SCALE;
+    drawHexButton(W/2 - 50 * SCALE, H - 35 * SCALE, btnSize, '悔', '#ffa726');
+    drawHexButton(W/2 + 50 * SCALE, H - 35 * SCALE, btnSize, '新', '#ef5350');
+}
+
+function drawButton(cx, cy, w, h, text, color, borderColor) {
+    var r = h / 3;
+    ctx.beginPath();
+    ctx.moveTo(cx - w/2 + r, cy - h/2);
+    ctx.lineTo(cx + w/2 - r, cy - h/2);
+    ctx.quadraticCurveTo(cx + w/2, cy - h/2, cx + w/2, cy - h/2 + r);
+    ctx.lineTo(cx + w/2, cy + h/2 - r);
+    ctx.quadraticCurveTo(cx + w/2, cy + h/2, cx + w/2 - r, cy + h/2);
+    ctx.lineTo(cx - w/2 + r, cy + h/2);
+    ctx.quadraticCurveTo(cx - w/2, cy + h/2, cx - w/2, cy + h/2 - r);
+    ctx.lineTo(cx - w/2, cy - h/2 + r);
+    ctx.quadraticCurveTo(cx - w/2, cy - h/2, cx - w/2 + r, cy - h/2);
+    ctx.closePath();
+
+    var grad = ctx.createLinearGradient(cx, cy - h/2, cx, cy + h/2);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, borderColor);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + (18 * SCALE) + 'px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, cy);
+}
+
+function drawHexButton(cx, cy, r, text, color) {
+    drawHexagon(cx, cy, r, color, 'rgba(255,255,255,0.3)', 1.5);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + (14 * SCALE) + 'px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, cy);
+}
+
+function drawGameOver() {
+    drawBackground();
+    drawBoard();
+
+    // 遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    var resultText, resultColor;
+    if (G.playerScore > G.aiScore) {
+        resultText = '你赢了!';
+        resultColor = CONFIG.COLORS.player;
+    } else if (G.playerScore < G.aiScore) {
+        resultText = 'AI获胜';
+        resultColor = CONFIG.COLORS.ai;
+    } else {
+        resultText = '平局';
+        resultColor = CONFIG.COLORS.gold;
+    }
+
+    ctx.font = 'bold ' + (48 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = resultColor;
+    ctx.fillText(resultText, W/2, H * 0.25);
+
+    ctx.font = (22 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = CONFIG.COLORS.text;
+    ctx.fillText(G.playerScore + ' : ' + G.aiScore, W/2, H * 0.35);
+
+    ctx.font = (16 * SCALE) + 'px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    var tMins = Math.floor(G.timer / 60);
+    var tSecs = G.timer % 60;
+    ctx.fillText('步数: ' + G.moveCount + '  时间: ' + (tMins < 10 ? '0' : '') + tMins + ':' + (tSecs < 10 ? '0' : '') + tSecs, W/2, H * 0.43);
+
+    if (G.playerScore > G.highScore) {
+        ctx.fillStyle = CONFIG.COLORS.gold;
+        ctx.font = 'bold ' + (18 * SCALE) + 'px Microsoft YaHei';
+        ctx.fillText('新纪录!', W/2, H * 0.50);
+    }
+
+    var btnW = 180 * SCALE;
+    var btnH = 50 * SCALE;
+    drawButton(W/2, H * 0.62, btnW, btnH, '再来一局', '#4fc3f7', '#0288d1');
+    drawButton(W/2, H * 0.74, btnW, btnH, '返回菜单', '#666', '#444');
+
+    drawParticles();
+
+    // 分数弹出
+    if (G.showScorePop) {
+        var sp = G.showScorePop;
+        ctx.globalAlpha = sp.life;
+        ctx.font = 'bold ' + (18 * SCALE) + 'px Microsoft YaHei';
+        ctx.fillStyle = sp.color;
+        ctx.fillText(sp.text, sp.x, sp.y - (1 - sp.life) * 30);
+        ctx.globalAlpha = 1;
+    }
+}
+
+function drawGame() {
+    drawBackground();
+    drawBoard();
+    drawGameUI();
+    drawParticles();
+
+    // 暂停遮罩
+    if (G.paused) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold ' + (40 * SCALE) + 'px Microsoft YaHei';
+        ctx.fillStyle = CONFIG.COLORS.text;
+        ctx.fillText('已暂停', W/2, H/2 - 20 * SCALE);
+        ctx.font = (16 * SCALE) + 'px Microsoft YaHei';
+        ctx.fillStyle = '#aaa';
+        ctx.fillText('按 P 继续  |  按 S 切换音效', W/2, H/2 + 25 * SCALE);
+    }
+
+    // 分数弹出
+    if (G.showScorePop) {
+        var sp = G.showScorePop;
+        ctx.globalAlpha = sp.life;
+        ctx.font = 'bold ' + (18 * SCALE) + 'px Microsoft YaHei';
+        ctx.fillStyle = sp.color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(sp.text, sp.x, sp.y - (1 - sp.life) * 30);
+        ctx.globalAlpha = 1;
+    }
+}
+
+// ==================== 主循环 ====================
+function gameLoop() {
+    // 更新
+    updateAnimations();
+    updateParticles();
+
+    if (G.showScorePop) {
+        G.showScorePop.life -= 0.015;
+        if (G.showScorePop.life <= 0) G.showScorePop = null;
+    }
+
+    // 渲染
+    switch (G.state) {
+        case 'menu': drawMenu(); break;
+        case 'difficulty': drawDifficultySelect(); break;
+        case 'playing': drawGame(); break;
+        case 'gameover': drawGameOver(); break;
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ==================== 输入处理 ====================
+function getMenuButton(x, y) {
+    var btnW = 220 * SCALE;
+    var btnH = 55 * SCALE;
+    var btnY = H * 0.48;
+    if (Math.abs(x - W/2) < btnW/2 && Math.abs(y - btnY) < btnH/2) return 'start';
+    return null;
+}
+
+function getDifficultyButton(x, y) {
+    var btnW = 200 * SCALE;
+    var btnH = 50 * SCALE;
+    var startY = H * 0.38;
+    var gap = 75 * SCALE;
+
+    for (var i = 0; i < 3; i++) {
+        var by = startY + i * gap;
+        if (Math.abs(x - W/2) < btnW/2 && Math.abs(y - by) < btnH/2) return i;
+    }
+
+    // 返回按钮
+    if (Math.abs(x - W/2) < 60 * SCALE && Math.abs(y - H * 0.85) < 20 * SCALE) return 'back';
+    return null;
+}
+
+function getGameButton(x, y) {
+    var btnSize = 40 * SCALE;
+    // 悔棋
+    if (hexDistance(x, y, W/2 - 50 * SCALE, H - 35 * SCALE) < btnSize) return 'undo';
+    // 新游戏
+    if (hexDistance(x, y, W/2 + 50 * SCALE, H - 35 * SCALE) < btnSize) return 'restart';
+    return null;
+}
+
+function getGameOverButton(x, y) {
+    var btnW = 180 * SCALE;
+    var btnH = 50 * SCALE;
+    if (Math.abs(x - W/2) < btnW/2 && Math.abs(y - H * 0.62) < btnH/2) return 'replay';
+    if (Math.abs(x - W/2) < btnW/2 && Math.abs(y - H * 0.74) < btnH/2) return 'menu';
+    return null;
+}
+
+function handleClick(x, y) {
+    switch (G.state) {
+        case 'menu':
+            var menuBtn = getMenuButton(x, y);
+            if (menuBtn === 'start') G.state = 'difficulty';
+            break;
+
+        case 'difficulty':
+            var diffBtn = getDifficultyButton(x, y);
+            if (diffBtn === 'back') {
+                G.state = 'menu';
+            } else if (diffBtn !== null) {
+                startGame(diffBtn);
+            }
+            break;
+
+        case 'playing':
+            if (G.animating || G.aiThinking || G.currentPlayer !== 1) break;
+
+            // 检查底部按钮
+            var gameBtn = getGameButton(x, y);
+            if (gameBtn === 'restart') {
+                startGame(G.difficulty);
+                break;
+            }
+
+            // 棋盘点击
+            var hex = pixelToHex(x, y);
+            if (isValidHex(hex.q, hex.r) && G.board[hex.q] && G.board[hex.q][hex.r] === 0) {
+                var flips = getFlips(hex.q, hex.r, 1);
+                if (flips.length > 0) {
+                    applyMove(hex.q, hex.r, 1, true);
+                }
+            }
+            break;
+
+        case 'gameover':
+            var overBtn = getGameOverButton(x, y);
+            if (overBtn === 'replay') {
+                startGame(G.difficulty);
+            } else if (overBtn === 'menu') {
+                G.state = 'menu';
+            }
+            break;
+    }
+}
+
+function handleMove(x, y) {
+    if (G.state === 'playing') {
+        var hex = pixelToHex(x, y);
+        if (isValidHex(hex.q, hex.r)) {
+            G.hoverHex = hex;
+        } else {
+            G.hoverHex = null;
+        }
+    }
+}
+
+// 鼠标事件
+canvas.addEventListener('click', function(e) {
+    handleClick(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('mousemove', function(e) {
+    handleMove(e.clientX, e.clientY);
+});
+
+// 触屏事件
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    handleClick(t.clientX, t.clientY);
+});
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    handleMove(t.clientX, t.clientY);
+});
+
+// 键盘事件
+canvas.addEventListener('keydown', function(e) {
+    switch (e.key) {
+        case 'Escape':
+            if (G.state === 'playing' || G.state === 'gameover') G.state = 'menu';
+            else if (G.state === 'difficulty') G.state = 'menu';
+            break;
+        case 'u':
+        case 'U':
+            if (G.state === 'playing') undoMove();
+            break;
+        case 'r':
+        case 'R':
+            if (G.state === 'playing') startGame(G.difficulty);
+            break;
+        case 'n':
+        case 'N':
+            if (G.state === 'gameover') startGame(G.difficulty);
+            break;
+        case 'm':
+        case 'M':
+            if (G.state === 'gameover') G.state = 'menu';
+            break;
+        case 'p':
+        case 'P':
+            if (G.state === 'playing') G.paused = !G.paused;
+            break;
+        case 's':
+        case 'S':
+            G.soundEnabled = !G.soundEnabled;
+            break;
+        case '1':
+            if (G.state === 'difficulty') startGame(0);
+            break;
+        case '2':
+            if (G.state === 'difficulty') startGame(1);
+            break;
+        case '3':
+            if (G.state === 'difficulty') startGame(2);
+            break;
+    }
+});
+
+// ==================== 初始化 ====================
+G.highScore = parseInt(localStorage.getItem('hexReversi_highScore')) || 0;
+gameLoop();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>举重</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+background: #1a1a2e;
+overflow: hidden;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+height: 100vh;
+font-family: 'Microsoft YaHei', sans-serif;
+touch-action: none;
+user-select: none;
+-webkit-user-select: none;
+}
+canvas {
+display: block;
+max-width: 100%;
+max-height: 100%;
+}
+#bottomAd {
+position: fixed;
+bottom: 0;
+left: 0;
+width: 100%;
+height: 50px;
+background: linear-gradient(135deg, #16213e, #0f3460);
+display: flex;
+align-items: center;
+justify-content: center;
+z-index: 100;
+border-top: 1px solid #e94560;
+}
+#bottomAd span {
+color: #aaa;
+font-size: 12px;
+}
+#sponsorBtn {
+position: fixed;
+top: 10px;
+right: 10px;
+background: linear-gradient(135deg, #e94560, #533483);
+color: white;
+border: none;
+padding: 8px 16px;
+border-radius: 20px;
+font-size: 12px;
+cursor: pointer;
+z-index: 100;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="bottomAd"><span>广告位招租</span></div>
+<button id="sponsorBtn" onclick="showSponsor()">赞助</button>
+
+<script>
+// ============ CONFIGURATION ============
+const CONFIG = {
+INITIAL_WEIGHT: 40,
+WEIGHT_INCREMENT: 10,
+MAX_WEIGHT: 200,
+ROUNDS_PER_WEIGHT: 3,
+PERFECT_THRESHOLD: 0.08,
+GREAT_THRESHOLD: 0.15,
+GOOD_THRESHOLD: 0.25,
+POWER_SPEED: 3,
+LIFT_SPEED: 0.03,
+BAR_WIDTH: 0.4,
+BAR_HEIGHT: 0.06,
+RHYTHM_INTERVAL: 2000,
+AD_SHOW_INTERVAL: 5,
+};
+
+// ============ GAME STATE ============
+var canvas, ctx;
+var W, H, SCALE;
+var G = {
+state: 'menu',
+score: 0,
+combo: 0,
+maxCombo: 0,
+weight: CONFIG.INITIAL_WEIGHT,
+round: 0,
+totalLifts: 0,
+perfectCount: 0,
+greatCount: 0,
+goodCount: 0,
+power: 0,
+powerDir: 1,
+liftY: 0,
+liftState: 'waiting',
+beatTimer: 0,
+beatInterval: CONFIG.RHYTHM_INTERVAL,
+beatActive: false,
+beatAlpha: 0,
+lastBeatTime: 0,
+particles: [],
+textEffects: [],
+shakes: [],
+highScore: 0,
+totalGames: 0,
+adTimer: 0,
+showAd: false,
+adType: '',
+sponsorVisible: false,
+characterY: 0,
+characterState: 'idle',
+barbellRotation: 0,
+sweatDrops: [],
+breathPhase: 0,
+groundShadow: 0,
+spotlightAngle: 0,
+achievementPopups: [],
+achievements: {},
+roundHistory: [],
+lastRoundScore: 0,
+difficulty: 1,
+rhythmAccuracy: 0,
+totalAttempts: 0,
+};
+
+// ============ PARTICLE SYSTEM ============
+class Particle {
+constructor(x, y, type) {
+this.x = x;
+this.y = y;
+this.type = type || 'default';
+this.life = 1;
+this.maxLife = 1;
+this.vx = (Math.random() - 0.5) * 4;
+this.vy = -Math.random() * 3 - 1;
+this.gravity = 0.1;
+this.size = Math.random() * 4 + 2;
+this.color = this.getColor();
+this.rotation = Math.random() * Math.PI * 2;
+this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+}
+
+getColor() {
+const colors = {
+'default': ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff6b9d'],
+'success': ['#4ade80', '#22c55e', '#86efac', '#bbf7d0'],
+'perfect': ['#fbbf24', '#f59e0b', '#fcd34d', '#fde68a'],
+'great': ['#60a5fa', '#3b82f6', '#93c5fd', '#bfdbfe'],
+'good': ['#a78bfa', '#8b5cf6', '#c4b5fd', '#ddd6fe'],
+'fail': ['#f87171', '#ef4444', '#fca5a5', '#fecaca'],
+'sweat': ['#60a5fa', '#93c5fd', '#bfdbfe'],
+'dust': ['#9ca3af', '#6b7280', '#d1d5db', '#e5e7eb'],
+'star': ['#fbbf24', '#f59e0b', '#fcd34d', '#fde68a', '#fff'],
+};
+const c = colors[this.type] || colors['default'];
+return c[Math.floor(Math.random() * c.length)];
+}
+
+update(dt) {
+this.life -= dt * 2;
+this.x += this.vx;
+this.y += this.vy;
+this.vy += this.gravity;
+this.rotation += this.rotationSpeed;
+if (this.type === 'sweat') {
+this.vx *= 0.98;
+this.gravity = 0.05;
+}
+if (this.type === 'dust') {
+this.vy *= 0.95;
+this.vx *= 0.97;
+this.gravity = 0.02;
+}
+return this.life > 0;
+}
+
+draw(ctx) {
+ctx.save();
+ctx.globalAlpha = Math.max(0, this.life);
+ctx.translate(this.x, this.y);
+ctx.rotate(this.rotation);
+ctx.fillStyle = this.color;
+if (this.type === 'star') {
+this.drawStar(ctx, 0, 0, this.size * 2, this.size, 5);
+} else if (this.type === 'sweat') {
+ctx.beginPath();
+ctx.ellipse(0, 0, this.size * 0.6, this.size, 0, 0, Math.PI * 2);
+ctx.fill();
+} else {
+ctx.beginPath();
+ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+ctx.fill();
+}
+ctx.restore();
+}
+
+drawStar(ctx, cx, cy, outerR, innerR, points) {
+ctx.beginPath();
+for (let i = 0; i < points * 2; i++) {
+const r = i % 2 === 0 ? outerR : innerR;
+const angle = (i * Math.PI) / points - Math.PI / 2;
+const x = cx + Math.cos(angle) * r;
+const y = cy + Math.sin(angle) * r;
+if (i === 0) ctx.moveTo(x, y);
+else ctx.lineTo(x, y);
+}
+ctx.closePath();
+ctx.fill();
+}
+}
+
+// ============ INITIALIZATION ============
+function init() {
+canvas = document.getElementById('canvas');
+ctx = canvas.getContext('2d');
+resize();
+window.addEventListener('resize', resize);
+setupInput();
+loadHighScore();
+requestAnimationFrame(gameLoop);
+}
+
+function resize() {
+const dpr = window.devicePixelRatio || 1;
+const maxW = window.innerWidth;
+const maxH = window.innerHeight - 50;
+const aspect = 9 / 16;
+if (maxW / maxH > aspect) {
+H = maxH;
+W = H * aspect;
+} else {
+W = maxW;
+H = W / aspect;
+}
+canvas.width = W * dpr;
+canvas.height = H * dpr;
+canvas.style.width = W + 'px';
+canvas.style.height = H + 'px';
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+SCALE = W / 400;
+}
+
+function setupInput() {
+const actions = [
+{ keys: ['Space', 'Enter'], action: 'mainAction' },
+{ keys: ['KeyZ'], action: 'mainAction' },
+{ keys: ['Escape'], action: 'pause' },
+];
+
+document.addEventListener('keydown', (e) => {
+if (G.showAd) { closeAd(); return; }
+if (G.sponsorVisible) { closeSponsor(); return; }
+const a = actions.find(a => a.keys.includes(e.code));
+if (a) {
+e.preventDefault();
+handleInput(a.action);
+}
+});
+
+canvas.addEventListener('click', (e) => {
+if (G.showAd) { closeAd(); return; }
+if (G.sponsorVisible) { closeSponsor(); return; }
+handleInput('mainAction');
+});
+
+canvas.addEventListener('touchstart', (e) => {
+e.preventDefault();
+if (G.showAd) { closeAd(); return; }
+if (G.sponsorVisible) { closeSponsor(); return; }
+handleInput('mainAction');
+}, { passive: false });
+}
+
+function handleInput(action) {
+switch (G.state) {
+case 'menu':
+if (action === 'mainAction') startGame();
+break;
+case 'playing':
+if (action === 'mainAction') handleLiftAction();
+if (action === 'pause') G.state = 'paused';
+break;
+case 'paused':
+if (action === 'mainAction' || action === 'pause') G.state = 'playing';
+break;
+case 'gameOver':
+if (action === 'mainAction') startGame();
+break;
+case 'roundEnd':
+if (action === 'mainAction') nextRound();
+break;
+}
+}
+
+// ============ GAME LOGIC ============
+function startGame() {
+G.state = 'playing';
+G.score = 0;
+G.combo = 0;
+G.maxCombo = 0;
+G.weight = CONFIG.INITIAL_WEIGHT;
+G.round = 0;
+G.totalLifts = 0;
+G.perfectCount = 0;
+G.greatCount = 0;
+G.goodCount = 0;
+G.power = 0;
+G.powerDir = 1;
+G.liftY = 0;
+G.liftState = 'waiting';
+G.beatTimer = 0;
+G.beatActive = false;
+G.beatAlpha = 0;
+G.lastBeatTime = performance.now();
+G.particles = [];
+G.textEffects = [];
+G.sweatDrops = [];
+G.achievementPopups = [];
+G.roundHistory = [];
+G.lastRoundScore = 0;
+G.difficulty = 1;
+G.rhythmAccuracy = 0;
+G.totalAttempts = 0;
+G.characterY = 0;
+G.characterState = 'idle';
+G.adTimer = 0;
+G.showAd = false;
+G.totalGames++;
+checkAchievements();
+}
+
+function handleLiftAction() {
+if (G.liftState === 'waiting') {
+G.liftState = 'powering';
+G.power = 0;
+G.powerDir = 1;
+} else if (G.liftState === 'powering') {
+const accuracy = Math.abs(0.5 - G.power / 100) * 2;
+G.totalAttempts++;
+if (accuracy <= CONFIG.PERFECT_THRESHOLD) {
+scoreLift('PERFECT!', 300);
+} else if (accuracy <= CONFIG.GREAT_THRESHOLD) {
+scoreLift('GREAT!', 200);
+} else if (accuracy <= CONFIG.GOOD_THRESHOLD) {
+scoreLift('GOOD!', 100);
+} else {
+scoreLift('MISS!', 0);
+}
+} else if (G.liftState === 'lifting') {
+// Already lifting
+}
+}
+
+function scoreLift(text, points) {
+if (points > 0) {
+G.combo++;
+if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+const comboBonus = Math.floor(G.combo / 5) * 50;
+const weightBonus = Math.floor(G.weight / 10) * 10;
+const totalPoints = (points + comboBonus + weightBonus) * G.difficulty;
+G.score += totalPoints;
+G.totalLifts++;
+if (text === 'PERFECT!') {
+G.perfectCount++;
+G.liftState = 'lifting';
+G.characterState = 'lifting';
+spawnParticles(W / 2, H * 0.45, 'perfect', 30);
+spawnParticles(W / 2, H * 0.35, 'star', 15);
+addTextEffect(text, W / 2, H * 0.3, '#fbbf24', 48);
+if (G.combo > 0 && G.combo % 5 === 0) {
+addTextEffect(G.combo + ' COMBO!', W / 2, H * 0.25, '#ff6b6b', 36);
+}
+} else if (text === 'GREAT!') {
+G.greatCount++;
+G.liftState = 'lifting';
+G.characterState = 'lifting';
+spawnParticles(W / 2, H * 0.45, 'great', 20);
+addTextEffect(text, W / 2, H * 0.3, '#60a5fa', 40);
+} else if (text === 'GOOD!') {
+G.goodCount++;
+G.liftState = 'lifting';
+G.characterState = 'lifting';
+spawnParticles(W / 2, H * 0.45, 'good', 12);
+addTextEffect(text, W / 2, H * 0.3, '#a78bfa', 32);
+}
+addTextEffect('+' + totalPoints, W / 2, H * 0.38, '#ffffff', 24);
+} else {
+G.combo = 0;
+G.liftState = 'waiting';
+spawnParticles(W / 2, H * 0.45, 'fail', 15);
+addTextEffect('MISS!', W / 2, H * 0.3, '#f87171', 44);
+addTextEffect('节奏没跟上', W / 2, H * 0.36, '#fca5a5', 20);
+}
+G.rhythmAccuracy += (text === 'PERFECT!' ? 1 : text === 'GREAT!' ? 0.7 : text === 'GOOD!' ? 0.4 : 0);
+}
+
+function nextRound() {
+G.round++;
+if (G.round >= CONFIG.ROUNDS_PER_WEIGHT) {
+G.round = 0;
+G.weight += CONFIG.WEIGHT_INCREMENT;
+G.difficulty = 1 + (G.weight - CONFIG.INITIAL_WEIGHT) / 50;
+if (G.weight > CONFIG.MAX_WEIGHT) {
+gameOver();
+return;
+}
+}
+G.state = 'playing';
+G.liftState = 'waiting';
+G.beatTimer = 0;
+G.beatActive = false;
+G.lastBeatTime = performance.now();
+G.beatInterval = CONFIG.RHYTHM_INTERVAL / G.difficulty;
+}
+
+function gameOver() {
+G.state = 'gameOver';
+if (G.score > G.highScore) {
+G.highScore = G.score;
+saveHighScore();
+spawnParticles(W / 2, H * 0.3, 'star', 50);
+}
+G.adTimer++;
+if (G.adTimer % CONFIG.AD_SHOW_INTERVAL === 0) {
+showInterstitialAd();
+}
+checkAchievements();
+}
+
+// ============ RHYTHM SYSTEM ============
+function updateBeat(dt) {
+if (G.state !== 'playing') return;
+G.beatTimer += dt * 1000;
+if (G.beatTimer >= G.beatInterval) {
+G.beatTimer -= G.beatInterval;
+G.beatActive = true;
+G.beatAlpha = 1;
+G.lastBeatTime = performance.now();
+spawnBeatParticles();
+}
+if (G.beatActive) {
+G.beatAlpha -= dt * 3;
+if (G.beatAlpha <= 0) {
+G.beatActive = false;
+}
+}
+}
+
+function spawnBeatParticles() {
+const bx = W / 2;
+const by = H * 0.65;
+for (let i = 0; i < 8; i++) {
+const angle = (i / 8) * Math.PI * 2;
+const p = new Particle(bx + Math.cos(angle) * 30, by + Math.sin(angle) * 20, 'default');
+p.vx = Math.cos(angle) * 2;
+p.vy = Math.sin(angle) * 2;
+p.size = 3;
+G.particles.push(p);
+}
+}
+
+// ============ POWER BAR ============
+function updatePower(dt) {
+if (G.state !== 'playing' || G.liftState !== 'powering') return;
+G.power += G.powerDir * CONFIG.POWER_SPEED * dt * 60;
+if (G.power >= 100) {
+G.power = 100;
+G.powerDir = -1;
+} else if (G.power <= 0) {
+G.power = 0;
+G.powerDir = 1;
+}
+}
+
+// ============ LIFT ANIMATION ============
+function updateLift(dt) {
+if (G.liftState === 'lifting') {
+G.liftY += CONFIG.LIFT_SPEED * dt * 60;
+if (G.liftY >= 1) {
+G.liftY = 1;
+G.liftState = 'downing';
+spawnParticles(W / 2, H * 0.3, 'dust', 10);
+addShake(5, 200);
+}
+} else if (G.liftState === 'downing') {
+G.liftY -= CONFIG.LIFT_SPEED * 0.5 * dt * 60;
+if (G.liftY <= 0) {
+G.liftY = 0;
+G.liftState = 'waiting';
+G.characterState = 'idle';
+checkRoundComplete();
+}
+}
+}
+
+function checkRoundComplete() {
+G.roundHistory.push(G.lastRoundScore);
+if (G.round >= CONFIG.ROUNDS_PER_WEIGHT - 1 && G.weight >= CONFIG.MAX_WEIGHT) {
+gameOver();
+} else {
+G.state = 'roundEnd';
+}
+}
+
+// ============ PARTICLES ============
+function spawnParticles(x, y, type, count) {
+for (let i = 0; i < count; i++) {
+G.particles.push(new Particle(x, y, type));
+}
+}
+
+function updateParticles(dt) {
+G.particles = G.particles.filter(p => p.update(dt));
+}
+
+// ============ TEXT EFFECTS ============
+function addTextEffect(text, x, y, color, size) {
+G.textEffects.push({
+text, x, y, color, size,
+life: 1,
+vy: -1.5,
+scale: 1.5
+});
+}
+
+function updateTextEffects(dt) {
+G.textEffects = G.textEffects.filter(t => {
+t.life -= dt * 1.5;
+t.y += t.vy;
+t.vy *= 0.98;
+if (t.scale > 1) t.scale -= dt * 3;
+return t.life > 0;
+});
+}
+
+// ============ SCREEN SHAKE ============
+function addShake(intensity, duration) {
+G.shakes.push({ intensity, duration, elapsed: 0 });
+}
+
+function updateShakes(dt) {
+G.shakes = G.shakes.filter(s => {
+s.elapsed += dt * 1000;
+return s.elapsed < s.duration;
+});
+}
+
+function getShakeOffset() {
+let ox = 0, oy = 0;
+G.shakes.forEach(s => {
+const t = 1 - s.elapsed / s.duration;
+const i = s.intensity * t;
+ox += (Math.random() - 0.5) * i * 2;
+oy += (Math.random() - 0.5) * i * 2;
+});
+return { x: ox, y: oy };
+}
+
+// ============ CHARACTER ============
+function updateCharacter(dt) {
+G.breathPhase += dt * 3;
+if (G.characterState === 'idle') {
+G.characterY = Math.sin(G.breathPhase) * 3;
+}
+if (G.characterState === 'lifting' && G.liftState === 'lifting') {
+G.characterY = -G.liftY * 30;
+}
+if (Math.random() < dt * 2 && G.state === 'playing' && G.liftState === 'powering') {
+const sx = W / 2 + (Math.random() - 0.5) * 40;
+const sy = H * 0.35 + Math.random() * 20;
+G.sweatDrops.push({
+x: sx, y: sy,
+vx: (Math.random() - 0.5) * 2,
+vy: -Math.random() * 2 - 1,
+life: 1
+});
+}
+G.sweatDrops = G.sweatDrops.filter(d => {
+d.life -= dt * 2;
+d.x += d.vx;
+d.y += d.vy;
+d.vy += 0.1;
+return d.life > 0;
+});
+}
+
+// ============ ACHIEVEMENTS ============
+const ACHIEVEMENTS = [
+{ id: 'first_lift', name: '初次举重', desc: '完成第一次举重', check: () => G.totalLifts >= 1 },
+{ id: 'combo_10', name: '连击大师', desc: '达成10连击', check: () => G.maxCombo >= 10 },
+{ id: 'combo_20', name: '连击宗师', desc: '达成20连击', check: () => G.maxCombo >= 20 },
+{ id: 'perfect_10', name: '精准之王', desc: '累计10次PERFECT', check: () => G.perfectCount >= 10 },
+{ id: 'weight_100', name: '百公斤', desc: '举起100公斤', check: () => G.weight >= 100 },
+{ id: 'weight_150', name: '力拔山兮', desc: '举起150公斤', check: () => G.weight >= 150 },
+{ id: 'weight_200', name: '举世无双', desc: '举起200公斤', check: () => G.weight >= 200 },
+{ id: 'score_1000', name: '千分', desc: '单局得分超过1000', check: () => G.score >= 1000 },
+{ id: 'score_5000', name: '五千分', desc: '单局得分超过5000', check: () => G.score >= 5000 },
+{ id: 'games_5', name: '坚持不懈', desc: '游玩5次', check: () => G.totalGames >= 5 },
+];
+
+function checkAchievements() {
+ACHIEVEMENTS.forEach(a => {
+if (!G.achievements[a.id] && a.check()) {
+G.achievements[a.id] = true;
+addAchievementPopup(a.name, a.desc);
+saveAchievements();
+}
+});
+}
+
+function addAchievementPopup(name, desc) {
+G.achievementPopups.push({ name, desc, life: 3, y: 0 });
+spawnParticles(W / 2, H * 0.15, 'star', 20);
+}
+
+function updateAchievements(dt) {
+G.achievementPopups = G.achievementPopups.filter(a => {
+a.life -= dt;
+a.y = Math.min(a.y + dt * 60, 40);
+return a.life > 0;
+});
+}
+
+// ============ AD SYSTEM ============
+function showInterstitialAd() {
+G.showAd = true;
+G.adType = 'interstitial';
+}
+
+function showSponsor() {
+G.sponsorVisible = true;
+}
+
+function closeAd() {
+G.showAd = false;
+G.adType = '';
+}
+
+function closeSponsor() {
+G.sponsorVisible = false;
+}
+
+function drawAd() {
+if (!G.showAd) return;
+ctx.fillStyle = 'rgba(0,0,0,0.85)';
+ctx.fillRect(0, 0, W, H);
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${20 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('广告', W / 2, H / 2 - 20 * SCALE);
+ctx.font = `${14 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#aaa';
+ctx.fillText('点击任意位置关闭', W / 2, H / 2 + 20 * SCALE);
+if (G.adType === 'interstitial') {
+ctx.fillStyle = '#e94560';
+ctx.fillRect(W / 2 - 80 * SCALE, H / 2 + 40 * SCALE, 160 * SCALE, 40 * SCALE);
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${16 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('赞助支持', W / 2, H / 2 + 65 * SCALE);
+}
+}
+
+function drawSponsor() {
+if (!G.sponsorVisible) return;
+ctx.fillStyle = 'rgba(0,0,0,0.9)';
+ctx.fillRect(0, 0, W, H);
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${22 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('感谢您的支持!', W / 2, H / 2 - 40 * SCALE);
+ctx.font = `${14 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#aaa';
+const lines = ['您的支持是我持续开发的动力', '可以通过以下方式支持我:', '分享给朋友 / 点击广告 / 留言鼓励'];
+lines.forEach((line, i) => {
+ctx.fillText(line, W / 2, H / 2 + i * 25 * SCALE);
+});
+ctx.fillStyle = '#e94560';
+ctx.font = `${12 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('点击任意位置关闭', W / 2, H / 2 + 100 * SCALE);
+}
+
+// ============ DRAWING ============
+function drawBackground() {
+const grad = ctx.createLinearGradient(0, 0, 0, H);
+grad.addColorStop(0, '#0f0c29');
+grad.addColorStop(0.5, '#302b63');
+grad.addColorStop(1, '#24243e');
+ctx.fillStyle = grad;
+ctx.fillRect(0, 0, W, H);
+ctx.fillStyle = 'rgba(255,255,255,0.03)';
+for (let i = 0; i < 30; i++) {
+const x = ((i * 137.5) % W);
+const y = ((i * 89.3) % H);
+const s = (i % 3) + 1;
+ctx.beginPath();
+ctx.arc(x, y, s, 0, Math.PI * 2);
+ctx.fill();
+}
+}
+
+function drawMenu() {
+drawBackground();
+ctx.save();
+const pulse = Math.sin(performance.now() / 500) * 0.1 + 1;
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${52 * SCALE * pulse}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.shadowColor = '#e94560';
+ctx.shadowBlur = 20;
+ctx.fillText('举重', W / 2, H * 0.25);
+ctx.shadowBlur = 0;
+ctx.font = `${16 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#aaa';
+ctx.fillText('节奏举重 · 按键时机 · 力量控制', W / 2, H * 0.33);
+drawBarbellPreview(W / 2, H * 0.48);
+const btnY = H * 0.65;
+const btnW = 180 * SCALE;
+const btnH = 50 * SCALE;
+const hover = false;
+const btnGrad = ctx.createLinearGradient(W / 2 - btnW / 2, btnY, W / 2 + btnW / 2, btnY);
+btnGrad.addColorStop(0, '#e94560');
+btnGrad.addColorStop(1, '#533483');
+ctx.fillStyle = btnGrad;
+roundRect(ctx, W / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 25 * SCALE);
+ctx.fill();
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${20 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('开始举重', W / 2, btnY + 7 * SCALE);
+ctx.font = `${12 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#888';
+ctx.fillText('空格/点击/触屏 开始', W / 2, H * 0.78);
+if (G.highScore > 0) {
+ctx.font = `${14 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#ffd93d';
+ctx.fillText('最高分: ' + G.highScore, W / 2, H * 0.85);
+}
+ctx.font = `${10 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#555';
+ctx.fillText('成就: ' + Object.keys(G.achievements).length + '/' + ACHIEVEMENTS.length, W / 2, H * 0.9);
+ctx.restore();
+}
+
+function drawBarbellPreview(x, y) {
+ctx.save();
+const rot = Math.sin(performance.now() / 1000) * 0.1;
+ctx.translate(x, y);
+ctx.rotate(rot);
+ctx.strokeStyle = '#888';
+ctx.lineWidth = 8 * SCALE;
+ctx.beginPath();
+ctx.moveTo(-80 * SCALE, 0);
+ctx.lineTo(80 * SCALE, 0);
+ctx.stroke();
+ctx.fillStyle = '#666';
+[-80, -60, 60, 80].forEach(offset => {
+roundRect(ctx, (offset - 10) * SCALE, -25 * SCALE, 20 * SCALE, 50 * SCALE, 4 * SCALE);
+ctx.fill();
+});
+ctx.fillStyle = '#888';
+roundRect(ctx, -15 * SCALE, -8 * SCALE, 30 * SCALE, 16 * SCALE, 4 * SCALE);
+ctx.fill();
+ctx.restore();
+}
+
+function drawGame() {
+drawBackground();
+const shake = getShakeOffset();
+ctx.save();
+ctx.translate(shake.x, shake.y);
+drawStage();
+drawCharacter();
+drawBarbell();
+drawPowerMeter();
+drawBeatIndicator();
+drawUI();
+ctx.restore();
+drawParticles();
+drawTextEffects();
+drawAchievementPopups();
+drawAd();
+drawSponsor();
+}
+
+function drawStage() {
+ctx.fillStyle = '#1a1a1a';
+ctx.fillRect(W * 0.1, H * 0.7, W * 0.8, H * 0.05);
+const stageGrad = ctx.createLinearGradient(W * 0.1, H * 0.7, W * 0.1, H * 0.75);
+stageGrad.addColorStop(0, '#333');
+stageGrad.addColorStop(1, '#222');
+ctx.fillStyle = stageGrad;
+ctx.fillRect(W * 0.1, H * 0.7, W * 0.8, H * 0.05);
+ctx.fillStyle = 'rgba(255,255,255,0.05)';
+ctx.fillRect(W * 0.1, H * 0.7, W * 0.8, H * 0.01);
+ctx.fillStyle = 'rgba(0,0,0,0.3)';
+ctx.beginPath();
+ctx.ellipse(W / 2, H * 0.72, W * 0.35, H * 0.015, 0, 0, Math.PI * 2);
+ctx.fill();
+}
+
+function drawCharacter() {
+const cx = W / 2;
+const cy = H * 0.55 + G.characterY;
+ctx.save();
+ctx.translate(cx, cy);
+if (G.characterState === 'lifting') {
+ctx.translate(0, -G.liftY * 40 * SCALE);
+}
+const breath = Math.sin(G.breathPhase) * 2;
+ctx.fillStyle = '#e8b86d';
+roundRect(ctx, -8 * SCALE, -35 * SCALE + breath, 16 * SCALE, 16 * SCALE, 8 * SCALE);
+ctx.fill();
+ctx.fillStyle = '#e94560';
+roundRect(ctx, -14 * SCALE, -18 * SCALE + breath, 28 * SCALE, 30 * SCALE, 4 * SCALE);
+ctx.fill();
+ctx.fillStyle = '#e8b86d';
+const armAngle = G.liftState === 'lifting' ? -Math.PI / 2 : -Math.PI / 4;
+ctx.save();
+ctx.translate(-14 * SCALE, -14 * SCALE + breath);
+ctx.rotate(armAngle);
+roundRect(ctx, -4 * SCALE, 0, 8 * SCALE, 22 * SCALE, 4 * SCALE);
+ctx.fill();
+ctx.restore();
+ctx.save();
+ctx.translate(14 * SCALE, -14 * SCALE + breath);
+ctx.rotate(-armAngle);
+roundRect(ctx, -4 * SCALE, 0, 8 * SCALE, 22 * SCALE, 4 * SCALE);
+ctx.fill();
+ctx.restore();
+ctx.fillStyle = '#2d3436';
+roundRect(ctx, -12 * SCALE, 12 * SCALE + breath, 10 * SCALE, 20 * SCALE, 3 * SCALE);
+ctx.fill();
+roundRect(ctx, 2 * SCALE, 12 * SCALE + breath, 10 * SCALE, 20 * SCALE, 3 * SCALE);
+ctx.fill();
+ctx.fillStyle = '#fff';
+ctx.beginPath();
+ctx.arc(-4 * SCALE, -28 * SCALE + breath, 2 * SCALE, 0, Math.PI * 2);
+ctx.arc(4 * SCALE, -28 * SCALE + breath, 2 * SCALE, 0, Math.PI * 2);
+ctx.fill();
+if (G.liftState === 'powering') {
+ctx.strokeStyle = '#fff';
+ctx.lineWidth = 1.5 * SCALE;
+ctx.beginPath();
+ctx.moveTo(-5 * SCALE, -22 * SCALE + breath);
+ctx.lineTo(-3 * SCALE, -21 * SCALE + breath);
+ctx.moveTo(5 * SCALE, -22 * SCALE + breath);
+ctx.lineTo(3 * SCALE, -21 * SCALE + breath);
+ctx.stroke();
+}
+ctx.restore();
+G.sweatDrops.forEach(d => {
+ctx.fillStyle = 'rgba(96,165,250,' + d.life + ')';
+ctx.beginPath();
+ctx.arc(d.x, d.y, 2 * SCALE, 0, Math.PI * 2);
+ctx.fill();
+});
+}
+
+function drawBarbell() {
+const cx = W / 2;
+const baseY = H * 0.42;
+const liftOffset = G.liftY * 60 * SCALE;
+const y = baseY - liftOffset;
+ctx.save();
+ctx.translate(cx, y);
+ctx.strokeStyle = '#aaa';
+ctx.lineWidth = 6 * SCALE;
+ctx.beginPath();
+ctx.moveTo(-70 * SCALE, 0);
+ctx.lineTo(70 * SCALE, 0);
+ctx.stroke();
+const plateCount = Math.min(Math.floor(G.weight / 20), 6);
+const plateWidth = 12 * SCALE;
+const plateHeight = 30 * SCALE;
+for (let i = 0; i < plateCount; i++) {
+const px = -70 * SCALE + i * (plateWidth + 2);
+const grad = ctx.createLinearGradient(px, -plateHeight / 2, px + plateWidth, plateHeight / 2);
+grad.addColorStop(0, '#555');
+grad.addColorStop(0.5, '#888');
+grad.addColorStop(1, '#555');
+ctx.fillStyle = grad;
+roundRect(ctx, px, -plateHeight / 2, plateWidth, plateHeight, 3 * SCALE);
+ctx.fill();
+ctx.strokeStyle = '#333';
+ctx.lineWidth = 1;
+ctx.stroke();
+const px2 = 70 * SCALE - i * (plateWidth + 2) - plateWidth;
+ctx.fillStyle = grad;
+roundRect(ctx, px2, -plateHeight / 2, plateWidth, plateHeight, 3 * SCALE);
+ctx.fill();
+ctx.stroke();
+}
+ctx.fillStyle = '#777';
+roundRect(ctx, -12 * SCALE, -10 * SCALE, 24 * SCALE, 20 * SCALE, 4 * SCALE);
+ctx.fill();
+ctx.strokeStyle = '#555';
+ctx.lineWidth = 1;
+ctx.stroke();
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${10 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText(G.weight + 'kg', 0, 4 * SCALE);
+ctx.restore();
+}
+
+function drawPowerMeter() {
+if (G.state !== 'playing' || G.liftState !== 'powering') return;
+const barW = W * CONFIG.BAR_WIDTH;
+const barH = H * CONFIG.BAR_HEIGHT;
+const barX = (W - barW) / 2;
+const barY = H * 0.82;
+ctx.fillStyle = 'rgba(0,0,0,0.6)';
+roundRect(ctx, barX - 4, barY - 4, barW + 8, barH + 8, 12);
+ctx.fill();
+const grad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
+grad.addColorStop(0, '#ef4444');
+grad.addColorStop(0.3, '#f59e0b');
+grad.addColorStop(0.5, '#22c55e');
+grad.addColorStop(0.7, '#f59e0b');
+grad.addColorStop(1, '#ef4444');
+ctx.fillStyle = grad;
+roundRect(ctx, barX, barY, barW, barH, 8);
+ctx.fill();
+ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+ctx.lineWidth = 1;
+roundRect(ctx, barX, barY, barW, barH, 8);
+ctx.stroke();
+const perfectX = barX + barW * 0.5;
+const perfectW = barW * CONFIG.PERFECT_THRESHOLD;
+ctx.fillStyle = 'rgba(255,255,255,0.2)';
+ctx.fillRect(perfectX - perfectW / 2, barY, perfectW, barH);
+const markerX = barX + (G.power / 100) * barW;
+ctx.fillStyle = '#fff';
+ctx.beginPath();
+ctx.moveTo(markerX, barY - 10 * SCALE);
+ctx.lineTo(markerX - 6 * SCALE, barY - 2 * SCALE);
+ctx.lineTo(markerX + 6 * SCALE, barY - 2 * SCALE);
+ctx.closePath();
+ctx.fill();
+ctx.beginPath();
+ctx.moveTo(markerX, barY + barH + 10 * SCALE);
+ctx.lineTo(markerX - 6 * SCALE, barY + barH + 2 * SCALE);
+ctx.lineTo(markerX + 6 * SCALE, barY + barH + 2 * SCALE);
+ctx.closePath();
+ctx.fill();
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${14 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('按空格/点击 停止', W / 2, barY + barH + 30 * SCALE);
+ctx.font = `${12 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#22c55e';
+ctx.fillText('PERFECT区域在中间', W / 2, barY - 20 * SCALE);
+}
+
+function drawBeatIndicator() {
+if (G.state !== 'playing') return;
+const bx = W / 2;
+const by = H * 0.65;
+if (G.beatActive) {
+ctx.save();
+ctx.globalAlpha = G.beatAlpha * 0.5;
+const pulseR = 30 * SCALE * (1 + (1 - G.beatAlpha) * 2);
+ctx.strokeStyle = '#e94560';
+ctx.lineWidth = 3 * SCALE;
+ctx.beginPath();
+ctx.arc(bx, by, pulseR, 0, Math.PI * 2);
+ctx.stroke();
+ctx.restore();
+}
+const beatProgress = G.beatTimer / G.beatInterval;
+const nextBeatIn = (1 - beatProgress) * G.beatInterval;
+if (nextBeatIn < 500) {
+const urgency = 1 - nextBeatIn / 500;
+ctx.save();
+ctx.globalAlpha = urgency * 0.3;
+ctx.fillStyle = '#e94560';
+ctx.beginPath();
+ctx.arc(bx, by, 25 * SCALE * (1 + urgency * 0.3), 0, Math.PI * 2);
+ctx.fill();
+ctx.restore();
+}
+if (G.liftState === 'waiting') {
+const pulse = Math.sin(performance.now() / 300) * 0.3 + 0.7;
+ctx.save();
+ctx.globalAlpha = pulse;
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${16 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('按节奏按键!', bx, by + 50 * SCALE);
+ctx.restore();
+}
+}
+
+function drawUI() {
+ctx.fillStyle = 'rgba(0,0,0,0.4)';
+roundRect(ctx, 10, 10, W - 20, 60 * SCALE, 10);
+ctx.fill();
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${20 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'left';
+ctx.fillText('得分: ' + G.score, 20, 35 * SCALE);
+ctx.textAlign = 'right';
+ctx.fillText(G.weight + 'kg', W - 20, 35 * SCALE);
+ctx.textAlign = 'center';
+ctx.font = `${14 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#ffd93d';
+ctx.fillText('连击: ' + G.combo, W / 2, 35 * SCALE);
+ctx.fillStyle = '#aaa';
+ctx.font = `${11 * SCALE}px "Microsoft YaHei"`;
+const roundText = '第' + (G.round + 1) + '/' + CONFIG.ROUNDS_PER_WEIGHT + '轮';
+ctx.fillText(roundText, W / 2, 52 * SCALE);
+const accuracy = G.totalAttempts > 0 ? Math.round(G.rhythmAccuracy / G.totalAttempts * 100) : 0;
+ctx.textAlign = 'right';
+ctx.fillStyle = '#888';
+ctx.font = `${10 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('精准: ' + accuracy + '%', W - 20, 52 * SCALE);
+}
+
+function drawParticles() {
+G.particles.forEach(p => p.draw(ctx));
+}
+
+function drawTextEffects() {
+G.textEffects.forEach(t => {
+ctx.save();
+ctx.globalAlpha = Math.max(0, t.life);
+ctx.font = `bold ${t.size * SCALE * t.scale}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillStyle = t.color;
+ctx.shadowColor = t.color;
+ctx.shadowBlur = 10;
+ctx.fillText(t.text, t.x, t.y);
+ctx.restore();
+});
+}
+
+function drawAchievementPopups() {
+G.achievementPopups.forEach(a => {
+const y = H * 0.1 + a.y;
+ctx.fillStyle = 'rgba(0,0,0,0.8)';
+roundRect(ctx, W * 0.15, y, W * 0.7, 50 * SCALE, 10);
+ctx.fill();
+ctx.strokeStyle = '#ffd93d';
+ctx.lineWidth = 2;
+roundRect(ctx, W * 0.15, y, W * 0.7, 50 * SCALE, 10);
+ctx.stroke();
+ctx.fillStyle = '#ffd93d';
+ctx.font = `bold ${14 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('成就解锁: ' + a.name, W / 2, y + 22 * SCALE);
+ctx.fillStyle = '#aaa';
+ctx.font = `${11 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText(a.desc, W / 2, y + 40 * SCALE);
+});
+}
+
+function drawRoundEnd() {
+drawBackground();
+ctx.fillStyle = 'rgba(0,0,0,0.6)';
+ctx.fillRect(0, 0, W, H);
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${36 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('轮次结束', W / 2, H * 0.25);
+ctx.font = `${20 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#ffd93d';
+ctx.fillText('得分: ' + G.score, W / 2, H * 0.38);
+ctx.fillStyle = '#aaa';
+ctx.font = `${16 * SCALE}px "Microsoft YaHei"`;
+const stats = [
+'重量: ' + G.weight + 'kg',
+'连击: ' + G.combo + ' (最高: ' + G.maxCombo + ')',
+'PERFECT: ' + G.perfectCount,
+'GREAT: ' + G.greatCount,
+'GOOD: ' + G.goodCount,
+];
+stats.forEach((s, i) => {
+ctx.fillText(s, W / 2, H * 0.48 + i * 28 * SCALE);
+});
+const btnY = H * 0.78;
+const btnW = 180 * SCALE;
+const btnH = 45 * SCALE;
+const btnGrad = ctx.createLinearGradient(W / 2 - btnW / 2, btnY, W / 2 + btnW / 2, btnY);
+btnGrad.addColorStop(0, '#22c55e');
+btnGrad.addColorStop(1, '#16a34a');
+ctx.fillStyle = btnGrad;
+roundRect(ctx, W / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 22 * SCALE);
+ctx.fill();
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${18 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('继续', W / 2, btnY + 6 * SCALE);
+drawParticles();
+drawTextEffects();
+drawAchievementPopups();
+drawAd();
+drawSponsor();
+}
+
+function drawGameOver() {
+drawBackground();
+ctx.fillStyle = 'rgba(0,0,0,0.7)';
+ctx.fillRect(0, 0, W, H);
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${42 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('训练结束', W / 2, H * 0.15);
+if (G.score >= G.highScore) {
+const pulse = Math.sin(performance.now() / 400) * 0.2 + 0.8;
+ctx.save();
+ctx.globalAlpha = pulse;
+ctx.fillStyle = '#ffd93d';
+ctx.font = `bold ${24 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('新纪录!', W / 2, H * 0.22);
+ctx.restore();
+}
+ctx.fillStyle = '#ffd93d';
+ctx.font = `bold ${32 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText(G.score, W / 2, H * 0.32);
+ctx.fillStyle = '#aaa';
+ctx.font = `${14 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('最高分: ' + G.highScore, W / 2, H * 0.38);
+const stats = [
+'最终重量: ' + G.weight + 'kg',
+'最高连击: ' + G.maxCombo,
+'总举重次数: ' + G.totalLifts,
+'精准率: ' + (G.totalAttempts > 0 ? Math.round(G.rhythmAccuracy / G.totalAttempts * 100) : 0) + '%',
+'PERFECT: ' + G.perfectCount + ' | GREAT: ' + G.greatCount + ' | GOOD: ' + G.goodCount,
+];
+ctx.font = `${14 * SCALE}px "Microsoft YaHei"`;
+stats.forEach((s, i) => {
+ctx.fillStyle = '#ccc';
+ctx.fillText(s, W / 2, H * 0.46 + i * 24 * SCALE);
+});
+const achievementsUnlocked = Object.keys(G.achievements).length;
+if (achievementsUnlocked > 0) {
+ctx.fillStyle = '#ffd93d';
+ctx.font = `${12 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('成就: ' + achievementsUnlocked + '/' + ACHIEVEMENTS.length, W / 2, H * 0.65);
+}
+const btnY = H * 0.75;
+const btnW = 180 * SCALE;
+const btnH = 45 * SCALE;
+const btnGrad = ctx.createLinearGradient(W / 2 - btnW / 2, btnY, W / 2 + btnW / 2, btnY);
+btnGrad.addColorStop(0, '#e94560');
+btnGrad.addColorStop(1, '#533483');
+ctx.fillStyle = btnGrad;
+roundRect(ctx, W / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 22 * SCALE);
+ctx.fill();
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${18 * SCALE}px "Microsoft YaHei"`;
+ctx.fillText('再来一次', W / 2, btnY + 6 * SCALE);
+ctx.font = `${11 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#888';
+ctx.fillText('空格/点击/触屏', W / 2, H * 0.85);
+drawParticles();
+drawTextEffects();
+drawAchievementPopups();
+drawAd();
+drawSponsor();
+}
+
+function drawPaused() {
+ctx.fillStyle = 'rgba(0,0,0,0.7)';
+ctx.fillRect(0, 0, W, H);
+ctx.fillStyle = '#fff';
+ctx.font = `bold ${36 * SCALE}px "Microsoft YaHei"`;
+ctx.textAlign = 'center';
+ctx.fillText('暂停', W / 2, H * 0.4);
+ctx.font = `${16 * SCALE}px "Microsoft YaHei"`;
+ctx.fillStyle = '#aaa';
+ctx.fillText('按空格/点击继续', W / 2, H * 0.5);
+}
+
+// ============ UTILITY ============
+function roundRect(ctx, x, y, w, h, r) {
+if (w < 2 * r) r = w / 2;
+if (h < 2 * r) r = h / 2;
+ctx.beginPath();
+ctx.moveTo(x + r, y);
+ctx.arcTo(x + w, y, x + w, y + h, r);
+ctx.arcTo(x + w, y + h, x, y + h, r);
+ctx.arcTo(x, y + h, x, y, r);
+ctx.arcTo(x, y, x + w, y, r);
+ctx.closePath();
+}
+
+// ============ SAVE/LOAD ============
+function loadHighScore() {
+try {
+const saved = localStorage.getItem('weightlifting_highscore');
+if (saved) G.highScore = parseInt(saved) || 0;
+const games = localStorage.getItem('weightlifting_games');
+if (games) G.totalGames = parseInt(games) || 0;
+const achievements = localStorage.getItem('weightlifting_achievements');
+if (achievements) G.achievements = JSON.parse(achievements) || {};
+} catch (e) {}
+}
+
+function saveHighScore() {
+try {
+localStorage.setItem('weightlifting_highscore', G.highScore);
+localStorage.setItem('weightlifting_games', G.totalGames);
+} catch (e) {}
+}
+
+function saveAchievements() {
+try {
+localStorage.setItem('weightlifting_achievements', JSON.stringify(G.achievements));
+} catch (e) {}
+}
+
+// ============ GAME LOOP ============
+let lastTime = 0;
+function gameLoop(timestamp) {
+const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+lastTime = timestamp;
+update(dt);
+render();
+requestAnimationFrame(gameLoop);
+}
+
+function update(dt) {
+if (G.state === 'playing') {
+updateBeat(dt);
+updatePower(dt);
+updateLift(dt);
+updateCharacter(dt);
+}
+updateParticles(dt);
+updateTextEffects(dt);
+updateShakes(dt);
+updateAchievements(dt);
+G.spotlightAngle += dt * 0.5;
+}
+
+function render() {
+ctx.clearRect(0, 0, W, H);
+switch (G.state) {
+case 'menu': drawMenu(); break;
+case 'playing': drawGame(); break;
+case 'paused': drawGame(); drawPaused(); break;
+case 'roundEnd': drawRoundEnd(); break;
+case 'gameOver': drawGameOver(); break;
+}
+}
+
+// ============ START ============
+window.addEventListener('load', init);
+</script>
+</body>
+</html>

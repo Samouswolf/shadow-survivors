@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>气泡射击</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; overflow:hidden; background:#000; font-family:'Microsoft YaHei','PingFang SC',sans-serif; }
+canvas { display:block; touch-action:none; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<script>
+"use strict";
+
+/* ============================================================
+   气泡射击 - Bubble Shooter
+   单文件HTML5 Canvas游戏
+   50+关卡 | 同色消除 | 计分系统 | 响应式
+   ============================================================ */
+
+const canvas = document.getElementById('C');
+const ctx = canvas.getContext('2d');
+
+/* ---------- 响应式 ---------- */
+let W, H, SCALE;
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    SCALE = Math.min(W / 800, H / 600);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ---------- 颜色定义 ---------- */
+const COLORS = [
+    '#FF4757', // 红
+    '#FFA502', // 橙
+    '#2ED573', // 绿
+    '#1E90FF', // 蓝
+    '#A55EEA', // 紫
+    '#FF6B81', // 粉
+    '#ECCC68', // 黄
+    '#45AAF2', // 天蓝
+];
+
+const COLOR_NAMES = ['红','橙','绿','蓝','紫','粉','黄','天蓝'];
+
+/* ---------- 游戏状态 ---------- */
+const STATE = { MENU: 0, PLAY: 1, GAMEOVER: 2, WIN: 3, PAUSE: 4 };
+
+let G = {};
+let particles = [];
+let scorePopups = [];
+
+function resetGame(level) {
+    const ld = LEVELS[level];
+    G = {
+        state: STATE.PLAY,
+        level: level,
+        score: 0,
+        totalScore: 0,
+        combo: 0,
+        bestCombo: 0,
+        moves: 0,
+        maxMoves: ld.moves,
+        colorCount: ld.colors,
+        grid: [],
+        gridRows: ld.rows,
+        gridCols: ld.cols,
+        shooter: { x: W / 2, y: H - 80 * SCALE, angle: -Math.PI / 2, color: 0, nextColor: 0 },
+        flying: null,
+        particles: [],
+        scorePopups: [],
+        shakeTimer: 0,
+        fadeRows: [],
+        hintAngle: -Math.PI / 2,
+        aimLine: [],
+    };
+    initGrid();
+    G.shooter.color = randomColor();
+    G.shooter.nextColor = randomColor();
+    calcAimLine();
+}
+
+function randomColor() {
+    return Math.floor(Math.random() * G.colorCount);
+}
+
+/* ---------- 关卡数据 ---------- */
+function genLevels() {
+    const L = [];
+    for (let i = 0; i < 55; i++) {
+        const rows = Math.min(5 + Math.floor(i / 5), 12);
+        const cols = 10 + Math.floor(i / 10);
+        const colors = Math.min(3 + Math.floor(i / 8), 8);
+        const moves = Math.max(35 - Math.floor(i / 3), 15);
+        const desc = getLevelDesc(i);
+        L.push({
+            id: i + 1,
+            name: desc.name,
+            desc: desc.text,
+            rows: rows,
+            cols: cols,
+            colors: colors,
+            moves: moves,
+            pattern: i % 6, // 布局模式
+        });
+    }
+    return L;
+}
+
+function getLevelDesc(i) {
+    const descs = [
+        { name: '初识泡泡', text: '学习基础射击' },
+        { name: '色彩入门', text: '认识更多颜色' },
+        { name: '连锁反应', text: '尝试连锁消除' },
+        { name: '精准射击', text: '精确瞄准很重要' },
+        { name: '颜色风暴', text: '四种颜色挑战' },
+        { name: '泡泡雨', text: '更多泡泡来袭' },
+        { name: '彩虹之路', text: '颜色越来越丰富' },
+        { name: '连锁大师', text: '追求高连击' },
+        { name: '限时挑战', text: '步数更加紧张' },
+        { name: '泡泡迷宫', text: '复杂的布局' },
+        { name: '天空之城', text: '高处的泡泡' },
+        { name: '海底世界', text: '水下冒险' },
+        { name: '森林秘境', text: '自然的颜色' },
+        { name: '火山熔岩', text: '炽热的挑战' },
+        { name: '冰雪奇缘', text: '寒冷的考验' },
+        { name: '沙漠绿洲', text: '沙漠中的色彩' },
+        { name: '星空闪烁', text: '星光下的泡泡' },
+        { name: '月光宝盒', text: '月夜的魔法' },
+        { name: '龙之巢穴', text: '龙的宝藏' },
+        { name: '仙境之桥', text: '通往仙境' },
+        { name: '时光隧道', text: '穿越时空' },
+        { name: '水晶宫殿', text: '水晶的魅力' },
+        { name: '魔法森林', text: '魔法的力量' },
+        { name: '幽灵船', text: '海上冒险' },
+        { name: '金字塔', text: '古墓探险' },
+        { name: '太空站', text: '宇宙冒险' },
+        { name: '机械城', text: '齿轮的转动' },
+        { name: '糖果世界', text: '甜蜜的挑战' },
+        { name: '游乐园', text: '欢乐时光' },
+        { name: '樱花树下', text: '春天的气息' },
+        { name: '竹林深处', text: '东方的意境' },
+        { name: '极光之夜', text: '自然的奇迹' },
+        { name: '彩虹瀑布', text: '七彩的水流' },
+        { name: '蘑菇森林', text: '奇幻的旅程' },
+        { name: '火山口', text: '炽热的核心' },
+        { name: '冰川时代', text: '冰封的世界' },
+        { name: '热带雨林', text: '生机盎然' },
+        { name: '银河系', text: '星际漫游' },
+        { name: '龙卷风', text: '狂风的挑战' },
+        { name: '宝石矿洞', text: '寻宝之旅' },
+        { name: '童话王国', text: '梦幻的世界' },
+        { name: '数码世界', text: '虚拟的冒险' },
+        { name: '音乐盒', text: '旋律的泡泡' },
+        { name: '万花筒', text: '千变万化' },
+        { name: '时光机', text: '回到过去' },
+        { name: '仙境花园', text: '花的海洋' },
+        { name: '天空之眼', text: '俯瞰大地' },
+        { name: '深渊', text: '深不可测' },
+        { name: '创世纪', text: '最终挑战' },
+        { name: '传说之巅', text: '巅峰对决' },
+        { name: '永恒之光', text: '光明的力量' },
+        { name: '暗影迷宫', text: '黑暗中的光芒' },
+        { name: '元素之塔', text: '元素的融合' },
+        { name: '命运之轮', text: '命运的考验' },
+        { name: '终极之战', text: '最后的决战' },
+    ];
+    return descs[i] || { name: '关卡 ' + (i + 1), text: '挑战自我' };
+}
+
+const LEVELS = genLevels();
+
+/* ---------- 最高分 ---------- */
+let highScore = parseInt(localStorage.getItem('bubble_high') || '0');
+let levelStars = JSON.parse(localStorage.getItem('bubble_stars') || '{}');
+let unlockedLevel = parseInt(localStorage.getItem('bubble_unlock') || '0');
+
+function saveProgress(level, score, stars) {
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('bubble_high', highScore);
+    }
+    const key = 'L' + level;
+    if (!levelStars[key] || levelStars[key] < stars) {
+        levelStars[key] = stars;
+        localStorage.setItem('bubble_stars', JSON.stringify(levelStars));
+    }
+    if (level >= unlockedLevel) {
+        unlockedLevel = level + 1;
+        localStorage.setItem('bubble_unlock', unlockedLevel);
+    }
+}
+
+/* ---------- 网格系统 ---------- */
+const BUBBLE_R = 18;
+
+function getBubbleXY(row, col) {
+    const offsetX = row % 2 === 1 ? BUBBLE_R : 0;
+    const gridW = G.gridCols * BUBBLE_R * 2;
+    const startX = (W - gridW) / 2 + BUBBLE_R;
+    return {
+        x: startX + col * BUBBLE_R * 2 + offsetX,
+        y: 60 * SCALE + row * BUBBLE_R * 1.75
+    };
+}
+
+function initGrid() {
+    G.grid = [];
+    for (let r = 0; r < G.gridRows; r++) {
+        G.grid[r] = [];
+        const cols = r % 2 === 1 ? G.gridCols - 1 : G.gridCols;
+        for (let c = 0; c < cols; c++) {
+            let hasBubble = false;
+            switch (G.level % 6) {
+                case 0: hasBubble = true; break;
+                case 1: hasBubble = (r + c) % 3 !== 0; break;
+                case 2: hasBubble = Math.random() < 0.7; break;
+                case 3: hasBubble = c % 2 === 0 || r < 3; break;
+                case 4: hasBubble = (r * cols + c) % 4 !== 0; break;
+                case 5: hasBubble = Math.abs(c - cols / 2) < cols / 2 - r / 4; break;
+            }
+            if (r >= G.gridRows - 2) hasBubble = false; // 底部留空
+            G.grid[r][c] = hasBubble ? randomColor() : -1;
+        }
+    }
+}
+
+function getNeighbors(row, col) {
+    const neighbors = [];
+    const even = row % 2 === 0;
+    const dirs = even ?
+        [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]] :
+        [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]];
+    for (const [dr, dc] of dirs) {
+        const nr = row + dr, nc = col + dc;
+        if (nr >= 0 && nr < G.grid.length) {
+            const maxC = nr % 2 === 1 ? G.gridCols - 1 : G.gridCols;
+            if (nc >= 0 && nc < maxC) {
+                neighbors.push([nr, nc]);
+            }
+        }
+    }
+    return neighbors;
+}
+
+function findCluster(row, col, color) {
+    const visited = new Set();
+    const cluster = [];
+    const queue = [[row, col]];
+    visited.add(row + ',' + col);
+    while (queue.length > 0) {
+        const [r, c] = queue.shift();
+        if (G.grid[r] && G.grid[r][c] === color) {
+            cluster.push([r, c]);
+            for (const [nr, nc] of getNeighbors(r, c)) {
+                const key = nr + ',' + nc;
+                if (!visited.has(key)) {
+                    visited.add(key);
+                    queue.push([nr, nc]);
+                }
+            }
+        }
+    }
+    return cluster;
+}
+
+function findFloating() {
+    // BFS from top row to find connected bubbles
+    const connected = new Set();
+    const queue = [];
+    for (let c = 0; c < (G.grid[0] ? G.grid[0].length : 0); c++) {
+        if (G.grid[0][c] >= 0) {
+            queue.push([0, c]);
+            connected.add('0,' + c);
+        }
+    }
+    while (queue.length > 0) {
+        const [r, c] = queue.shift();
+        for (const [nr, nc] of getNeighbors(r, c)) {
+            const key = nr + ',' + nc;
+            if (!connected.has(key) && G.grid[nr] && G.grid[nr][nc] >= 0) {
+                connected.add(key);
+                queue.push([nr, nc]);
+            }
+        }
+    }
+    // Find all bubbles not connected
+    const floating = [];
+    for (let r = 0; r < G.grid.length; r++) {
+        if (!G.grid[r]) continue;
+        for (let c = 0; c < G.grid[r].length; c++) {
+            if (G.grid[r][c] >= 0 && !connected.has(r + ',' + c)) {
+                floating.push([r, c]);
+            }
+        }
+    }
+    return floating;
+}
+
+function snapToGrid(x, y) {
+    let bestR = 0, bestC = 0, bestDist = Infinity;
+    for (let r = 0; r < G.grid.length; r++) {
+        const maxC = r % 2 === 1 ? G.gridCols - 1 : G.gridCols;
+        for (let c = 0; c < maxC; c++) {
+            if (G.grid[r][c] >= 0) continue;
+            const pos = getBubbleXY(r, c);
+            const d = Math.hypot(pos.x - x, pos.y - y);
+            if (d < bestDist) {
+                bestDist = d;
+                bestR = r;
+                bestC = c;
+            }
+        }
+    }
+    return { row: bestR, col: bestC };
+}
+
+function isGridEmpty() {
+    for (let r = 0; r < G.grid.length; r++) {
+        if (!G.grid[r]) continue;
+        for (let c = 0; c < G.grid[r].length; c++) {
+            if (G.grid[r][c] >= 0) return false;
+        }
+    }
+    return true;
+}
+
+/* ---------- 射击系统 ---------- */
+function shootBubble() {
+    if (G.flying || G.state !== STATE.PLAY) return;
+    const speed = 12;
+    G.flying = {
+        x: G.shooter.x,
+        y: G.shooter.y,
+        vx: Math.cos(G.shooter.angle) * speed,
+        vy: Math.sin(G.shooter.angle) * speed,
+        color: G.shooter.color,
+    };
+    G.shooter.color = G.shooter.nextColor;
+    G.shooter.nextColor = randomColor();
+    G.moves++;
+    G.combo = 0;
+}
+
+function updateFlying() {
+    if (!G.flying) return;
+    const b = G.flying;
+    b.x += b.vx;
+    b.y += b.vy;
+
+    // Wall bounce
+    if (b.x < BUBBLE_R) { b.x = BUBBLE_R; b.vx = -b.vx; }
+    if (b.x > W - BUBBLE_R) { b.x = W - BUBBLE_R; b.vx = -b.vx; }
+
+    // Top wall
+    if (b.y < 60 * SCALE + BUBBLE_R) {
+        snapBubble(b);
+        return;
+    }
+
+    // Check collision with grid bubbles
+    for (let r = 0; r < G.grid.length; r++) {
+        if (!G.grid[r]) continue;
+        for (let c = 0; c < G.grid[r].length; c++) {
+            if (G.grid[r][c] < 0) continue;
+            const pos = getBubbleXY(r, c);
+            const d = Math.hypot(pos.x - b.x, pos.y - b.y);
+            if (d < BUBBLE_R * 1.8) {
+                snapBubble(b);
+                return;
+            }
+        }
+    }
+
+    // Off screen
+    if (b.y > H + 50) {
+        G.flying = null;
+    }
+}
+
+function snapBubble(b) {
+    const snap = snapToGrid(b.x, b.y);
+
+    // Ensure row exists
+    while (G.grid.length <= snap.row) {
+        const r = G.grid.length;
+        const cols = r % 2 === 1 ? G.gridCols - 1 : G.gridCols;
+        G.grid[r] = new Array(cols).fill(-1);
+    }
+
+    G.grid[snap.row][snap.col] = b.color;
+    G.flying = null;
+
+    // Check cluster
+    const cluster = findCluster(snap.row, snap.col, b.color);
+    if (cluster.length >= 3) {
+        // Remove cluster
+        for (const [r, c] of cluster) {
+            spawnParticles(getBubbleXY(r, c).x, getBubbleXY(r, c).y, G.grid[r][c]);
+            G.grid[r][c] = -1;
+        }
+        G.combo++;
+        if (G.combo > G.bestCombo) G.bestCombo = G.combo;
+        const points = cluster.length * 10 * G.combo;
+        G.score += points;
+        G.totalScore += points;
+        const pos = getBubbleXY(snap.row, snap.col);
+        addScorePopup(pos.x, pos.y, '+' + points, G.combo > 1 ? 'combo' : 'normal');
+
+        // Find and remove floating bubbles
+        const floating = findFloating();
+        if (floating.length > 0) {
+            for (const [r, c] of floating) {
+                spawnParticles(getBubbleXY(r, c).x, getBubbleXY(r, c).y, G.grid[r][c]);
+                G.grid[r][c] = -1;
+            }
+            const floatPoints = floating.length * 15 * G.combo;
+            G.score += floatPoints;
+            G.totalScore += floatPoints;
+            addScorePopup(W / 2, H / 2, '掉落 +' + floatPoints, 'float');
+        }
+    }
+
+    // Check win/lose
+    if (isGridEmpty()) {
+        const stars = calcStars();
+        saveProgress(G.level, G.score, stars);
+        G.state = STATE.WIN;
+    } else if (G.moves >= G.maxMoves) {
+        G.state = STATE.GAMEOVER;
+    } else {
+        // Check if any bubble is too low
+        for (let r = 0; r < G.grid.length; r++) {
+            if (!G.grid[r]) continue;
+            for (let c = 0; c < G.grid[r].length; c++) {
+                if (G.grid[r][c] >= 0) {
+                    const pos = getBubbleXY(r, c);
+                    if (pos.y > G.shooter.y - 40) {
+                        G.state = STATE.GAMEOVER;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    calcAimLine();
+}
+
+function calcStars() {
+    const ratio = G.score / (G.maxMoves * 30);
+    if (ratio > 0.8) return 3;
+    if (ratio > 0.5) return 2;
+    return 1;
+}
+
+/* ---------- 瞄准线 ---------- */
+function calcAimLine() {
+    G.aimLine = [];
+    let x = G.shooter.x, y = G.shooter.y;
+    let vx = Math.cos(G.shooter.angle), vy = Math.sin(G.shooter.angle);
+    for (let i = 0; i < 20; i++) {
+        x += vx * 15;
+        y += vy * 15;
+        if (x < BUBBLE_R) { x = BUBBLE_R; vx = -vx; }
+        if (x > W - BUBBLE_R) { x = W - BUBBLE_R; vx = -vx; }
+        if (y < 60 * SCALE + BUBBLE_R) break;
+        G.aimLine.push({ x, y });
+    }
+}
+
+/* ---------- 粒子系统 ---------- */
+function spawnParticles(x, y, colorIdx) {
+    for (let i = 0; i < 8; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 4;
+        particles.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay: 0.02 + Math.random() * 0.03,
+            color: COLORS[colorIdx] || '#fff',
+            size: 3 + Math.random() * 4,
+        });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= p.decay;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+/* ---------- 分数弹出 ---------- */
+function addScorePopup(x, y, text, type) {
+    scorePopups.push({
+        x, y,
+        text,
+        type,
+        life: 1,
+        vy: -2,
+    });
+}
+
+function updateScorePopups() {
+    for (let i = scorePopups.length - 1; i >= 0; i--) {
+        const p = scorePopups[i];
+        p.y += p.vy;
+        p.life -= 0.02;
+        if (p.life <= 0) scorePopups.splice(i, 1);
+    }
+}
+
+/* ---------- 菜单系统 ---------- */
+let menuScroll = 0;
+let menuTarget = 0;
+let selectedLevel = 0;
+let menuAnim = 0;
+
+/* ---------- 输入处理 ---------- */
+let mouseX = W / 2, mouseY = H / 2;
+let isTouching = false;
+
+function updateAim(x, y) {
+    const dx = x - G.shooter.x;
+    const dy = y - G.shooter.y;
+    let angle = Math.atan2(dy, dx);
+    // Clamp angle to prevent shooting downward
+    if (angle > -0.15) angle = -0.15;
+    if (angle < -Math.PI + 0.15) angle = -Math.PI + 0.15;
+    G.shooter.angle = angle;
+    calcAimLine();
+}
+
+canvas.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    if (G.state === STATE.PLAY) updateAim(mouseX, mouseY);
+});
+
+canvas.addEventListener('click', (e) => {
+    handleClick(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    isTouching = true;
+    const t = e.touches[0];
+    mouseX = t.clientX;
+    mouseY = t.clientY;
+    if (G.state === STATE.PLAY) updateAim(mouseX, mouseY);
+    handleClick(mouseX, mouseY);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouseX = t.clientX;
+    mouseY = t.clientY;
+    if (G.state === STATE.PLAY) updateAim(mouseX, mouseY);
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    isTouching = false;
+}, { passive: false });
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+    if (G.state === STATE.PLAY) {
+        if (e.key === ' ' || e.key === 'Enter') {
+            shootBubble();
+        } else if (e.key === 'ArrowLeft') {
+            G.shooter.angle -= 0.05;
+            if (G.shooter.angle < -Math.PI + 0.15) G.shooter.angle = -Math.PI + 0.15;
+            calcAimLine();
+        } else if (e.key === 'ArrowRight') {
+            G.shooter.angle += 0.05;
+            if (G.shooter.angle > -0.15) G.shooter.angle = -0.15;
+            calcAimLine();
+        } else if (e.key === 'Escape') {
+            G.state = STATE.PAUSE;
+        }
+    } else if (G.state === STATE.PAUSE) {
+        if (e.key === 'Escape') G.state = STATE.PLAY;
+    } else if (G.state === STATE.MENU) {
+        if (e.key === 'ArrowUp') {
+            selectedLevel = Math.max(0, selectedLevel - 1);
+        } else if (e.key === 'ArrowDown') {
+            selectedLevel = Math.min(LEVELS.length - 1, selectedLevel + 1);
+        } else if (e.key === 'Enter' || e.key === ' ') {
+            if (selectedLevel <= unlockedLevel) {
+                resetGame(selectedLevel);
+            }
+        }
+    } else if (G.state === STATE.GAMEOVER || G.state === STATE.WIN) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            G.state = STATE.MENU;
+        }
+    }
+});
+
+function handleClick(x, y) {
+    if (G.state === STATE.MENU) {
+        handleMenuClick(x, y);
+    } else if (G.state === STATE.PLAY) {
+        shootBubble();
+    } else if (G.state === STATE.GAMEOVER || G.state === STATE.WIN) {
+        G.state = STATE.MENU;
+    } else if (G.state === STATE.PAUSE) {
+        handlePauseClick(x, y);
+    }
+}
+
+function handleMenuClick(x, y) {
+    // Check level buttons
+    const startY = 160 * SCALE;
+    const btnH = 55 * SCALE;
+    const btnW = 280 * SCALE;
+    const startX = (W - btnW) / 2;
+
+    for (let i = 0; i < LEVELS.length; i++) {
+        const by = startY + i * btnH - menuScroll;
+        if (by < -btnH || by > H) continue;
+        if (x >= startX && x <= startX + btnW && y >= by && y <= by + btnH - 5) {
+            if (i <= unlockedLevel) {
+                resetGame(i);
+            }
+            return;
+        }
+    }
+
+    // Scroll with drag
+    menuTarget = y;
+}
+
+function handlePauseClick(x, y) {
+    const btnW = 200 * SCALE;
+    const btnH = 50 * SCALE;
+    const cx = (W - btnW) / 2;
+
+    // Continue button
+    if (x >= cx && x <= cx + btnW && y >= H / 2 - 20 && y <= H / 2 - 20 + btnH) {
+        G.state = STATE.PLAY;
+    }
+    // Menu button
+    if (x >= cx && x <= cx + btnW && y >= H / 2 + 50 && y <= H / 2 + 50 + btnH) {
+        G.state = STATE.MENU;
+    }
+}
+
+/* ---------- 绘图函数 ---------- */
+function drawGradientBg(colors) {
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    for (let i = 0; i < colors.length; i++) {
+        grad.addColorStop(i / (colors.length - 1), colors[i]);
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+}
+
+function drawBubble(x, y, colorIdx, r, glow) {
+    r = r || BUBBLE_R;
+    if (colorIdx < 0 || colorIdx >= COLORS.length) return;
+
+    // Glow
+    if (glow) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS[colorIdx] + '40';
+        ctx.fill();
+    }
+
+    // Main bubble
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+    grad.addColorStop(0, '#fff');
+    grad.addColorStop(0.3, COLORS[colorIdx]);
+    grad.addColorStop(1, shadeColor(COLORS[colorIdx], -30));
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Highlight
+    ctx.beginPath();
+    ctx.arc(x - r * 0.25, y - r * 0.25, r * 0.3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fill();
+}
+
+function shadeColor(color, percent) {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = Math.max(0, Math.min(255, (num >> 16) + amt));
+    const G = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amt));
+    const B = Math.max(0, Math.min(255, (num & 0x0000FF) + amt));
+    return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+}
+
+function drawText(text, x, y, size, color, align, baseline) {
+    ctx.font = `bold ${size}px 'Microsoft YaHei','PingFang SC',sans-serif`;
+    ctx.fillStyle = color || '#fff';
+    ctx.textAlign = align || 'center';
+    ctx.textBaseline = baseline || 'middle';
+    ctx.fillText(text, x, y);
+}
+
+function drawButton(text, x, y, w, h, color1, color2, textColor) {
+    const grad = ctx.createLinearGradient(x, y, x, y + h);
+    grad.addColorStop(0, color1);
+    grad.addColorStop(1, color2);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    roundRect(ctx, x, y, w, h, 10);
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    roundRect(ctx, x, y, w, h, 10);
+    ctx.stroke();
+
+    drawText(text, x + w / 2, y + h / 2, h * 0.35, textColor || '#fff');
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function drawStars(x, y, count, size) {
+    for (let i = 0; i < 3; i++) {
+        ctx.font = `${size}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = i < count ? '#FFD700' : '#555';
+        ctx.fillText('★', x + i * size * 1.2, y);
+    }
+}
+
+/* ---------- 菜单绘制 ---------- */
+function drawMenu() {
+    drawGradientBg(['#1a0533', '#0d1b2a', '#1b2838']);
+
+    // Animated background bubbles
+    menuAnim += 0.02;
+    for (let i = 0; i < 20; i++) {
+        const bx = W * 0.5 + Math.sin(menuAnim + i * 0.7) * W * 0.4;
+        const by = (H * 0.5 + Math.cos(menuAnim * 0.8 + i * 0.5) * H * 0.4 + i * 50) % H;
+        ctx.globalAlpha = 0.15;
+        drawBubble(bx, by, i % COLORS.length, 15 + i % 10);
+        ctx.globalAlpha = 1;
+    }
+
+    // Title
+    drawText('气泡射击', W / 2, 60 * SCALE, 48 * SCALE, '#fff');
+    drawText('Bubble Shooter', W / 2, 100 * SCALE, 18 * SCALE, '#aaa');
+
+    // High score
+    drawText('最高分: ' + highScore, W / 2, 135 * SCALE, 16 * SCALE, '#FFD700');
+
+    // Level list
+    const startY = 160 * SCALE;
+    const btnH = 55 * SCALE;
+    const btnW = 280 * SCALE;
+    const startX = (W - btnW) / 2;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, startY - 10, W, H - startY + 10);
+    ctx.clip();
+
+    for (let i = 0; i < LEVELS.length; i++) {
+        const by = startY + i * btnH - menuScroll;
+        if (by < -btnH || by > H) continue;
+
+        const locked = i > unlockedLevel;
+        const ld = LEVELS[i];
+        const stars = levelStars['L' + i] || 0;
+
+        // Button background
+        if (locked) {
+            ctx.fillStyle = 'rgba(50,50,50,0.8)';
+        } else {
+            const grad = ctx.createLinearGradient(startX, by, startX, by + btnH - 5);
+            grad.addColorStop(0, 'rgba(30,60,120,0.9)');
+            grad.addColorStop(1, 'rgba(20,40,80,0.9)');
+            ctx.fillStyle = grad;
+        }
+        ctx.beginPath();
+        roundRect(ctx, startX, by, btnW, btnH - 5, 8);
+        ctx.fill();
+
+        // Border
+        if (!locked) {
+            ctx.strokeStyle = 'rgba(100,180,255,0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            roundRect(ctx, startX, by, btnW, btnH - 5, 8);
+            ctx.stroke();
+        }
+
+        // Level number
+        drawText(locked ? '🔒' : (i + 1), startX + 30 * SCALE, by + (btnH - 5) / 2, 20 * SCALE, locked ? '#666' : '#fff');
+
+        // Level name
+        drawText(ld.name, startX + 80 * SCALE, by + (btnH - 5) / 2 - 8, 16 * SCALE, locked ? '#666' : '#fff', 'left');
+
+        // Level desc
+        drawText(ld.desc, startX + 80 * SCALE, by + (btnH - 5) / 2 + 12, 11 * SCALE, locked ? '#444' : '#aaa', 'left');
+
+        // Stars
+        if (!locked && stars > 0) {
+            drawStars(startX + btnW - 80 * SCALE, by + (btnH - 5) / 2, stars, 16 * SCALE);
+        }
+    }
+    ctx.restore();
+
+    // Scroll indicator
+    const maxScroll = LEVELS.length * btnH - (H - startY);
+    if (maxScroll > 0) {
+        const scrollH = (H - startY) * ((H - startY) / (LEVELS.length * btnH));
+        const scrollY = startY + (menuScroll / maxScroll) * ((H - startY) - scrollH);
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        roundRect(ctx, W - 8, scrollY, 5, scrollH, 3);
+        ctx.fill();
+    }
+
+    // Bottom hint
+    drawText('↑↓ 选择 | Enter 开始 | 触屏点击', W / 2, H - 25, 13 * SCALE, '#666');
+}
+
+/* ---------- 游戏绘制 ---------- */
+function drawGame() {
+    // Background
+    drawGradientBg(['#0a0a2e', '#16213e', '#1a1a2e']);
+
+    // Grid bubbles
+    for (let r = 0; r < G.grid.length; r++) {
+        if (!G.grid[r]) continue;
+        for (let c = 0; c < G.grid[r].length; c++) {
+            if (G.grid[r][c] < 0) continue;
+            const pos = getBubbleXY(r, c);
+            drawBubble(pos.x, pos.y, G.grid[r][c]);
+        }
+    }
+
+    // Aim line
+    if (!G.flying) {
+        for (let i = 0; i < G.aimLine.length; i++) {
+            const p = G.aimLine[i];
+            ctx.globalAlpha = 1 - i / G.aimLine.length;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#fff';
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // Flying bubble
+    if (G.flying) {
+        drawBubble(G.flying.x, G.flying.y, G.flying.color, BUBBLE_R, true);
+    }
+
+    // Shooter area
+    ctx.fillStyle = 'rgba(20,20,50,0.8)';
+    ctx.fillRect(0, G.shooter.y - 40, W, H - G.shooter.y + 40);
+
+    // Shooter
+    drawBubble(G.shooter.x, G.shooter.y, G.shooter.color, BUBBLE_R * 1.2, true);
+
+    // Next bubble
+    drawBubble(G.shooter.x - 60 * SCALE, G.shooter.y, G.shooter.nextColor, BUBBLE_R * 0.8);
+    drawText('下一个', G.shooter.x - 60 * SCALE, G.shooter.y + 25 * SCALE, 10 * SCALE, '#888');
+
+    // Top bar
+    ctx.fillStyle = 'rgba(10,10,30,0.9)';
+    ctx.fillRect(0, 0, W, 55 * SCALE);
+
+    // Level info
+    drawText('关卡 ' + (G.level + 1) + ' - ' + LEVELS[G.level].name, W / 2, 18 * SCALE, 16 * SCALE, '#fff');
+    drawText('步数: ' + G.moves + '/' + G.maxMoves, W / 2, 40 * SCALE, 13 * SCALE, '#aaa');
+
+    // Score
+    drawText('分数: ' + G.score, 80 * SCALE, 18 * SCALE, 14 * SCALE, '#FFD700');
+    drawText('连击: x' + G.combo, 80 * SCALE, 40 * SCALE, 12 * SCALE, G.combo > 1 ? '#FF6B81' : '#666');
+
+    // Pause button
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.beginPath();
+    roundRect(ctx, W - 50 * SCALE, 8, 40 * SCALE, 38 * SCALE, 8);
+    ctx.fill();
+    drawText('⏸', W - 30 * SCALE, 27 * SCALE, 18 * SCALE, '#fff');
+
+    // Particles
+    for (const p of particles) {
+        ctx.globalAlpha = p.life;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Score popups
+    for (const p of scorePopups) {
+        ctx.globalAlpha = p.life;
+        const size = p.type === 'combo' ? 24 * SCALE : 18 * SCALE;
+        const color = p.type === 'combo' ? '#FF6B81' : p.type === 'float' ? '#2ED573' : '#FFD700';
+        drawText(p.text, p.x, p.y, size, color);
+    }
+    ctx.globalAlpha = 1;
+
+    // Shake effect
+    if (G.shakeTimer > 0) {
+        ctx.save();
+        ctx.translate(Math.random() * 4 - 2, Math.random() * 4 - 2);
+        G.shakeTimer--;
+        ctx.restore();
+    }
+}
+
+/* ---------- 游戏结束绘制 ---------- */
+function drawGameOver() {
+    drawGradientBg(['#1a0000', '#0d0d0d', '#1a0505']);
+
+    // Animated particles
+    menuAnim += 0.01;
+    for (let i = 0; i < 15; i++) {
+        const px = W * 0.5 + Math.sin(menuAnim + i) * W * 0.3;
+        const py = H * 0.5 + Math.cos(menuAnim * 0.7 + i) * H * 0.3;
+        ctx.globalAlpha = 0.2;
+        drawBubble(px, py, i % COLORS.length, 10 + i % 8);
+    }
+    ctx.globalAlpha = 1;
+
+    drawText('游戏结束', W / 2, H * 0.25, 42 * SCALE, '#FF4757');
+    drawText('关卡 ' + (G.level + 1) + ' - ' + LEVELS[G.level].name, W / 2, H * 0.35, 18 * SCALE, '#aaa');
+
+    drawText('最终得分', W / 2, H * 0.45, 16 * SCALE, '#888');
+    drawText(G.score, W / 2, H * 0.52, 36 * SCALE, '#FFD700');
+
+    drawText('最高连击: x' + G.bestCombo, W / 2, H * 0.62, 16 * SCALE, '#FF6B81');
+
+    drawButton('返回菜单', W / 2 - 100 * SCALE, H * 0.72, 200 * SCALE, 50 * SCALE, '#FF4757', '#c0392b');
+
+    drawText('按任意键继续', W / 2, H * 0.88, 14 * SCALE, '#666');
+}
+
+/* ---------- 胜利绘制 ---------- */
+function drawWin() {
+    drawGradientBg(['#001a00', '#0d2818', '#001a00']);
+
+    // Animated particles
+    menuAnim += 0.015;
+    for (let i = 0; i < 25; i++) {
+        const px = W * 0.5 + Math.sin(menuAnim + i * 0.5) * W * 0.4;
+        const py = H * 0.5 + Math.cos(menuAnim * 0.6 + i * 0.4) * H * 0.4;
+        ctx.globalAlpha = 0.25;
+        drawBubble(px, py, i % COLORS.length, 12 + i % 10);
+    }
+    ctx.globalAlpha = 1;
+
+    drawText('关卡通过!', W / 2, H * 0.18, 42 * SCALE, '#2ED573');
+    drawText('关卡 ' + (G.level + 1) + ' - ' + LEVELS[G.level].name, W / 2, H * 0.28, 18 * SCALE, '#aaa');
+
+    // Stars
+    const stars = calcStars();
+    drawText('★'.repeat(stars) + '☆'.repeat(3 - stars), W / 2, H * 0.38, 40 * SCALE, '#FFD700');
+
+    drawText('得分', W / 2, H * 0.48, 16 * SCALE, '#888');
+    drawText(G.score, W / 2, H * 0.55, 36 * SCALE, '#FFD700');
+
+    drawText('最高连击: x' + G.bestCombo, W / 2, H * 0.64, 16 * SCALE, '#FF6B81');
+
+    const nextLevel = G.level + 1;
+    if (nextLevel < LEVELS.length) {
+        drawButton('下一关', W / 2 - 100 * SCALE, H * 0.72, 200 * SCALE, 50 * SCALE, '#2ED573', '#27ae60');
+    }
+    drawButton('返回菜单', W / 2 - 100 * SCALE, H * 0.82, 200 * SCALE, 50 * SCALE, '#576574', '#222f3e');
+
+    drawText('按任意键继续', W / 2, H * 0.92, 14 * SCALE, '#666');
+}
+
+/* ---------- 暂停绘制 ---------- */
+function drawPause() {
+    // Dim background
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    drawText('游戏暂停', W / 2, H * 0.3, 36 * SCALE, '#fff');
+
+    const btnW = 200 * SCALE;
+    const btnH = 50 * SCALE;
+    const cx = (W - btnW) / 2;
+
+    drawButton('继续游戏', cx, H / 2 - 20, btnW, btnH, '#2ED573', '#27ae60');
+    drawButton('返回菜单', cx, H / 2 + 50, btnW, btnH, '#FF4757', '#c0392b');
+
+    drawText('按 ESC 继续', W / 2, H * 0.85, 14 * SCALE, '#666');
+}
+
+/* ---------- 主循环 ---------- */
+function update() {
+    resize();
+    updateParticles();
+    updateScorePopups();
+
+    if (G.state === STATE.PLAY) {
+        updateFlying();
+    }
+
+    if (G.state === STATE.MENU) {
+        menuScroll += (menuTarget - menuScroll) * 0.1;
+        const maxScroll = LEVELS.length * 55 * SCALE - (H - 160 * SCALE);
+        menuScroll = Math.max(0, Math.min(maxScroll, menuScroll));
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    switch (G.state) {
+        case STATE.MENU: drawMenu(); break;
+        case STATE.PLAY: drawGame(); break;
+        case STATE.GAMEOVER: drawGameOver(); break;
+        case STATE.WIN: drawWin(); break;
+        case STATE.PAUSE:
+            drawGame();
+            drawPause();
+            break;
+    }
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+/* ---------- 启动 ---------- */
+G.state = STATE.MENU;
+menuScroll = 0;
+gameLoop();
+
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>咖啡馆</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;overflow:hidden;display:flex;justify-content:center;align-items:center;height:100vh;font-family:'Microsoft YaHei',sans-serif;touch-action:none;-webkit-user-select:none;user-select:none}
+canvas{display:block;max-width:100%;max-height:100%}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ===== 配置 =====
+const CFG = {
+    W:800, H:600,
+    DAY_LEN:90,        // 一天秒数
+    INTERMISSION:3,     // 天间间隔
+    CUST_SPEED:1.5,
+    BASE_PATIENCE:300,  // 基础耐心帧数
+    MAX_STREAK:10,
+    STREAK_BONUS:0.1,   // 每连击+10%
+    BASE_SPAWN:120,     // 初始生成间隔帧
+    MIN_SPAWN:35,
+    COOK_TIME:[120,90,150,100,180,140], // 6种咖啡制作帧数
+    UP_COST:[[0],[200,500,1000]],       // 通用升级 [当前无用,各等级]
+    SEAT_COST:[0,150,350],
+    SEAT_CNT:[4,6,8],
+    WORKER_COST:[0,400,900],
+    WORKER_CD:[0,180,120],             // 自动制作冷却帧
+    SPEED_MULT:[1,0.85,0.70,0.55],
+    TIP_MULT:[1,1.2,1.5,2.0],
+    PATIENCE_MULT:[1,1.2,1.4,1.6],
+};
+
+// 咖啡配方
+const RECIPES = [
+    {name:'美式',      icon:'☕', color:'#8B4513', price:15, cost:3},
+    {name:'拿铁',      icon:'🥛', color:'#D2B48C', price:22, cost:5},
+    {name:'卡布奇诺',  icon:'🫧', color:'#F5DEB3', price:25, cost:6},
+    {name:'摩卡',      icon:'🍫', color:'#654321', price:28, cost:7},
+    {name:'焦糖玛奇朵',icon:'🍯', color:'#DAA520', price:30, cost:8},
+    {name:'抹茶拿铁',  icon:'🍵', color:'#90EE90', price:26, cost:6},
+];
+
+// 顾客类型
+const CUST_TYPES = [
+    {name:'上班族',    emoji:'👔', pat:1.0, tip:1.0},
+    {name:'学生',      emoji:'📚', pat:1.3, tip:0.8},
+    {name:'商务人士',  emoji:'💼', pat:0.8, tip:1.5},
+    {name:'情侣',      emoji:'💑', pat:1.5, tip:1.2},
+    {name:'艺术家',    emoji:'🎨', pat:2.0, tip:0.6},
+    {name:'老奶奶',    emoji:'👵', pat:0.6, tip:2.0},
+];
+
+const ORDER_TPL = [
+    '来杯{0}','要一杯{0}','我想要{0}','给我{0}谢谢','一杯{0}打包带走'
+];
+
+// 座位位置（相对坐标）
+const SEATS = [
+    {x:.15,y:.45},{x:.15,y:.62},
+    {x:.38,y:.45},{x:.38,y:.62},
+    {x:.58,y:.45},{x:.58,y:.62},
+    {x:.78,y:.45},{x:.78,y:.62},
+];
+
+// 商店项
+const SHOP = [
+    {name:'制作速度',desc:'所有咖啡制作速度提升',icon:'⚡',key:'speed',costs:[0,200,500,1000],max:3},
+    {name:'小费提升',desc:'顾客给更多小费',      icon:'💰',key:'tips', costs:[0,200,500,1000],max:3},
+    {name:'耐心提升',desc:'顾客等待更久',        icon:'⏳',key:'pat',  costs:[0,200,500,1000],max:3},
+    {name:'座位扩充',desc:'增加可服务座位',      icon:'🪑',key:'seats',costs:[0,150,350],      max:2},
+    {name:'雇佣咖啡师',desc:'自动制作咖啡',     icon:'👨‍🍳',key:'worker',costs:[0,400,900],    max:2},
+];
+
+// ===== 游戏状态 =====
+var G = {};
+
+function resetState() {
+    G.state = 'menu';
+    G.money = 50;
+    G.totalEarned = 0;
+    G.score = 0;
+    G.day = 1;
+    G.dayTimer = CFG.DAY_LEN;
+    G.streak = 0;
+    G.maxStreak = 0;
+    G.combo = 0;
+    G.comboTimer = 0;
+    G.customers = [];
+    G.activeOrder = null;      // 当前正在服务的顾客引用
+    G.makingIdx = -1;          // 正在制作的咖啡索引
+    G.makeProg = 0;            // 制作进度 0-1
+    G.particles = [];
+    G.floats = [];
+    G.shopOpen = false;
+    G.upgrade = {speed:1,tips:1,pat:1,seats:0,worker:0};
+    G.workerTimer = 0;
+    G.workerAuto = false;      // 咖啡师是否在自动制作
+    G.spawnTimer = 60;         // 首个顾客稍延迟
+    G.spawnRate = CFG.BASE_SPAWN;
+    G.stats = {served:0,lost:0,total:0,maxCombo:0,dayEarn:0,dayTips:0,dayLost:0};
+    G.highScore = parseInt(localStorage.getItem('cafe_hs')||'0');
+}
+resetState();
+
+// ===== Canvas =====
+const cv = document.getElementById('gameCanvas');
+const cx = cv.getContext('2d');
+let S = 1; // scale
+
+function resize() {
+    const r = CFG.W/CFG.H;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w/h > r) { h = h; w = h*r; } else { w = w; h = w/r; }
+    cv.width = CFG.W; cv.height = CFG.H;
+    cv.style.width = w+'px'; cv.style.height = h+'px';
+    cv.style.marginLeft = ((window.innerWidth-w)/2)+'px';
+    cv.style.marginTop  = ((window.innerHeight-h)/2)+'px';
+    S = w/CFG.W;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ===== 音频 =====
+const Audio = {
+    ctx: null,
+    init(){ if(!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)(); },
+    beep(f,dur,type){
+        this.init(); if(!this.ctx) return;
+        const o=this.ctx.createOscillator(), g=this.ctx.createGain();
+        o.connect(g); g.connect(this.ctx.destination);
+        o.type=type||'sine'; o.frequency.value=f;
+        g.gain.value=0.12; g.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+dur);
+        o.start(); o.stop(this.ctx.currentTime+dur);
+    },
+    click(){this.beep(800,0.08)},
+    serve(){const t=this.ctx?this.ctx.currentTime:0;this.init();if(!this.ctx)return;
+        [523,659,784].forEach((f,i)=>{const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+        o.connect(g);g.connect(this.ctx.destination);o.frequency.value=f;g.gain.value=0.1;
+        g.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+0.3+i*0.01);
+        o.start(this.ctx.currentTime+i*0.08);o.stop(this.ctx.currentTime+0.35+i*0.08);});
+    },
+    coin(){this.beep(1200,0.12);this.beep(1500,0.1)},
+    fail(){this.beep(250,0.3,'sawtooth')},
+    upgrade(){[523,659,784,1047].forEach((f,i)=>{setTimeout(()=>this.beep(f,0.12),i*80)})},
+};
+
+// ===== 粒子 & 浮字 =====
+function spawnParticles(x,y,color,n){
+    for(let i=0;i<(n||8);i++){
+        const a=Math.PI*2/n*i, sp=1.5+Math.random()*2.5;
+        G.particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,decay:0.02+Math.random()*0.015,
+            sz:3+Math.random()*3,color});
+    }
+}
+function addFloat(x,y,text,color,sz){
+    G.floats.push({x,y,text,color:color||'#FFF',sz:sz||18,life:1,decay:0.018});
+}
+function updateParticles(){
+    for(let i=G.particles.length-1;i>=0;i--){
+        const p=G.particles[i];
+        p.x+=p.vx; p.y+=p.vy; p.vy-=0.06; p.life-=p.decay;
+        if(p.life<=0) G.particles.splice(i,1);
+    }
+    for(let i=G.floats.length-1;i>=0;i--){
+        const f=G.floats[i]; f.y-=0.8; f.life-=f.decay;
+        if(f.life<=0) G.floats.splice(i,1);
+    }
+}
+function drawParticles(){
+    G.particles.forEach(p=>{
+        cx.globalAlpha=p.life;
+        cx.fillStyle=p.color;
+        cx.beginPath(); cx.arc(p.x,p.y,p.sz*p.life,0,Math.PI*2); cx.fill();
+    });
+    cx.globalAlpha=1;
+    G.floats.forEach(f=>{
+        cx.globalAlpha=f.life;
+        cx.fillStyle=f.color;
+        cx.font='bold '+f.sz+'px sans-serif';
+        cx.textAlign='center';
+        cx.fillText(f.text,f.x,f.y);
+    });
+    cx.globalAlpha=1;
+}
+
+// ===== 圆角矩形 =====
+function rrect(x,y,w,h,r){
+    cx.beginPath();
+    cx.moveTo(x+r,y); cx.lineTo(x+w-r,y); cx.quadraticCurveTo(x+w,y,x+w,y+r);
+    cx.lineTo(x+w,y+h-r); cx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    cx.lineTo(x+r,y+h); cx.quadraticCurveTo(x,y+h,x,y+h-r);
+    cx.lineTo(x,y+r); cx.quadraticCurveTo(x,y,x+r,y);
+    cx.closePath();
+}
+
+// ===== 按钮 =====
+function drawBtn(x,y,w,h,text,c1,c2){
+    const g=cx.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0,c1); g.addColorStop(1,c2);
+    cx.fillStyle=g; rrect(x,y,w,h,h/2); cx.fill();
+    cx.strokeStyle='rgba(255,255,255,0.25)'; cx.lineWidth=2; rrect(x,y,w,h,h/2); cx.stroke();
+    cx.fillStyle='#FFF'; cx.font='bold '+Math.min(20,h*0.45)+'px sans-serif';
+    cx.textAlign='center'; cx.textBaseline='middle';
+    cx.fillText(text,x+w/2,y+h/2);
+    cx.textBaseline='alphabetic';
+}
+function inRect(px,py,x,y,w,h){return px>=x&&px<=x+w&&py>=y&&py<=y+h;}
+
+// ===== 背景 =====
+function drawBg(){
+    const g=cx.createLinearGradient(0,0,0,CFG.H);
+    g.addColorStop(0,'#2C1810'); g.addColorStop(0.4,'#4A2C17'); g.addColorStop(1,'#1A0F0A');
+    cx.fillStyle=g; cx.fillRect(0,0,CFG.W,CFG.H);
+    cx.globalAlpha=0.025; cx.font='140px serif'; cx.textAlign='center';
+    cx.fillStyle='#FFF';
+    cx.fillText('☕',CFG.W*0.15,CFG.H*0.35);
+    cx.fillText('☕',CFG.W*0.85,CFG.H*0.7);
+    cx.globalAlpha=1;
+}
+
+// ===== 顾客系统 =====
+function spawnCustomer(){
+    const sc=CFG.SEAT_CNT[G.upgrade.seats];
+    const occ=G.customers.map(c=>c.si);
+    const free=[];
+    for(let i=0;i<sc;i++) if(!occ.includes(i)) free.push(i);
+    if(!free.length) return;
+
+    const si=free[Math.floor(Math.random()*free.length)];
+    const seat=SEATS[si];
+    const ct=CUST_TYPES[Math.floor(Math.random()*CUST_TYPES.length)];
+    const ci=Math.floor(Math.random()*RECIPES.length);
+    const tpl=ORDER_TPL[Math.floor(Math.random()*ORDER_TPL.length)];
+    const maxP=CFG.BASE_PATIENCE*CFG.PATIENCE_MULT[G.upgrade.pat]*ct.pat;
+
+    G.customers.push({
+        si, x:-50, tx:seat.x*CFG.W, y:seat.y*CFG.H-40,
+        ct, ci, order:tpl.replace('{0}',RECIPES[ci].name),
+        patience:maxP, maxPat:maxP,
+        state:'entering', servedTimer:0
+    });
+    G.stats.total++;
+}
+
+function updateCustomers(dt){
+    for(let i=G.customers.length-1;i>=0;i--){
+        const c=G.customers[i];
+        if(c.state==='entering'){
+            c.x+=(c.tx-c.x)*0.06;
+            if(Math.abs(c.x-c.tx)<2){c.x=c.tx; c.state='waiting';}
+        } else if(c.state==='waiting'){
+            c.patience-=dt;
+            if(c.patience<=0){
+                c.state='leaving'; G.stats.lost++; G.stats.dayLost++;
+                G.streak=0; G.combo=0;
+                addFloat(c.x,c.y-30,'😤 太慢了！','#FF4444',16);
+                Audio.fail();
+            }
+        } else if(c.state==='served'){
+            c.servedTimer+=dt;
+            if(c.servedTimer>80) c.state='leaving';
+        } else if(c.state==='leaving'){
+            c.x-=3;
+            if(c.x<-60) G.customers.splice(i,1);
+        }
+    }
+}
+
+function drawCustomers(){
+    G.customers.forEach(c=>{
+        // 椅子
+        cx.fillStyle='#6B4226';
+        cx.beginPath(); cx.arc(c.x,c.y+42,14,0,Math.PI*2); cx.fill();
+
+        // 身体
+        cx.font='34px serif'; cx.textAlign='center';
+        cx.fillText(c.ct.emoji, c.x, c.y+22);
+
+        // 耐心条
+        if(c.state==='waiting'){
+            const bw=50,bh=6,bx=c.x-bw/2,by=c.y-32;
+            const pct=Math.max(0,c.patience/c.maxPat);
+            cx.fillStyle='#222'; cx.fillRect(bx,by,bw,bh);
+            cx.fillStyle=pct>0.5?'#4CAF50':pct>0.25?'#FFC107':'#F44336';
+            cx.fillRect(bx,by,bw*pct,bh);
+            cx.strokeStyle='#000'; cx.lineWidth=1; cx.strokeRect(bx,by,bw,bh);
+        }
+
+        // 订单气泡
+        if(c.state==='waiting'||c.state==='entering'){
+            const bx=c.x, by=c.y-48;
+            const rec=RECIPES[c.ci];
+            cx.fillStyle='rgba(255,255,255,0.93)';
+            rrect(bx-48,by-22,96,36,8); cx.fill();
+            cx.strokeStyle=rec.color; cx.lineWidth=2; rrect(bx-48,by-22,96,36,8); cx.stroke();
+            cx.fillStyle='#333'; cx.font='12px sans-serif'; cx.textAlign='center';
+            cx.fillText(rec.icon+' '+rec.name, bx, by-1);
+        }
+
+        // 满意
+        if(c.state==='served'){
+            cx.font='22px serif'; cx.fillText('😊',c.x,c.y-8);
+        }
+    });
+}
+
+// ===== 制作系统 =====
+function startMake(ci){
+    if(G.activeOrder||G.makingIdx>=0) return;
+    // 找最急的顾客
+    const ws=G.customers.filter(c=>c.state==='waiting'&&c.ci===ci);
+    if(!ws.length) return;
+    ws.sort((a,b)=>a.patience-b.patience);
+    G.activeOrder=ws[0];
+    G.makingIdx=ci;
+    G.makeProg=0;
+    G.state='making';
+}
+
+function updateMaking(dt){
+    if(G.state!=='making'||G.makingIdx<0) return;
+    const sm=CFG.SPEED_MULT[G.upgrade.speed];
+    const ct=CFG.COOK_TIME[G.makingIdx]*sm;
+    G.makeProg+=dt/ct;
+    if(G.makeProg>=1) doServe();
+}
+
+function doServe(){
+    if(!G.activeOrder) return;
+    const c=G.activeOrder, rec=RECIPES[G.makingIdx];
+    const pratio=c.patience/c.maxPat;
+
+    // 连击
+    G.streak=Math.min(G.streak+1,CFG.MAX_STREAK);
+    G.combo=G.streak;
+    if(G.combo>G.stats.maxCombo) G.stats.maxCombo=G.combo;
+    G.comboTimer=0;
+
+    // 计算收入
+    const streakMul=1+G.streak*CFG.STREAK_BONUS;
+    let earn=Math.floor(rec.price*streakMul);
+    let tip=Math.floor(rec.cost*CFG.TIP_MULT[G.upgrade.tips]*streakMul);
+    if(pratio>0.5) tip=Math.floor(tip*1.5);
+
+    const total=earn+tip;
+    G.money+=total; G.totalEarned+=total; G.score+=total;
+    G.stats.dayEarn+=earn; G.stats.dayTips+=tip; G.stats.served++;
+
+    c.state='served'; c.servedTimer=0;
+    spawnParticles(c.x,c.y-15,'#FFD700',8);
+    addFloat(c.x,c.y-45,'+'+total+'💰','#FFD700',20);
+    if(G.streak>=3) addFloat(c.x,c.y-75,G.streak+' 连击!','#FF6B6B',15);
+
+    Audio.serve();
+    if(tip>0) setTimeout(()=>Audio.coin(),150);
+
+    G.activeOrder=null; G.makingIdx=-1; G.makeProg=0;
+    G.state='playing'; G.workerAuto=false;
+}
+
+// ===== 咖啡师自动 =====
+function updateWorker(dt){
+    if(!G.upgrade.worker) return;
+    G.workerTimer+=dt;
+    const cd=CFG.WORKER_CD[G.upgrade.worker];
+    if(G.workerTimer>=cd&&!G.activeOrder){
+        G.workerTimer=0;
+        const ws=G.customers.filter(c=>c.state==='waiting');
+        if(ws.length){
+            ws.sort((a,b)=>a.patience-b.patience);
+            G.activeOrder=ws[0]; G.makingIdx=ws[0].ci; G.makeProg=0; G.workerAuto=true;
+        }
+    }
+    if(G.workerAuto&&G.makingIdx>=0){
+        const sm=CFG.SPEED_MULT[G.upgrade.speed];
+        G.makeProg+=dt/(CFG.COOK_TIME[G.makingIdx]*sm);
+        if(G.makeProg>=1) doServe();
+    }
+}
+
+// ===== 主循环 =====
+let lastT=0;
+function loop(ts){
+    const dt=Math.min((ts-lastT)/16.667,3);
+    lastT=ts;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+}
+
+function update(dt){
+    updateParticles();
+    if(G.state==='menu'||G.state==='gameover') return;
+
+    if(G.state==='intermission'){
+        G.dayTimer-=dt;
+        if(G.dayTimer<=0){
+            G.day++; G.dayTimer=CFG.DAY_LEN; G.spawnRate=Math.max(CFG.MIN_SPAWN,CFG.BASE_SPAWN-G.day*7);
+            G.spawnTimer=30; G.customers=[]; G.streak=0; G.combo=0;
+            G.stats.dayEarn=0; G.stats.dayTips=0; G.stats.dayLost=0; G.stats.served=0; G.stats.lost=0; G.stats.total=0;
+            G.state='playing';
+        }
+        return;
+    }
+
+    // 一天倒计时（秒）
+    G.dayTimer-=dt/60;
+    if(G.dayTimer<=0){
+        // 一天结束
+        if(G.day>=5||(G.day>=3&&G.stats.lost>G.stats.served)){
+            G.state='gameover';
+            if(G.score>G.highScore){G.highScore=G.score;localStorage.setItem('cafe_hs',G.score);}
+        } else {
+            G.state='intermission'; G.dayTimer=CFG.INTERMISSION;
+        }
+        return;
+    }
+
+    // 生成顾客
+    G.spawnTimer+=dt;
+    if(G.spawnTimer>=G.spawnRate){
+        G.spawnTimer=0;
+        spawnCustomer();
+    }
+
+    updateCustomers(dt/60);
+    updateMaking(dt);
+    updateWorker(dt);
+
+    // 连击超时
+    if(G.combo>0){
+        G.comboTimer+=dt/60;
+        if(G.comboTimer>8){G.combo=0;G.streak=0;}
+    }
+}
+
+// ===== 渲染 =====
+function render(){
+    cx.clearRect(0,0,CFG.W,CFG.H);
+    drawBg();
+
+    switch(G.state){
+        case 'menu': drawMenu(); break;
+        case 'gameover': drawGameOver(); break;
+        default: drawScene(); drawUI(); if(G.shopOpen) drawShop(); break;
+    }
+
+    drawParticles();
+}
+
+function drawMenu(){
+    cx.fillStyle='#FFD700'; cx.font='bold 52px sans-serif'; cx.textAlign='center';
+    cx.fillText('☕ 咖啡馆 ☕', CFG.W/2, CFG.H*0.22);
+    cx.fillStyle='#D2B48C'; cx.font='18px sans-serif';
+    cx.fillText('制作美味咖啡 · 服务每一位顾客', CFG.W/2, CFG.H*0.30);
+
+    // 咖啡展示
+    const ox=CFG.W*0.12, oy=CFG.H*0.38;
+    for(let i=0;i<6;i++){
+        const r=RECIPES[i], px=ox+(i%3)*210, py=oy+Math.floor(i/3)*80;
+        cx.fillStyle='rgba(0,0,0,0.35)'; rrect(px-65,py-22,130,55,10); cx.fill();
+        cx.font='26px serif'; cx.fillStyle='#FFF'; cx.textAlign='center';
+        cx.fillText(r.icon, px, py+8);
+        cx.font='13px sans-serif'; cx.fillStyle='#D2B48C';
+        cx.fillText(r.name+' '+r.price+'元', px, py+26);
+    }
+
+    // 最高分
+    cx.fillStyle='#FFD700'; cx.font='15px sans-serif';
+    cx.fillText('最高分: '+G.highScore, CFG.W/2, CFG.H*0.72);
+
+    // 说明
+    cx.fillStyle='#AAA'; cx.font='13px sans-serif';
+    cx.fillText('点击顾客要的咖啡开始制作 · 越快完成小费越多 · 连击获得加成', CFG.W/2, CFG.H*0.77);
+
+    drawBtn(CFG.W/2-100, CFG.H*0.82, 200, 48, '开始营业', '#4CAF50','#2E7D32');
+    drawBtn(CFG.W/2-70, CFG.H*0.91, 140, 35, '操作说明', '#1976D2','#1565C0');
+}
+
+function drawScene(){
+    // 咖啡台
+    cx.fillStyle='#5C3A21'; cx.fillRect(0,CFG.H*0.78,CFG.W,CFG.H*0.22);
+    cx.strokeStyle='#8B6914'; cx.lineWidth=3; cx.strokeRect(0,CFG.H*0.78,CFG.W,CFG.H*0.22);
+
+    // 咖啡机
+    cx.fillStyle='#555'; rrect(CFG.W*0.015,CFG.H*0.79,100,60,6); cx.fill();
+    cx.fillStyle='#777'; cx.font='28px serif'; cx.textAlign='center';
+    cx.fillText('☕',CFG.W*0.015+50,CFG.H*0.79+40);
+
+    // 座位
+    const sc=CFG.SEAT_CNT[G.upgrade.seats];
+    for(let i=0;i<sc;i++){
+        const s=SEATS[i], sx=s.x*CFG.W, sy=s.y*CFG.H;
+        cx.fillStyle='#8B7355'; cx.fillRect(sx-22,sy+18,44,6);
+        cx.fillStyle='#6B4226'; cx.fillRect(sx-3,sy+24,6,16);
+    }
+
+    drawCustomers();
+
+    // 咖啡选择栏
+    drawCoffeeBar();
+
+    // 制作进度
+    if(G.makingIdx>=0) drawMakeBar();
+}
+
+function drawCoffeeBar(){
+    const by=CFG.H*0.82, ox=CFG.W*0.16;
+    cx.fillStyle='rgba(0,0,0,0.45)'; rrect(ox-10,by-5,530,68,10); cx.fill();
+    cx.fillStyle='#D2B48C'; cx.font='bold 11px sans-serif'; cx.textAlign='left';
+    cx.fillText('选择咖啡:',ox,by+10);
+
+    for(let i=0;i<6;i++){
+        const r=RECIPES[i], ix=ox+i*88, iy=by+16, iw=80, ih=44;
+        const has=G.customers.some(c=>c.state==='waiting'&&c.ci===i);
+
+        cx.fillStyle=G.makingIdx===i?'rgba(76,175,80,0.5)':
+                     has?'rgba(255,193,7,0.3)':'rgba(255,255,255,0.12)';
+        rrect(ix,iy,iw,ih,6); cx.fill();
+        if(has){cx.strokeStyle='#FFD700';cx.lineWidth=2;rrect(ix,iy,iw,ih,6);cx.stroke();}
+
+        cx.font='18px serif'; cx.textAlign='center'; cx.fillStyle='#FFF';
+        cx.fillText(r.icon,ix+iw/2,iy+18);
+        cx.font='10px sans-serif'; cx.fillStyle='#D2B48C';
+        cx.fillText(r.name,ix+iw/2,iy+34);
+
+        // 小红点
+        if(has){
+            cx.fillStyle='#F44336'; cx.beginPath();
+            cx.arc(ix+iw-5,iy+5,5,0,Math.PI*2); cx.fill();
+        }
+    }
+}
+
+function drawMakeBar(){
+    const r=RECIPES[G.makingIdx], bx=CFG.W/2, by=CFG.H*0.74;
+    cx.fillStyle='rgba(0,0,0,0.7)'; rrect(bx-110,by-22,220,48,10); cx.fill();
+
+    // 进度条
+    const lx=bx-90,ly=by-6,lw=180,lh=18;
+    cx.fillStyle='#222'; rrect(lx,ly,lw,lh,lh/2); cx.fill();
+    const g=cx.createLinearGradient(lx,ly,lx+lw,ly);
+    g.addColorStop(0,'#4CAF50');g.addColorStop(1,'#8BC34A');
+    cx.fillStyle=g; rrect(lx,ly,lw*Math.min(1,G.makeProg),lh,lh/2); cx.fill();
+
+    cx.fillStyle='#FFF'; cx.font='11px sans-serif'; cx.textAlign='center';
+    cx.fillText('制作中: '+r.icon+' '+r.name, bx, by-13);
+    cx.font='bold 11px sans-serif';
+    cx.fillText(Math.floor(Math.min(1,G.makeProg)*100)+'%', bx, by+8);
+}
+
+function drawUI(){
+    // 顶部栏
+    cx.fillStyle='rgba(0,0,0,0.55)'; cx.fillRect(0,0,CFG.W,42);
+
+    cx.fillStyle='#FFD700'; cx.font='bold 16px sans-serif'; cx.textAlign='left';
+    cx.fillText('💰 '+G.money, 12, 27);
+
+    cx.fillStyle='#FFF'; cx.font='15px sans-serif'; cx.textAlign='center';
+    cx.fillText('第 '+G.day+' 天', CFG.W/2, 27);
+
+    const tl=Math.ceil(G.dayTimer);
+    cx.fillStyle=tl<20?'#FF6B6B':'#FFF';
+    cx.fillText('⏱ '+tl+'s', CFG.W/2+90, 27);
+
+    if(G.combo>0){
+        cx.fillStyle='#FF6B6B'; cx.font='bold 15px sans-serif';
+        cx.fillText('🔥 '+G.combo+' 连击', CFG.W-120, 27);
+    }
+
+    cx.fillStyle='#4CAF50'; cx.font='13px sans-serif'; cx.textAlign='right';
+    cx.fillText('✓'+G.stats.served+'  ✗'+G.stats.lost, CFG.W-12, 27);
+
+    // 商店按钮
+    cx.fillStyle='rgba(255,193,7,0.85)'; rrect(CFG.W-95,48,85,32,8); cx.fill();
+    cx.fillStyle='#333'; cx.font='bold 13px sans-serif'; cx.textAlign='center';
+    cx.fillText('🛒 商店', CFG.W-52, 68);
+
+    // 前2天教程
+    if(G.day<=2){
+        cx.fillStyle='rgba(0,0,0,0.8)'; rrect(CFG.W/2-170,CFG.H*0.13,340,50,8); cx.fill();
+        cx.fillStyle='#FFD700'; cx.font='bold 13px sans-serif';
+        cx.fillText('💡 点击下方咖啡图标为顾客制作！',CFG.W/2,CFG.H*0.13+20);
+        cx.fillStyle='#CCC'; cx.font='12px sans-serif';
+        cx.fillText('越快完成小费越多，连续成功获得连击加成',CFG.W/2,CFG.H*0.13+40);
+    }
+}
+
+function drawShop(){
+    const sx=CFG.W/2-210, sy=CFG.H*0.08, sw=420, sh=440;
+    cx.fillStyle='rgba(0,0,0,0.65)'; cx.fillRect(0,0,CFG.W,CFG.H);
+    cx.fillStyle='#3E2723'; rrect(sx,sy,sw,sh,14); cx.fill();
+    cx.strokeStyle='#FFD700'; cx.lineWidth=3; rrect(sx,sy,sw,sh,14); cx.stroke();
+
+    cx.fillStyle='#FFD700'; cx.font='bold 22px sans-serif'; cx.textAlign='center';
+    cx.fillText('🛒 升级商店',sx+sw/2,sy+32);
+    cx.fillStyle='#D2B48C'; cx.font='13px sans-serif';
+    cx.fillText('金币: 💰 '+G.money,sx+sw/2,sy+55);
+
+    for(let i=0;i<SHOP.length;i++){
+        const it=SHOP[i], ix=sx+18, iy=sy+70+i*70, iw=sw-36, ih=60;
+        const lv=it.key==='speed'?G.upgrade.speed:it.key==='tips'?G.upgrade.tips:
+                  it.key==='pat'?G.upgrade.pat:it.key==='seats'?G.upgrade.seats:G.upgrade.worker;
+        const maxed=lv>=it.max;
+        const cost=maxed?0:it.costs[lv];
+        const canBuy=!maxed&&G.money>=cost;
+
+        cx.fillStyle='rgba(255,255,255,0.08)'; rrect(ix,iy,iw,ih,8); cx.fill();
+
+        cx.font='26px serif'; cx.textAlign='left'; cx.fillStyle='#FFF';
+        cx.fillText(it.icon,ix+10,iy+38);
+        cx.font='bold 13px sans-serif';
+        cx.fillText(it.name,ix+48,iy+22);
+        cx.font='11px sans-serif'; cx.fillStyle='#AAA';
+        cx.fillText(it.desc,ix+48,iy+40);
+
+        // 等级
+        cx.fillStyle='#FFD700'; cx.font='11px sans-serif'; cx.textAlign='right';
+        let lvTxt='Lv.'+lv; if(maxed) lvTxt='MAX';
+        cx.fillText(lvTxt,ix+iw-90,iy+22);
+
+        // 升级效果预览
+        if(!maxed){
+            cx.fillStyle='#4CAF50'; cx.font='10px sans-serif';
+            const nxt=it.key==='speed'?((1-CFG.SPEED_MULT[lv+1])*100).toFixed(0)+'%更快':
+                       it.key==='tips'?'+'+((CFG.TIP_MULT[lv+1]-1)*100).toFixed(0)+'%小费':
+                       it.key==='pat'?'+'+((CFG.PATIENCE_MULT[lv+1]-1)*100).toFixed(0)+'%耐心':
+                       it.key==='seats'?CFG.SEAT_CNT[lv+1]+'个座位':'自动制作';
+            cx.fillText('→ '+nxt,ix+iw-90,iy+38);
+        }
+
+        // 按钮
+        if(!maxed){
+            const bx=ix+iw-78,by=iy+14,bw=68,bh=32;
+            cx.fillStyle=canBuy?'#4CAF50':'#555'; rrect(bx,by,bw,bh,5); cx.fill();
+            cx.fillStyle=canBuy?'#FFF':'#888'; cx.font='bold 12px sans-serif'; cx.textAlign='center';
+            cx.fillText('💰'+cost,bx+bw/2,by+19);
+        }
+    }
+
+    // 关闭
+    cx.fillStyle='#F44336'; cx.beginPath(); cx.arc(sx+sw-24,sy+24,14,0,Math.PI*2); cx.fill();
+    cx.fillStyle='#FFF'; cx.font='bold 16px sans-serif'; cx.textAlign='center';
+    cx.fillText('✕',sx+sw-24,sy+30);
+}
+
+function drawGameOver(){
+    cx.fillStyle='rgba(0,0,0,0.82)'; cx.fillRect(0,0,CFG.W,CFG.H);
+
+    cx.fillStyle='#FFD700'; cx.font='bold 40px sans-serif'; cx.textAlign='center';
+    cx.fillText('营业结束！',CFG.W/2,CFG.H*0.18);
+
+    const stats=[
+        ['营业天数',G.day+' 天'],
+        ['总收入',  '💰 '+G.totalEarned],
+        ['最终评分',G.score+' 分'],
+        ['服务顾客','✓ '+G.stats.served],
+        ['失去顾客','✗ '+G.stats.lost],
+        ['最高连击','🔥 '+G.stats.maxCombo],
+    ];
+    cx.font='17px sans-serif';
+    stats.forEach((s,i)=>{
+        const y=CFG.H*0.30+i*36;
+        cx.fillStyle='#D2B48C'; cx.textAlign='right'; cx.fillText(s[0]+':',CFG.W/2-10,y);
+        cx.fillStyle='#FFF'; cx.textAlign='left'; cx.fillText(s[1],CFG.W/2+10,y);
+    });
+
+    if(G.score>=G.highScore&&G.score>0){
+        cx.fillStyle='#FF6B6B'; cx.font='bold 18px sans-serif'; cx.textAlign='center';
+        cx.fillText('🎉 新纪录！',CFG.W/2,CFG.H*0.67);
+    }
+    cx.fillStyle='#FFD700'; cx.font='15px sans-serif';
+    cx.fillText('历史最高: '+G.highScore,CFG.W/2,CFG.H*0.73);
+
+    drawBtn(CFG.W/2-100,CFG.H*0.79,200,46,'再来一次','#4CAF50','#2E7D32');
+    drawBtn(CFG.W/2-60,CFG.H*0.88,120,34,'返回菜单','#1976D2','#1565C0');
+}
+
+// ===== 输入 =====
+function getPos(e){
+    const r=cv.getBoundingClientRect();
+    const cx2=e.touches?e.touches[0].clientX:e.clientX;
+    const cy2=e.touches?e.touches[0].clientY:e.clientY;
+    return {x:(cx2-r.left)/S, y:(cy2-r.top)/S};
+}
+
+function onClick(e){
+    e.preventDefault();
+    const p=getPos(e);
+    Audio.init(); Audio.click();
+
+    if(G.state==='menu'){
+        if(inRect(p.x,p.y,CFG.W/2-100,CFG.H*0.82,200,48)){startGame();return;}
+        if(inRect(p.x,p.y,CFG.W/2-70,CFG.H*0.91,140,35)){
+            alert('☕ 咖啡馆 - 操作说明\n\n'+
+                '1. 点击下方咖啡图标为等待中的顾客制作\n'+
+                '2. 越快完成顾客越满意，小费越多\n'+
+                '3. 连续成功服务获得连击加成\n'+
+                '4. 用金币升级制作速度、小费、座位等\n'+
+                '5. 雇佣咖啡师可以自动制作咖啡\n\n'+
+                '提示：注意顾客头顶的耐心条！');return;}
+    }
+
+    if(G.state==='gameover'){
+        if(inRect(p.x,p.y,CFG.W/2-100,CFG.H*0.79,200,46)){startGame();return;}
+        if(inRect(p.x,p.y,CFG.W/2-60,CFG.H*0.88,120,34)){resetState();return;}
+    }
+
+    if(G.state==='playing'||G.state==='making'){
+        // 商店按钮
+        if(inRect(p.x,p.y,CFG.W-95,48,85,32)){G.shopOpen=!G.shopOpen;return;}
+        if(G.shopOpen){shopClick(p.x,p.y);return;}
+
+        // 咖啡栏
+        const by=CFG.H*0.82, ox=CFG.W*0.16;
+        for(let i=0;i<6;i++){
+            if(inRect(p.x,p.y,ox+i*88,by+16,80,44)){
+                if(!G.activeOrder&&G.makingIdx<0) startMake(i);
+                return;
+            }
+        }
+    }
+}
+
+function shopClick(x,y){
+    const sx=CFG.W/2-210,sy=CFG.H*0.08,sw=420;
+    // 关闭
+    const dx=x-(sx+sw-24), dy=y-(sy+24);
+    if(dx*dx+dy*dy<=196){G.shopOpen=false;return;}
+
+    for(let i=0;i<SHOP.length;i++){
+        const it=SHOP[i], ix=sx+18, iy=sy+70+i*70, iw=sw-36, ih=60;
+        if(!inRect(x,y,ix,iy,iw,ih)) continue;
+        const lv=it.key==='speed'?G.upgrade.speed:it.key==='tips'?G.upgrade.tips:
+                  it.key==='pat'?G.upgrade.pat:it.key==='seats'?G.upgrade.seats:G.upgrade.worker;
+        if(lv>=it.max) return;
+        const cost=it.costs[lv];
+        if(G.money>=cost){
+            G.money-=cost;
+            if(it.key==='speed') G.upgrade.speed++;
+            else if(it.key==='tips') G.upgrade.tips++;
+            else if(it.key==='pat') G.upgrade.pat++;
+            else if(it.key==='seats') G.upgrade.seats++;
+            else G.upgrade.worker++;
+            Audio.upgrade();
+            spawnParticles(x,y,'#FFD700',10);
+            addFloat(x,y-20,'升级成功!','#4CAF50',16);
+        }
+        return;
+    }
+}
+
+function startGame(){
+    resetState();
+    G.state='playing';
+    G.money=50; G.totalEarned=50; G.score=0;
+    G.day=1; G.dayTimer=CFG.DAY_LEN;
+}
+
+cv.addEventListener('click',onClick);
+cv.addEventListener('touchstart',function(e){e.preventDefault();onClick(e);},{passive:false});
+
+document.addEventListener('keydown',function(e){
+    if(G.state==='menu'&&e.key==='Enter') startGame();
+    if(G.state==='gameover'&&e.key==='Enter') startGame();
+    if(G.state==='gameover'&&e.key==='Escape') resetState();
+    if((G.state==='playing'||G.state==='making')&&!G.shopOpen){
+        const n=parseInt(e.key);
+        if(n>=1&&n<=6&&!G.activeOrder&&G.makingIdx<0) startMake(n-1);
+    }
+    if(e.key==='Escape'&&G.shopOpen) G.shopOpen=false;
+});
+
+requestAnimationFrame(loop);
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

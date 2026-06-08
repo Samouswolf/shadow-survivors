@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>果园采摘</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+canvas { image-rendering: pixelated; border: 2px solid #4a7c59; cursor: pointer; max-width: 100%; height: auto; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="startScreen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#0a1a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1000">
+  <h1 style="font-size:48px;color:#7dcea0;margin-bottom:10px">🌳 果园采摘</h1>
+  <p style="color:#888;margin-bottom:8px">种果树 · 采摘 · 售卖 · 赚取金币</p>
+  <p style="color:#666;margin-bottom:40px;font-size:13px">春种夏长秋收冬藏，四季轮转经营果园</p>
+  <button id="startBtn" style="padding:15px 60px;font-size:20px;background:linear-gradient(135deg,#27ae60,#7dcea0);color:#fff;border:none;border-radius:12px;cursor:pointer">开始游戏</button>
+</div>
+<button id="pauseBtn" style="position:fixed;top:10px;right:10px;width:44px;height:44px;font-size:20px;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:8px;z-index:100;display:none">⏸</button>
+<div id="pauseScreen" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);flex-direction:column;align-items:center;justify-content:center;z-index:999">
+  <h2 style="color:#fff;margin-bottom:30px">游戏暂停</h2>
+  <button id="resumeBtn" style="padding:12px 40px;font-size:18px;background:#7dcea0;color:#fff;border:none;border-radius:8px;margin-bottom:15px">继续游戏</button>
+  <button id="restartBtn" style="padding:12px 40px;font-size:18px;background:#666;color:#fff;border:none;border-radius:8px">重新开始</button>
+</div>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 800, H = 600;
+canvas.width = W;
+canvas.height = H;
+
+// === 响应式Canvas ===
+function resizeCanvas() {
+    const maxW = window.innerWidth - 20;
+    const maxH = window.innerHeight - 20;
+    const scale = Math.min(maxW / W, maxH / H, 1);
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// === roundRect polyfill ===
+if (!ctx.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        this.moveTo(x + r[0], y);
+        this.lineTo(x + w - r[1], y);
+        this.arcTo(x + w, y, x + w, y + r[1], r[1]);
+        this.lineTo(x + w, y + h - r[2]);
+        this.arcTo(x + w, y + h, x + w - r[2], y + h, r[2]);
+        this.lineTo(x + r[3], y + h);
+        this.arcTo(x, y + h, x, y + h - r[3], r[3]);
+        this.lineTo(x, y + r[0]);
+        this.arcTo(x, y, x + r[0], y, r[0]);
+        this.closePath();
+    };
+}
+
+// === 常量 ===
+const SEASONS = ['春', '夏', '秋', '冬'];
+const SEASON_COLORS = {
+    '春': { bg1: '#2d5a27', bg2: '#4a8c3f', sky1: '#87CEEB', sky2: '#B0E0E6', leaf: '#7dcea0' },
+    '夏': { bg1: '#1a5c1a', bg2: '#3d8b3d', sky1: '#4A90D9', sky2: '#87CEEB', leaf: '#27ae60' },
+    '秋': { bg1: '#8B6914', bg2: '#D4A017', sky1: '#D4A017', sky2: '#F0C040', leaf: '#e67e22' },
+    '冬': { bg1: '#4a6670', bg2: '#7f9ea8', sky1: '#B0C4DE', sky2: '#E0E8F0', leaf: '#ccc' }
+};
+
+const FRUIT_TYPES = [
+    { name: '苹果', emoji: '🍎', growTime: 3, sellPrice: 15, seedCost: 10, seasons: ['春', '夏', '秋'], color: '#e74c3c' },
+    { name: '草莓', emoji: '🍓', growTime: 2, sellPrice: 12, seedCost: 8, seasons: ['春', '夏'], color: '#e91e63' },
+    { name: '西瓜', emoji: '🍉', growTime: 4, sellPrice: 25, seedCost: 18, seasons: ['夏'], color: '#4CAF50' },
+    { name: '葡萄', emoji: '🍇', growTime: 3, sellPrice: 20, seedCost: 14, seasons: ['夏', '秋'], color: '#9b59b6' },
+    { name: '橘子', emoji: '🍊', growTime: 3, sellPrice: 18, seedCost: 12, seasons: ['秋', '冬'], color: '#f39c12' }
+];
+
+const TREE_STAGES = ['种子🌱', '幼苗🌿', '小树🪴', '大树🌳', '结果🍒'];
+const TREE_GROW_COLORS = ['#8B4513', '#6B8E23', '#228B22', '#006400', '#006400'];
+
+// === 操作面板定义 ===
+const TOOLS = [
+    { id: 'plant', label: '种植', emoji: '🌱', desc: '选择种子种植' },
+    { id: 'water', label: '浇水', emoji: '💧', desc: '加速生长' },
+    { id: 'harvest', label: '采摘', emoji: '✂️', desc: '采摘成熟果实' },
+    { id: 'sell', label: '售卖', emoji: '💰', desc: '出售库存水果' },
+    { id: 'fertilize', label: '施肥', emoji: '🧪', desc: '加速一季生长' },
+    { id: 'remove', label: '铲除', emoji: '🗑️', desc: '移除枯萎果树' }
+];
+
+// === 商店道具 ===
+const SHOP_ITEMS = [
+    { id: 'fertilizer', name: '化肥', emoji: '🧪', cost: 30, desc: '一次性加速一棵树生长50%', stackable: true },
+    { id: 'scarecrow', name: '稻草人', emoji: '🧑‍🌾', cost: 80, desc: '冬季保护所有果树不枯萎(整季)', stackable: false },
+    { id: 'golden_axe', name: '金斧头', emoji: '🪓', cost: 50, desc: '铲除时返还50%种子费用', stackable: false },
+    { id: 'rain_dance', name: '祈雨舞', emoji: '💃', cost: 40, desc: '立即触发下雨(全园浇水)', stackable: true },
+    { id: 'market_boom', name: '市场繁荣', emoji: '📈', cost: 60, desc: '下次售卖价格翻倍', stackable: false }
+];
+
+// === 成就系统 ===
+const ACHIEVEMENTS = [
+    { id: 'first_plant', name: '初出茅庐', desc: '种下第一棵果树', emoji: '🌱', check: () => G.grid.some(c => c.tree) },
+    { id: 'first_harvest', name: '硕果累累', desc: '第一次采摘', emoji: '🍎', check: () => G.totalHarvest > 0 },
+    { id: 'rich', name: '小富即安', desc: '金币达到200', emoji: '💰', check: () => G.money >= 200 },
+    { id: 'tycoon', name: '果园大亨', desc: '金币达到500', emoji: '👑', check: () => G.money >= 500 },
+    { id: 'full_orchard', name: '满园春色', desc: '所有地块都种上树', emoji: '🌳', check: () => G.grid.every(c => c.tree) },
+    { id: 'hundred_harvest', name: '百果丰登', desc: '累计采摘100个', emoji: '🎊', check: () => G.totalHarvest >= 100 },
+    { id: 'year_one', name: '四季轮回', desc: '度过第一个完整的年', emoji: '📅', check: () => G.seasonYears >= 1 },
+    { id: 'five_years', name: '五年老农', desc: '经营5年', emoji: '🏆', check: () => G.seasonYears >= 5 },
+    { id: 'combo_master', name: '连击达人', desc: '达成5连击采摘', emoji: '⚡', check: () => G.comboCount >= 5 },
+    { id: 'survivor', name: '严冬幸存', desc: '在冬季存活下来', emoji: '❄️', check: () => G.season === 0 && G.seasonYears >= 1 }
+];
+
+// === 游戏状态 ===
+var G = {
+    state: 'menu', // menu, playing, paused, gameover
+    season: 0, // 0-3
+    seasonTimer: 0,
+    seasonDuration: 900, // frames per season (15s at 60fps)
+    day: 1,
+    dayTimer: 0,
+    dayDuration: 60, // frames per day
+    money: 50,
+    score: 0,
+    totalHarvest: 0,
+    totalEarned: 0,
+    grid: [], // 6x5 grid of trees
+    gridCols: 6,
+    gridRows: 5,
+    selectedTool: 'plant',
+    selectedFruit: 0,
+    particles: [],
+    floatingTexts: [],
+    stock: [0, 0, 0, 0, 0], // inventory per fruit type
+    bestScore: parseInt(localStorage.getItem('orchard_bestScore') || '0'),
+    hoverCell: null,
+    tooltipTimer: 0,
+    weatherEffect: null, // 'rain', 'snow', null
+    weatherTimer: 0,
+    autoGrowTimer: 0,
+    comboCount: 0,
+    comboTimer: 0,
+    animFrame: 0,
+    shopOpen: false,
+    achievements: {},
+    fertilizer: 0, // fertilizer count
+    scarecrow: false, // pest protection
+    seasonYears: 0, // how many full years played
+    tips: [] // seasonal tips queue
+};
+
+// === 初始化网格 ===
+function initGrid() {
+    G.grid = [];
+    for (let r = 0; r < G.gridRows; r++) {
+        for (let c = 0; c < G.gridCols; c++) {
+            G.grid.push({
+                col: c, row: r,
+                tree: null // null or { type, stage(0-4), growth, watered, fruits, health }
+            });
+        }
+    }
+}
+
+function initGame() {
+    G.season = 0;
+    G.seasonTimer = 0;
+    G.day = 1;
+    G.dayTimer = 0;
+    G.money = 50;
+    G.score = 0;
+    G.totalHarvest = 0;
+    G.totalEarned = 0;
+    G.stock = [0, 0, 0, 0, 0];
+    G.particles = [];
+    G.floatingTexts = [];
+    G.selectedTool = 'plant';
+    G.selectedFruit = 0;
+    G.hoverCell = null;
+    G.weatherEffect = null;
+    G.weatherTimer = 0;
+    G.autoGrowTimer = 0;
+    G.comboCount = 0;
+    G.comboTimer = 0;
+    G.animFrame = 0;
+    G.shopOpen = false;
+    G.achievements = {};
+    G.fertilizer = 0;
+    G.scarecrow = false;
+    G.seasonYears = 0;
+    G.tips = [];
+    G.marketBoom = false;
+    G.goldenAxe = false;
+    initGrid();
+}
+
+// === 网格坐标 ===
+function getGridOrigin() {
+    const cellW = 90, cellH = 90;
+    const totalW = G.gridCols * cellW;
+    const totalH = G.gridRows * cellH;
+    return { x: (W - totalW) / 2, y: 100, cellW, cellH };
+}
+
+function getCellAt(mx, my) {
+    const { x: ox, y: oy, cellW, cellH } = getGridOrigin();
+    const col = Math.floor((mx - ox) / cellW);
+    const row = Math.floor((my - oy) / cellH);
+    if (col >= 0 && col < G.gridCols && row >= 0 && row < G.gridRows) {
+        return { col, row, idx: row * G.gridCols + col };
+    }
+    return null;
+}
+
+// === 粒子系统 ===
+function spawnParticles(x, y, color, count, spread) {
+    for (let i = 0; i < count; i++) {
+        G.particles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * spread,
+            vy: (Math.random() - 0.8) * spread,
+            life: 30 + Math.random() * 30,
+            maxLife: 60,
+            color,
+            size: 2 + Math.random() * 4
+        });
+    }
+}
+
+function spawnFloatingText(x, y, text, color) {
+    G.floatingTexts.push({ x, y, text, color, life: 60, vy: -1.5 });
+}
+
+// === 天气系统 ===
+function updateWeather() {
+    G.weatherTimer--;
+    if (G.weatherTimer <= 0) {
+        const season = SEASONS[G.season];
+        if (season === '春' || season === '夏') {
+            G.weatherEffect = Math.random() < 0.3 ? 'rain' : null;
+            G.weatherTimer = 300 + Math.random() * 300;
+        } else if (season === '冬') {
+            G.weatherEffect = Math.random() < 0.4 ? 'snow' : null;
+            G.weatherTimer = 300 + Math.random() * 300;
+        } else {
+            G.weatherEffect = null;
+            G.weatherTimer = 600;
+        }
+    }
+    // Rain waters all trees
+    if (G.weatherEffect === 'rain' && G.animFrame % 30 === 0) {
+        for (let i = 0; i < G.grid.length; i++) {
+            if (G.grid[i].tree && G.grid[i].tree.stage < 4) {
+                G.grid[i].tree.watered = true;
+            }
+        }
+    }
+}
+
+// === 生长逻辑 ===
+function growTrees() {
+    G.autoGrowTimer++;
+    if (G.autoGrowTimer < 10) return; // every 10 frames
+    G.autoGrowTimer = 0;
+
+    const season = SEASONS[G.season];
+    for (let i = 0; i < G.grid.length; i++) {
+        const cell = G.grid[i];
+        if (!cell.tree) continue;
+        const t = cell.tree;
+        if (t.dead) continue;
+
+        const fruitData = FRUIT_TYPES[t.type];
+        // Check season compatibility
+        const inSeason = fruitData.seasons.includes(season);
+        let growRate = inSeason ? 1 : 0.3;
+        if (t.watered) growRate *= 2;
+
+        if (t.stage < 4) {
+            t.growth += growRate;
+            const threshold = fruitData.growTime * 10;
+            if (t.growth >= threshold) {
+                t.growth = 0;
+                t.stage++;
+                t.watered = false;
+                if (t.stage === 4) {
+                    t.fruits = 3 + Math.floor(Math.random() * 3);
+                    spawnParticles(getCellCenter(i).x, getCellCenter(i).y, fruitData.color, 10, 3);
+                }
+            }
+        } else {
+            // Fully grown - slowly produce more fruit
+            t.growth += growRate * 0.5;
+            if (t.growth >= 30) {
+                t.growth = 0;
+                t.fruits = Math.min(t.fruits + 1, 8);
+            }
+        }
+
+        // Winter damage (scarecrow protects)
+        if (season === '冬' && !inSeason && Math.random() < 0.005 && !G.scarecrow) {
+            t.health -= 10;
+            if (t.health <= 0) {
+                t.dead = true;
+                spawnParticles(getCellCenter(i).x, getCellCenter(i).y, '#555', 8, 2);
+            }
+        }
+
+        t.watered = false; // reset daily watering
+    }
+}
+
+function getCellCenter(idx) {
+    const { x: ox, y: oy, cellW, cellH } = getGridOrigin();
+    const col = G.grid[idx].col;
+    const row = G.grid[idx].row;
+    return { x: ox + col * cellW + cellW / 2, y: oy + row * cellH + cellH / 2 };
+}
+
+// === 操作处理 ===
+function handleCellClick(cell) {
+    const idx = cell.idx;
+    const gridCell = G.grid[idx];
+    const tool = G.selectedTool;
+
+    if (tool === 'plant') {
+        if (gridCell.tree) return; // already has tree
+        const fruit = FRUIT_TYPES[G.selectedFruit];
+        if (G.money < fruit.seedCost) {
+            spawnFloatingText(W / 2, H / 2, '金币不足!', '#e74c3c');
+            return;
+        }
+        G.money -= fruit.seedCost;
+        gridCell.tree = {
+            type: G.selectedFruit,
+            stage: 0,
+            growth: 0,
+            watered: false,
+            fruits: 0,
+            health: 100,
+            dead: false
+        };
+        const pos = getCellCenter(idx);
+        spawnParticles(pos.x, pos.y, '#8B4513', 8, 2);
+        spawnFloatingText(pos.x, pos.y - 20, '-' + fruit.seedCost + '💰', '#f39c12');
+    }
+    else if (tool === 'water') {
+        if (!gridCell.tree || gridCell.tree.dead) return;
+        if (gridCell.tree.watered) {
+            spawnFloatingText(getCellCenter(idx).x, getCellCenter(idx).y - 20, '已浇过水', '#3498db');
+            return;
+        }
+        gridCell.tree.watered = true;
+        const pos = getCellCenter(idx);
+        spawnParticles(pos.x, pos.y, '#3498db', 12, 3);
+        spawnFloatingText(pos.x, pos.y - 20, '💧浇水', '#3498db');
+    }
+    else if (tool === 'harvest') {
+        if (!gridCell.tree || gridCell.tree.dead) return;
+        if (gridCell.tree.stage < 4 || gridCell.tree.fruits <= 0) {
+            spawnFloatingText(getCellCenter(idx).x, getCellCenter(idx).y - 20, '未成熟', '#e67e22');
+            return;
+        }
+        const count = gridCell.tree.fruits;
+        const fruitType = gridCell.tree.type;
+        G.stock[fruitType] += count;
+        G.totalHarvest += count;
+        gridCell.tree.fruits = 0;
+        gridCell.tree.stage = 3; // back to tree stage
+        gridCell.tree.growth = 0;
+        const pos = getCellCenter(idx);
+        spawnParticles(pos.x, pos.y, FRUIT_TYPES[fruitType].color, count * 3, 4);
+        spawnFloatingText(pos.x, pos.y - 20, '+' + count + ' ' + FRUIT_TYPES[fruitType].emoji, FRUIT_TYPES[fruitType].color);
+
+        // Combo
+        G.comboCount++;
+        G.comboTimer = 120;
+        if (G.comboCount > 1) {
+            spawnFloatingText(pos.x, pos.y - 40, '连击 x' + G.comboCount + '!', '#f1c40f');
+        }
+    }
+    else if (tool === 'sell') {
+        // Sell all stock
+        let total = 0;
+        let sold = 0;
+        let multiplier = G.marketBoom ? 2 : 1;
+        let soldItems = [];
+        for (let f = 0; f < FRUIT_TYPES.length; f++) {
+            if (G.stock[f] > 0) {
+                const price = FRUIT_TYPES[f].sellPrice * G.stock[f] * multiplier;
+                // Combo bonus
+                const bonus = G.comboCount > 1 ? Math.floor(price * 0.1 * G.comboCount) : 0;
+                total += price + bonus;
+                sold += G.stock[f];
+                soldItems.push(FRUIT_TYPES[f].emoji + 'x' + G.stock[f]);
+                G.stock[f] = 0;
+            }
+        }
+        if (sold > 0) {
+            G.money += total;
+            G.totalEarned += total;
+            G.score += total;
+            const boomText = G.marketBoom ? ' (双倍!)' : '';
+            spawnFloatingText(W / 2, H / 2 - 30, '+' + total + '💰' + boomText, '#f1c40f');
+            spawnParticles(W / 2, H / 2, '#f1c40f', 15, 5);
+            if (G.marketBoom) {
+                G.marketBoom = false;
+                spawnFloatingText(W / 2, H / 2 - 50, '📈 市场繁荣结束', '#e67e22');
+            }
+        } else {
+            spawnFloatingText(W / 2, H / 2, '没有库存', '#e67e22');
+        }
+    }
+    else if (tool === 'remove') {
+        if (!gridCell.tree) return;
+        const pos = getCellCenter(idx);
+        // Golden axe refund
+        if (G.goldenAxe && !gridCell.tree.dead) {
+            const refund = Math.floor(FRUIT_TYPES[gridCell.tree.type].seedCost * 0.5);
+            G.money += refund;
+            spawnFloatingText(pos.x, pos.y - 35, '+' + refund + '💰 返还', '#f1c40f');
+        }
+        spawnParticles(pos.x, pos.y, '#555', 10, 3);
+        gridCell.tree = null;
+        spawnFloatingText(pos.x, pos.y - 20, '已铲除', '#95a5a6');
+    }
+    else if (tool === 'fertilize') {
+        if (!gridCell.tree || gridCell.tree.dead || G.fertilizer <= 0) {
+            if (G.fertilizer <= 0) spawnFloatingText(getCellCenter(idx).x, getCellCenter(idx).y - 20, '没有化肥', '#e67e22');
+            return;
+        }
+        G.fertilizer--;
+        const fruit = FRUIT_TYPES[gridCell.tree.type];
+        const boost = fruit.growTime * 5; // 50% of threshold
+        gridCell.tree.growth += boost;
+        const pos = getCellCenter(idx);
+        spawnParticles(pos.x, pos.y, '#8BC34A', 12, 3);
+        spawnFloatingText(pos.x, pos.y - 20, '🧪 施肥加速!', '#8BC34A');
+        // Check if tree levels up
+        if (gridCell.tree.stage < 4) {
+            const threshold = fruit.growTime * 10;
+            if (gridCell.tree.growth >= threshold) {
+                gridCell.tree.growth -= threshold;
+                gridCell.tree.stage++;
+                if (gridCell.tree.stage === 4) {
+                    gridCell.tree.fruits = 3 + Math.floor(Math.random() * 3);
+                    spawnParticles(pos.x, pos.y, fruit.color, 10, 3);
+                }
+            }
+        }
+    }
+}
+
+// === 选择种子面板 ===
+function getSeedPanelRect() {
+    return { x: 10, y: 470, w: 780, h: 55 };
+}
+
+function drawSeedPanel() {
+    if (G.selectedTool !== 'plant') return;
+    const panel = getSeedPanelRect();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(panel.x, panel.y, panel.w, panel.h, 8);
+    ctx.fill();
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('选择种子:', panel.x + 10, panel.y + 18);
+
+    const startX = panel.x + 80;
+    const spacing = 140;
+    for (let i = 0; i < FRUIT_TYPES.length; i++) {
+        const f = FRUIT_TYPES[i];
+        const bx = startX + i * spacing;
+        const by = panel.y + 8;
+        const bw = 130, bh = 38;
+
+        const selected = G.selectedFruit === i;
+        ctx.fillStyle = selected ? 'rgba(125,206,160,0.4)' : 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bw, bh, 6);
+        ctx.fill();
+        if (selected) {
+            ctx.strokeStyle = '#7dcea0';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '14px Microsoft YaHei, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(f.emoji + f.name, bx + 8, by + 18);
+        ctx.fillStyle = '#f39c12';
+        ctx.font = '11px Microsoft YaHei, sans-serif';
+        ctx.fillText(f.seedCost + '💰', bx + 8, by + 33);
+
+        // Season indicators
+        const seasonStr = f.seasons.map(s => s[0]).join('');
+        ctx.fillStyle = '#888';
+        ctx.fillText(seasonStr, bx + 75, by + 33);
+    }
+}
+
+// === 工具栏 ===
+function getToolbarRect() {
+    return { x: 10, y: 535, w: 780, h: 55 };
+}
+
+function drawToolbar() {
+    const panel = getToolbarRect();
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.roundRect(panel.x, panel.y, panel.w, panel.h, 8);
+    ctx.fill();
+
+    const totalItems = TOOLS.length + 1; // +1 for shop
+    const spacing = panel.w / totalItems;
+    for (let i = 0; i < TOOLS.length; i++) {
+        const tool = TOOLS[i];
+        const bx = panel.x + i * spacing + 5;
+        const by = panel.y + 5;
+        const bw = spacing - 10;
+        const bh = 45;
+
+        const selected = G.selectedTool === tool.id;
+        ctx.fillStyle = selected ? 'rgba(125,206,160,0.4)' : 'rgba(255,255,255,0.05)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bw, bh, 6);
+        ctx.fill();
+        if (selected) {
+            ctx.strokeStyle = '#7dcea0';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(tool.emoji, bx + bw / 2, by + 25);
+        ctx.font = '11px Microsoft YaHei, sans-serif';
+        ctx.fillStyle = '#ccc';
+        ctx.fillText(tool.label, bx + bw / 2, by + 42);
+
+        // Show fertilizer count on fertilize button
+        if (tool.id === 'fertilize' && G.fertilizer > 0) {
+            ctx.fillStyle = '#f1c40f';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillText('x' + G.fertilizer, bx + bw - 12, by + 12);
+        }
+    }
+
+    // Shop button
+    const shopBx = panel.x + TOOLS.length * spacing + 5;
+    const shopBy = panel.y + 5;
+    const shopBw = spacing - 10;
+    const shopBh = 45;
+    ctx.fillStyle = G.shopOpen ? 'rgba(241,196,15,0.4)' : 'rgba(241,196,15,0.15)';
+    ctx.beginPath();
+    ctx.roundRect(shopBx, shopBy, shopBw, shopBh, 6);
+    ctx.fill();
+    ctx.strokeStyle = '#f1c40f';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🏪', shopBx + shopBw / 2, shopBy + 25);
+    ctx.font = '11px Microsoft YaHei, sans-serif';
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillText('商店', shopBx + shopBw / 2, shopBy + 42);
+}
+
+// === HUD ===
+function drawHUD() {
+    const season = SEASONS[G.season];
+    const sc = SEASON_COLORS[season];
+
+    // Top bar background
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, W, 50);
+
+    // Season
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'left';
+    const seasonIcons = { '春': '🌸', '夏': '☀️', '秋': '🍂', '冬': '❄️' };
+    ctx.fillText(seasonIcons[season] + ' ' + season + '季  第' + G.day + '天', 15, 22);
+
+    // Season progress bar
+    const barX = 15, barY = 30, barW = 120, barH = 10;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = sc.leaf;
+    ctx.fillRect(barX, barY, barW * (G.seasonTimer / G.seasonDuration), barH);
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barW, barH);
+
+    // Weather
+    if (G.weatherEffect) {
+        ctx.fillStyle = '#3498db';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(G.weatherEffect === 'rain' ? '🌧️ 下雨中(自动浇水)' : '❄️ 下雪中(注意防寒)', 150, 22);
+    }
+
+    // Money
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 18px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('💰 ' + G.money, W / 2, 25);
+
+    // Score
+    ctx.fillStyle = '#7dcea0';
+    ctx.font = '14px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('得分: ' + G.score, W - 15, 20);
+
+    // Best
+    ctx.fillStyle = '#888';
+    ctx.font = '12px Microsoft YaHei, sans-serif';
+    ctx.fillText('最高: ' + G.bestScore, W - 15, 38);
+
+    // Inventory bar
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(0, 50, W, 25);
+    ctx.textAlign = 'left';
+    ctx.font = '13px Microsoft YaHei, sans-serif';
+    let invX = 15;
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('库存:', invX, 67);
+    invX += 50;
+    for (let i = 0; i < FRUIT_TYPES.length; i++) {
+        ctx.fillStyle = '#fff';
+        ctx.fillText(FRUIT_TYPES[i].emoji + 'x' + G.stock[i], invX, 67);
+        invX += 90;
+    }
+
+    // Combo
+    if (G.comboCount > 1 && G.comboTimer > 0) {
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 14px Microsoft YaHei, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('连击 x' + G.comboCount + ' (售价+10%)', W - 15, 67);
+    }
+}
+
+// === 绘制场景 ===
+function drawBackground() {
+    const season = SEASONS[G.season];
+    const sc = SEASON_COLORS[season];
+
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, 100);
+    skyGrad.addColorStop(0, sc.sky1);
+    skyGrad.addColorStop(1, sc.sky2);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, 100);
+
+    // Ground gradient
+    const groundGrad = ctx.createLinearGradient(0, 75, 0, H);
+    groundGrad.addColorStop(0, sc.bg1);
+    groundGrad.addColorStop(1, sc.bg2);
+    ctx.fillStyle = groundGrad;
+    ctx.fillRect(0, 75, W, H - 75);
+
+    // Grass texture
+    ctx.fillStyle = 'rgba(0,0,0,0.05)';
+    for (let i = 0; i < 30; i++) {
+        const gx = (i * 137 + 50) % W;
+        const gy = 80 + (i * 89) % (H - 120);
+        ctx.fillRect(gx, gy, 3, 2);
+    }
+}
+
+function drawGrid() {
+    const { x: ox, y: oy, cellW, cellH } = getGridOrigin();
+
+    for (let i = 0; i < G.grid.length; i++) {
+        const cell = G.grid[i];
+        const cx = ox + cell.col * cellW;
+        const cy = oy + cell.row * cellH;
+        const centerX = cx + cellW / 2;
+        const centerY = cy + cellH / 2;
+
+        // Cell background (soil plot)
+        const isHover = G.hoverCell && G.hoverCell.idx === i;
+        ctx.fillStyle = isHover ? 'rgba(139,119,42,0.5)' : 'rgba(101,67,33,0.4)';
+        ctx.beginPath();
+        ctx.roundRect(cx + 4, cy + 4, cellW - 8, cellH - 8, 6);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(139,119,42,0.3)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Watered indicator
+        if (cell.tree && cell.tree.watered) {
+            ctx.fillStyle = 'rgba(52,152,219,0.15)';
+            ctx.beginPath();
+            ctx.roundRect(cx + 4, cy + 4, cellW - 8, cellH - 8, 6);
+            ctx.fill();
+        }
+
+        // Draw tree
+        if (cell.tree) {
+            const t = cell.tree;
+            const fruit = FRUIT_TYPES[t.type];
+
+            if (t.dead) {
+                // Dead tree
+                ctx.fillStyle = '#555';
+                ctx.font = '30px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('🪦', centerX, centerY + 8);
+                ctx.fillStyle = '#888';
+                ctx.font = '10px Microsoft YaHei, sans-serif';
+                ctx.fillText('枯萎', centerX, centerY + 28);
+            } else {
+                // Tree emoji by stage
+                const treeEmojis = ['🌱', '🌿', '🪴', '🌳', '🌳'];
+                ctx.font = (20 + t.stage * 4) + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(treeEmojis[t.stage], centerX, centerY - 2);
+
+                // Fruits on mature tree
+                if (t.stage === 4 && t.fruits > 0) {
+                    ctx.font = '16px sans-serif';
+                    const fruitPositions = [
+                        [-18, -15], [18, -15], [-10, -25], [10, -25],
+                        [0, -30], [-20, -5], [20, -5], [0, -10]
+                    ];
+                    for (let f = 0; f < Math.min(t.fruits, fruitPositions.length); f++) {
+                        ctx.fillText(fruit.emoji, centerX + fruitPositions[f][0], centerY + fruitPositions[f][1]);
+                    }
+                }
+
+                // Health bar (only if damaged)
+                if (t.health < 100) {
+                    const hbW = 40, hbH = 4;
+                    const hbX = centerX - hbW / 2;
+                    const hbY = centerY + 25;
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(hbX, hbY, hbW, hbH);
+                    ctx.fillStyle = t.health > 50 ? '#27ae60' : t.health > 25 ? '#f39c12' : '#e74c3c';
+                    ctx.fillRect(hbX, hbY, hbW * t.health / 100, hbH);
+                }
+
+                // Growth bar for non-mature trees
+                if (t.stage < 4) {
+                    const threshold = fruit.growTime * 10;
+                    const gbW = 40, gbH = 3;
+                    const gbX = centerX - gbW / 2;
+                    const gbY = centerY + 30;
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(gbX, gbY, gbW, gbH);
+                    ctx.fillStyle = '#7dcea0';
+                    ctx.fillRect(gbX, gbY, gbW * Math.min(t.growth / threshold, 1), gbH);
+                }
+
+                // Fruit count label
+                if (t.stage === 4) {
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 11px Microsoft YaHei, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('x' + t.fruits, centerX, centerY + 35);
+                }
+            }
+        } else {
+            // Empty plot - show subtle + for planting
+            if (G.selectedTool === 'plant') {
+                ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                ctx.font = '24px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('+', centerX, centerY + 8);
+            }
+        }
+    }
+}
+
+// === 天气渲染 ===
+function drawWeather() {
+    if (!G.weatherEffect) return;
+
+    if (G.weatherEffect === 'rain') {
+        ctx.strokeStyle = 'rgba(100,150,255,0.4)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 40; i++) {
+            const rx = (i * 73 + G.animFrame * 3) % W;
+            const ry = (i * 47 + G.animFrame * 8) % H;
+            ctx.beginPath();
+            ctx.moveTo(rx, ry);
+            ctx.lineTo(rx - 2, ry + 10);
+            ctx.stroke();
+        }
+    } else if (G.weatherEffect === 'snow') {
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        for (let i = 0; i < 30; i++) {
+            const sx = (i * 97 + G.animFrame * 0.5 + Math.sin(i + G.animFrame * 0.02) * 20) % W;
+            const sy = (i * 61 + G.animFrame * 1.5) % H;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
+// === 粒子更新 ===
+function updateParticles() {
+    for (let i = G.particles.length - 1; i >= 0; i--) {
+        const p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05; // gravity
+        p.life--;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+    for (let i = G.floatingTexts.length - 1; i >= 0; i--) {
+        const ft = G.floatingTexts[i];
+        ft.y += ft.vy;
+        ft.life--;
+        if (ft.life <= 0) G.floatingTexts.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (const p of G.particles) {
+        ctx.globalAlpha = p.life / p.maxLife;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const ft of G.floatingTexts) {
+        ctx.globalAlpha = ft.life / 60;
+        ctx.fillStyle = ft.color;
+        ctx.font = 'bold 14px Microsoft YaHei, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(ft.text, ft.x, ft.y);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// === 季节/日 更新 ===
+function updateSeason() {
+    G.seasonTimer++;
+    G.dayTimer++;
+    if (G.dayTimer >= G.dayDuration) {
+        G.dayTimer = 0;
+        G.day++;
+    }
+    if (G.seasonTimer >= G.seasonDuration) {
+        G.seasonTimer = 0;
+        G.season = (G.season + 1) % 4;
+        if (G.season === 0) {
+            // New year - score bonus
+            G.seasonYears++;
+            G.score += 50;
+            G.scarecrow = false; // reset seasonal items
+            spawnFloatingText(W / 2, H / 2, '新年到! +50分', '#f1c40f');
+            spawnParticles(W / 2, H / 2, '#f1c40f', 20, 5);
+        }
+        spawnFloatingText(W / 2, 80, SEASONS[G.season] + '季来了!', SEASON_COLORS[SEASONS[G.season]].leaf);
+    }
+
+    // Combo timer
+    if (G.comboTimer > 0) {
+        G.comboTimer--;
+        if (G.comboTimer <= 0) G.comboCount = 0;
+    }
+}
+
+// === 商店系统 ===
+function getShopRect() {
+    return { x: W / 2 - 200, y: 80, w: 400, h: 380 };
+}
+
+function drawShop() {
+    if (!G.shopOpen) return;
+    const sr = getShopRect();
+
+    // Overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Shop panel
+    ctx.fillStyle = 'rgba(20,30,20,0.95)';
+    ctx.beginPath();
+    ctx.roundRect(sr.x, sr.y, sr.w, sr.h, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#7dcea0';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#7dcea0';
+    ctx.font = 'bold 22px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🏪 果园商店', sr.x + sr.w / 2, sr.y + 30);
+
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = '14px Microsoft YaHei, sans-serif';
+    ctx.fillText('余额: ' + G.money + '💰', sr.x + sr.w / 2, sr.y + 52);
+
+    for (let i = 0; i < SHOP_ITEMS.length; i++) {
+        const item = SHOP_ITEMS[i];
+        const iy = sr.y + 70 + i * 56;
+        const ix = sr.x + 15;
+        const iw = sr.w - 30;
+        const ih = 48;
+
+        const canBuy = G.money >= item.cost;
+        ctx.fillStyle = canBuy ? 'rgba(125,206,160,0.15)' : 'rgba(255,255,255,0.05)';
+        ctx.beginPath();
+        ctx.roundRect(ix, iy, iw, ih, 6);
+        ctx.fill();
+        ctx.strokeStyle = canBuy ? 'rgba(125,206,160,0.3)' : 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(item.emoji, ix + 10, iy + 30);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '14px Microsoft YaHei, sans-serif';
+        ctx.fillText(item.name, ix + 40, iy + 20);
+        ctx.fillStyle = '#aaa';
+        ctx.font = '11px Microsoft YaHei, sans-serif';
+        ctx.fillText(item.desc, ix + 40, iy + 38);
+
+        ctx.fillStyle = canBuy ? '#f1c40f' : '#666';
+        ctx.font = 'bold 14px Microsoft YaHei, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(item.cost + '💰', ix + iw - 10, iy + 28);
+    }
+
+    // Close hint
+    ctx.fillStyle = '#888';
+    ctx.font = '12px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('点击道具购买 / 按 S 或 ESC 关闭', sr.x + sr.w / 2, sr.y + sr.h - 15);
+}
+
+function handleShopClick(mx, my) {
+    if (!G.shopOpen) return false;
+    const sr = getShopRect();
+
+    // Check if click is on a shop item
+    for (let i = 0; i < SHOP_ITEMS.length; i++) {
+        const iy = sr.y + 70 + i * 56;
+        const ix = sr.x + 15;
+        const iw = sr.w - 30;
+        const ih = 48;
+
+        if (mx >= ix && mx <= ix + iw && my >= iy && my <= iy + ih) {
+            const item = SHOP_ITEMS[i];
+            if (G.money >= item.cost) {
+                G.money -= item.cost;
+                if (item.id === 'fertilizer') {
+                    G.fertilizer++;
+                    spawnFloatingText(mx, my, '+1 化肥', '#7dcea0');
+                } else if (item.id === 'scarecrow') {
+                    G.scarecrow = true;
+                    spawnFloatingText(mx, my, '稻草人已放置', '#e67e22');
+                } else if (item.id === 'rain_dance') {
+                    // Water all trees
+                    for (let j = 0; j < G.grid.length; j++) {
+                        if (G.grid[j].tree && !G.grid[j].tree.dead) {
+                            G.grid[j].tree.watered = true;
+                        }
+                    }
+                    G.weatherEffect = 'rain';
+                    G.weatherTimer = 180;
+                    spawnFloatingText(mx, my, '祈雨成功!', '#3498db');
+                    spawnParticles(mx, my, '#3498db', 20, 5);
+                } else if (item.id === 'market_boom') {
+                    G.marketBoom = true;
+                    spawnFloatingText(mx, my, '下次售卖双倍!', '#f1c40f');
+                } else if (item.id === 'golden_axe') {
+                    G.goldenAxe = true;
+                    spawnFloatingText(mx, my, '获得金斧头!', '#f1c40f');
+                }
+                spawnParticles(mx, my, '#7dcea0', 8, 3);
+            } else {
+                spawnFloatingText(mx, my, '金币不足!', '#e74c3c');
+            }
+            return true;
+        }
+    }
+
+    // Close if click outside
+    if (mx < sr.x || mx > sr.x + sr.w || my < sr.y || my > sr.y + sr.h) {
+        G.shopOpen = false;
+        return true;
+    }
+    return true;
+}
+
+// === 成就系统 ===
+function checkAchievements() {
+    for (const ach of ACHIEVEMENTS) {
+        if (!G.achievements[ach.id] && ach.check()) {
+            G.achievements[ach.id] = true;
+            G.score += 25;
+            spawnFloatingText(W / 2, 80, '🏆 成就: ' + ach.name, '#f1c40f');
+            spawnParticles(W / 2, 80, '#f1c40f', 15, 5);
+        }
+    }
+}
+
+function drawAchievements() {
+    // Mini achievement ticker at bottom
+    const recentAchs = ACHIEVEMENTS.filter(a => G.achievements[a.id]);
+    if (recentAchs.length === 0) return;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, H - 20, W, 20);
+    ctx.fillStyle = '#888';
+    ctx.font = '11px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'left';
+    const achText = recentAchs.map(a => a.emoji + a.name).join('  ');
+    ctx.fillText('成就: ' + achText, 10, H - 6);
+}
+
+// === 季节提示 ===
+function getSeasonTip() {
+    const season = SEASONS[G.season];
+    const tips = {
+        '春': '春天适合种苹果和草莓',
+        '夏': '夏天所有水果都能生长，种西瓜!',
+        '秋': '秋天是收获季，橘子和葡萄正当时',
+        '冬': '冬天果树易枯萎，注意保护'
+    };
+    return tips[season] || '';
+}
+
+// === 游戏结束检查 ===
+function checkGameOver() {
+    // Game over if money is 0 and no stock and no mature trees
+    if (G.money <= 0) {
+        let hasStock = G.stock.some(s => s > 0);
+        let hasMatureTree = G.grid.some(c => c.tree && !c.tree.dead && c.tree.stage === 4 && c.tree.fruits > 0);
+        let hasGrowingTree = G.grid.some(c => c.tree && !c.tree.dead && c.tree.stage < 4);
+        if (!hasStock && !hasMatureTree && !hasGrowingTree) {
+            G.state = 'gameover';
+            if (G.score > G.bestScore) {
+                G.bestScore = G.score;
+                localStorage.setItem('orchard_bestScore', G.bestScore.toString());
+            }
+        }
+    }
+}
+
+// === 游戏结束界面 ===
+function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#7dcea0';
+    ctx.font = 'bold 36px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🌳 果园经营报告', W / 2, 80);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px Microsoft YaHei, sans-serif';
+    const stats = [
+        '总得分: ' + G.score,
+        '总采摘: ' + G.totalHarvest + ' 个水果',
+        '总售卖: ' + G.totalEarned + ' 金币',
+        '经营天数: ' + G.day + ' 天',
+        '经营年数: ' + G.seasonYears + ' 年',
+        '最高记录: ' + G.bestScore
+    ];
+    for (let i = 0; i < stats.length; i++) {
+        ctx.fillText(stats[i], W / 2, 130 + i * 28);
+    }
+
+    // Achievements earned
+    const earnedAchs = ACHIEVEMENTS.filter(a => G.achievements[a.id]);
+    if (earnedAchs.length > 0) {
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = '14px Microsoft YaHei, sans-serif';
+        ctx.fillText('获得成就:', W / 2, 310);
+        ctx.fillStyle = '#fff';
+        ctx.font = '13px Microsoft YaHei, sans-serif';
+        const achLine = earnedAchs.map(a => a.emoji + a.name).join('  ');
+        ctx.fillText(achLine, W / 2, 330);
+    }
+
+    if (G.score >= G.bestScore && G.score > 0) {
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 22px Microsoft YaHei, sans-serif';
+        ctx.fillText('🏆 新纪录!', W / 2, 365);
+    }
+
+    // Restart button
+    ctx.fillStyle = 'rgba(125,206,160,0.3)';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - 80, 390, 160, 50, 10);
+    ctx.fill();
+    ctx.strokeStyle = '#7dcea0';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = '18px Microsoft YaHei, sans-serif';
+    ctx.fillText('重新开始', W / 2, 422);
+
+    // Back to menu
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - 80, 455, 160, 40, 10);
+    ctx.fill();
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Microsoft YaHei, sans-serif';
+    ctx.fillText('返回菜单', W / 2, 480);
+}
+
+// === 提示信息 ===
+function drawTooltip() {
+    if (!G.hoverCell) return;
+    const cell = G.grid[G.hoverCell.idx];
+    if (!cell.tree) return;
+    const t = cell.tree;
+    const fruit = FRUIT_TYPES[t.type];
+
+    const tx = G.hoverCell.mx + 15;
+    const ty = G.hoverCell.my - 10;
+
+    const lines = [];
+    if (t.dead) {
+        lines.push('已枯萎 - 使用铲除清理');
+    } else if (t.stage < 4) {
+        lines.push(fruit.emoji + ' ' + fruit.name + TREE_STAGES[t.stage]);
+        lines.push('生长: ' + Math.floor(t.growth / (fruit.growTime * 10) * 100) + '%');
+        lines.push(t.watered ? '💧 已浇水' : '💧 未浇水(可浇水加速)');
+    } else {
+        lines.push(fruit.emoji + ' ' + fruit.name + ' 成熟');
+        lines.push('果实: x' + t.fruits + ' (可采摘)');
+        lines.push('售价: ' + fruit.sellPrice + '/个');
+    }
+
+    const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+    const boxW = maxW + 20;
+    const boxH = lines.length * 18 + 10;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.beginPath();
+    ctx.roundRect(tx, ty - boxH, boxW, boxH, 4);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Microsoft YaHei, sans-serif';
+    ctx.textAlign = 'left';
+    for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], tx + 8, ty - boxH + 16 + i * 18);
+    }
+}
+
+// === 主渲染 ===
+function render() {
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    drawGrid();
+    drawWeather();
+    drawParticles();
+    drawHUD();
+    drawSeedPanel();
+    drawToolbar();
+    drawTooltip();
+    drawAchievements();
+
+    // Season tip
+    if (G.state === 'playing' && G.seasonTimer < 60) {
+        const tip = getSeasonTip();
+        if (tip) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.beginPath();
+            ctx.roundRect(W / 2 - 150, 90, 300, 28, 6);
+            ctx.fill();
+            ctx.fillStyle = '#7dcea0';
+            ctx.font = '13px Microsoft YaHei, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('💡 ' + tip, W / 2, 108);
+        }
+    }
+
+    // Shop overlay (drawn last, on top)
+    drawShop();
+
+    if (G.state === 'gameover') {
+        drawGameOver();
+    }
+}
+
+// === 游戏循环 ===
+function gameLoop() {
+    G.animFrame++;
+    if (G.state === 'playing') {
+        updateSeason();
+        updateWeather();
+        growTrees();
+        updateParticles();
+        checkAchievements();
+        checkGameOver();
+    }
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// === 输入处理 ===
+function getCanvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    let clientX, clientY;
+    if (e.touches) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+    }
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+function handleClick(mx, my) {
+    // Shop overlay intercept
+    if (G.shopOpen) {
+        handleShopClick(mx, my);
+        return;
+    }
+
+    if (G.state !== 'playing') {
+        // Game over buttons
+        if (G.state === 'gameover') {
+            if (mx >= W / 2 - 80 && mx <= W / 2 + 80) {
+                if (my >= 390 && my <= 440) {
+                    initGame();
+                    G.state = 'playing';
+                    document.getElementById('pauseBtn').style.display = 'block';
+                    return;
+                }
+                if (my >= 455 && my <= 495) {
+                    G.state = 'menu';
+                    document.getElementById('startScreen').style.display = 'flex';
+                    document.getElementById('pauseBtn').style.display = 'none';
+                    return;
+                }
+            }
+        }
+        return;
+    }
+
+    // Check toolbar click
+    const tb = getToolbarRect();
+    if (my >= tb.y && my <= tb.y + tb.h) {
+        const totalItems = TOOLS.length + 1;
+        const spacing = tb.w / totalItems;
+        for (let i = 0; i < TOOLS.length; i++) {
+            const bx = tb.x + i * spacing + 5;
+            if (mx >= bx && mx <= bx + spacing - 10) {
+                G.selectedTool = TOOLS[i].id;
+                return;
+            }
+        }
+        // Shop button
+        const shopBx = tb.x + TOOLS.length * spacing + 5;
+        if (mx >= shopBx && mx <= shopBx + spacing - 10) {
+            G.shopOpen = !G.shopOpen;
+            return;
+        }
+    }
+
+    // Check seed panel click
+    if (G.selectedTool === 'plant') {
+        const sp = getSeedPanelRect();
+        if (my >= sp.y && my <= sp.y + sp.h) {
+            const startX = sp.x + 80;
+            const spacing = 140;
+            for (let i = 0; i < FRUIT_TYPES.length; i++) {
+                const bx = startX + i * spacing;
+                if (mx >= bx && mx <= bx + 130) {
+                    G.selectedFruit = i;
+                    return;
+                }
+            }
+        }
+    }
+
+    // Check grid click
+    const cell = getCellAt(mx, my);
+    if (cell) {
+        handleCellClick(cell);
+    }
+}
+
+function handleMouseMove(mx, my) {
+    if (G.state !== 'playing') {
+        G.hoverCell = null;
+        return;
+    }
+    const cell = getCellAt(mx, my);
+    if (cell) {
+        G.hoverCell = { idx: cell.idx, mx, my };
+    } else {
+        G.hoverCell = null;
+    }
+}
+
+// Mouse events
+canvas.addEventListener('click', function(e) {
+    const pos = getCanvasPos(e);
+    handleClick(pos.x, pos.y);
+});
+
+canvas.addEventListener('mousemove', function(e) {
+    const pos = getCanvasPos(e);
+    handleMouseMove(pos.x, pos.y);
+});
+
+// Touch events
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    handleClick(pos.x, pos.y);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    handleMouseMove(pos.x, pos.y);
+}, { passive: false });
+
+// Keyboard
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        if (G.shopOpen) {
+            G.shopOpen = false;
+        } else if (G.state === 'playing') {
+            G.state = 'paused';
+            document.getElementById('pauseScreen').style.display = 'flex';
+        } else if (G.state === 'paused') {
+            G.state = 'playing';
+            document.getElementById('pauseScreen').style.display = 'none';
+        }
+    }
+    if (G.state === 'playing') {
+        if (e.key === '1') G.selectedTool = 'plant';
+        if (e.key === '2') G.selectedTool = 'water';
+        if (e.key === '3') G.selectedTool = 'harvest';
+        if (e.key === '4') G.selectedTool = 'sell';
+        if (e.key === '5') G.selectedTool = 'fertilize';
+        if (e.key === '6') G.selectedTool = 'remove';
+        if (e.key === 'q' || e.key === 'Q') G.selectedFruit = (G.selectedFruit - 1 + FRUIT_TYPES.length) % FRUIT_TYPES.length;
+        if (e.key === 'e' || e.key === 'E') G.selectedFruit = (G.selectedFruit + 1) % FRUIT_TYPES.length;
+        if (e.key === 's' || e.key === 'S') G.shopOpen = !G.shopOpen;
+    }
+});
+
+// === UI按钮事件 ===
+document.getElementById('startBtn').addEventListener('click', function() {
+    initGame();
+    G.state = 'playing';
+    document.getElementById('startScreen').style.display = 'none';
+    document.getElementById('pauseBtn').style.display = 'block';
+});
+
+document.getElementById('pauseBtn').addEventListener('click', function() {
+    if (G.state === 'playing') {
+        G.state = 'paused';
+        document.getElementById('pauseScreen').style.display = 'flex';
+    }
+});
+
+document.getElementById('resumeBtn').addEventListener('click', function() {
+    G.state = 'playing';
+    document.getElementById('pauseScreen').style.display = 'none';
+});
+
+document.getElementById('restartBtn').addEventListener('click', function() {
+    initGame();
+    G.state = 'playing';
+    document.getElementById('pauseScreen').style.display = 'none';
+});
+
+// === 启动 ===
+gameLoop();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

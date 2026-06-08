@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>幻方</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:'Segoe UI',sans-serif}
+canvas{display:block;image-rendering:pixelated;touch-action:none}
+#gameCanvas{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}.ad-banner-container iframe{max-width:100%}.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div class="ad-banner-container"><span class="ad">广告</span><div id="adBanner"></div></div>
+<div class="sponsor-btn" id="sponsorBtn">赞助</div>
+<div class="sponsor-panel" id="sponsorPanel">
+  <h2>支持我们</h2>
+  <div class="qr-row">
+    <div class="qr-card"><div class="qr-icon">微信</div><div class="qr-label">微信支付</div><div class="qr-hint">扫码支持</div></div>
+    <div class="qr-card"><div class="qr-icon">支付宝</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+  </div>
+  <div class="sponsor-close" id="sponsorClose">关闭</div>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+  <div class="ad-content"><p>广告加载中...</p></div>
+  <div class="skip-btn" id="skipAd">跳过广告 (3)</div>
+</div>
+<script>
+(function(){
+'use strict';
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const COLORS = {
+  bg1: '#0a0a2e',
+  bg2: '#1a1a4e',
+  accent: '#4fc3f7',
+  gold: '#ffd700',
+  white: '#ffffff',
+  text: '#ffffff',
+  dim: 'rgba(255,255,255,0.5)',
+  cell: 'rgba(255,255,255,0.08)',
+  cellBorder: 'rgba(255,255,255,0.15)',
+  cellHover: 'rgba(79,195,247,0.2)',
+  cellFixed: 'rgba(79,195,247,0.15)',
+  cellError: 'rgba(255,100,100,0.25)',
+  success: '#4caf50',
+  warning: '#ff9800',
+  danger: '#f44336',
+  purple: '#9c27b0',
+  teal: '#009688'
+};
+
+const PUZZLES = {
+  3: [
+    { id: '3x3_1', name: '入门', size: 3, magicSum: 15, difficulty: 1,
+      fixed: [[0,0,2],[0,2,6],[1,1,5],[2,0,6],[2,2,2]],  // pre-filled cells
+      empty: [[0,1],[1,0],[1,2],[2,1]] },
+    { id: '3x3_2', name: '经典', size: 3, magicSum: 15, difficulty: 1,
+      fixed: [[0,0,8],[1,1,5],[2,2,2]], empty: [[0,1],[0,2],[1,0],[1,2],[2,0],[2,1]] },
+    { id: '3x3_3', name: '挑战', size: 3, magicSum: 15, difficulty: 2,
+      fixed: [[0,2,6],[2,0,6]], empty: [[0,0],[0,1],[1,0],[1,1],[1,2],[2,1],[2,2]] }
+  ],
+  4: [
+    { id: '4x4_1', name: '入门', size: 4, magicSum: 34, difficulty: 2,
+      fixed: [[0,0,16],[0,3,3],[1,1,10],[1,2,7],[2,1,5],[2,2,11],[3,0,9],[3,3,6]],
+      empty: [[0,1],[0,2],[1,0],[1,3],[2,0],[2,3],[3,1],[3,2]] },
+    { id: '4x4_2', name: '经典', size: 4, magicSum: 34, difficulty: 2,
+      fixed: [[0,0,1],[0,3,15],[1,1,14],[1,2,4],[2,1,8],[2,2,9],[3,0,12],[3,3,2]],
+      empty: [[0,1],[0,2],[1,0],[1,3],[2,0],[2,3],[3,1],[3,2]] },
+    { id: '4x4_3', name: '挑战', size: 4, magicSum: 34, difficulty: 3,
+      fixed: [[0,0,1],[1,1,14],[2,2,9],[3,3,2]],
+      empty: [[0,1],[0,2],[0,3],[1,0],[1,2],[1,3],[2,0],[2,1],[2,3],[3,0],[3,1],[3,2]] }
+  ],
+  5: [
+    { id: '5x5_1', name: '入门', size: 5, magicSum: 65, difficulty: 3,
+      fixed: [[0,0,1],[0,2,24],[0,4,5],[1,1,15],[1,3,16],[2,2,13],[3,1,20],[3,3,7],[4,0,21],[4,2,12],[4,4,9]],
+      empty: [[0,1],[0,3],[1,0],[1,2],[1,4],[2,0],[2,1],[2,3],[2,4],[3,0],[3,2],[3,4],[4,1],[4,3]] },
+    { id: '5x5_2', name: '经典', size: 5, magicSum: 65, difficulty: 3,
+      fixed: [[0,0,1],[0,4,21],[1,1,15],[1,3,16],[2,2,13],[3,1,20],[3,3,7],[4,0,5],[4,4,25]],
+      empty: [[0,1],[0,2],[0,3],[1,0],[1,2],[1,4],[2,0],[2,1],[2,3],[2,4],[3,0],[3,2],[3,4],[4,1],[4,2],[4,3]] }
+  ],
+  6: [
+    { id: '6x6_1', name: '入门', size: 6, magicSum: 111, difficulty: 4,
+      fixed: [[0,0,35],[0,5,1],[1,1,8],[1,4,26],[2,2,19],[2,3,20],[3,2,23],[3,3,18],[4,1,14],[4,4,31],[5,0,5],[5,5,33]],
+      empty: [[0,1],[0,2],[0,3],[0,4],[1,0],[1,2],[1,3],[1,5],[2,0],[2,1],[2,4],[2,5],[3,0],[3,1],[3,4],[3,5],[4,0],[4,2],[4,3],[4,5],[5,1],[5,2],[5,3],[5,4]] }
+  ],
+  7: [
+    { id: '7x7_1', name: '入门', size: 7, magicSum: 175, difficulty: 5,
+      fixed: [[0,0,49],[0,3,11],[0,6,7],[1,1,10],[1,5,38],[2,2,30],[2,4,21],[3,0,14],[3,3,25],[3,6,36],[4,2,27],[4,4,24],[5,1,35],[5,5,13],[6,0,28],[6,3,40],[6,6,1]],
+      empty: [[0,1],[0,2],[0,4],[0,5],[1,0],[1,2],[1,3],[1,4],[1,6],[2,0],[2,1],[2,3],[2,5],[2,6],[3,1],[3,2],[3,4],[3,5],[4,0],[4,1],[4,3],[4,5],[4,6],[5,0],[5,2],[5,3],[5,4],[5,6],[6,1],[6,2],[6,4],[6,5]] }
+  ]
+};
+
+const STATE = {
+  MENU: 0, PLAYING: 1, PAUSED: 2, GAME_OVER: 3, WIN: 4
+};
+
+const G = {
+  state: STATE.MENU,
+  puzzle: null,
+  grid: [],
+  selected: null,
+  timer: 0,
+  timerInterval: null,
+  score: 0,
+  moves: 0,
+  mistakes: 0,
+  hints: 3,
+  hintCells: new Set(),
+  undoStack: [],
+  level: 0,
+  category: 3,
+  menuScroll: 0,
+  particles: [],
+  bgParticles: [],
+  animation: 0,
+  adsShown: 0,
+  showInterstitial: false,
+  interstitialTimer: 0
+};
+
+function initBgParticles() {
+  G.bgParticles = [];
+  for (let i = 0; i < 50; i++) {
+    G.bgParticles.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      size: Math.random() * 2 + 0.5,
+      speedY: Math.random() * 0.5 + 0.1,
+      speedX: Math.random() * 0.3 - 0.15,
+      alpha: Math.random() * 0.4 + 0.1
+    });
+  }
+}
+
+function updateBgParticles() {
+  for (let p of G.bgParticles) {
+    p.y -= p.speedY;
+    p.x += p.speedX;
+    if (p.y < -10) { p.y = canvas.height + 10; p.x = Math.random() * canvas.width; }
+    if (p.x < -10) p.x = canvas.width + 10;
+    if (p.x > canvas.width + 10) p.x = -10;
+  }
+}
+
+function drawBgParticles() {
+  for (let p of G.bgParticles) {
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = COLORS.accent;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    G.particles.push({
+      x: x, y: y,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      size: Math.random() * 4 + 2,
+      color: color,
+      life: 1,
+      decay: Math.random() * 0.02 + 0.01
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = G.particles.length - 1; i >= 0; i--) {
+    let p = G.particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+    if (p.life <= 0) G.particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (let p of G.particles) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  initBgParticles();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function drawBg() {
+  let grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, COLORS.bg1);
+  grad.addColorStop(1, COLORS.bg2);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  updateBgParticles();
+  drawBgParticles();
+}
+
+function drawText(text, x, y, size, color, align) {
+  ctx.font = `bold ${size}px "Microsoft YaHei", "Segoe UI", sans-serif`;
+  ctx.fillStyle = color || COLORS.white;
+  ctx.textAlign = align || 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+}
+
+function drawButton(text, x, y, w, h, hover) {
+  let grad = ctx.createLinearGradient(x, y, x, y + h);
+  if (hover) {
+    grad.addColorStop(0, 'rgba(79,195,247,0.4)');
+    grad.addColorStop(1, 'rgba(79,195,247,0.2)');
+  } else {
+    grad.addColorStop(0, 'rgba(79,195,247,0.2)');
+    grad.addColorStop(1, 'rgba(79,195,247,0.1)');
+  }
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 8);
+  ctx.fill();
+  ctx.strokeStyle = hover ? COLORS.accent : 'rgba(79,195,247,0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  drawText(text, x + w/2, y + h/2, Math.min(16, h * 0.4), COLORS.white);
+}
+
+function getGridArea() {
+  let n = G.puzzle ? G.puzzle.size : 3;
+  let maxW = canvas.width * 0.85;
+  let maxH = canvas.height * 0.6;
+  let cellSize = Math.min(maxW / n, maxH / n, 70);
+  let gridW = cellSize * n;
+  let gridH = cellSize * n;
+  let x = (canvas.width - gridW) / 2;
+  let y = (canvas.height - gridH) / 2 + 30;
+  return { x, y, w: gridW, h: gridH, cellSize };
+}
+
+function getMagicSum(size) {
+  return size * (size * size + 1) / 2;
+}
+
+function initPuzzle(puzzle) {
+  G.puzzle = puzzle;
+  G.grid = [];
+  let n = puzzle.size;
+  for (let r = 0; r < n; r++) {
+    G.grid[r] = [];
+    for (let c = 0; c < n; c++) {
+      let fixed = puzzle.fixed.find(f => f[0] === r && f[1] === c);
+      G.grid[r][c] = {
+        value: fixed ? fixed[2] : 0,
+        fixed: !!fixed,
+        error: false,
+        hint: false
+      };
+    }
+  }
+  G.selected = null;
+  G.timer = 0;
+  G.score = 0;
+  G.moves = 0;
+  G.mistakes = 0;
+  G.hints = 3;
+  G.hintCells = new Set();
+  G.undoStack = [];
+  G.particles = [];
+  G.state = STATE.PLAYING;
+  if (G.timerInterval) clearInterval(G.timerInterval);
+  G.timerInterval = setInterval(() => {
+    if (G.state === STATE.PLAYING) G.timer++;
+  }, 1000);
+  loadHighScore();
+}
+
+function checkRow(row) {
+  let n = G.puzzle.size;
+  let sum = 0;
+  let filled = 0;
+  for (let c = 0; c < n; c++) {
+    if (G.grid[row][c].value === 0) return { sum: 0, complete: false };
+    sum += G.grid[row][c].value;
+    filled++;
+  }
+  return { sum, complete: filled === n, valid: sum === G.puzzle.magicSum };
+}
+
+function checkCol(col) {
+  let n = G.puzzle.size;
+  let sum = 0;
+  let filled = 0;
+  for (let r = 0; r < n; r++) {
+    if (G.grid[r][col].value === 0) return { sum: 0, complete: false };
+    sum += G.grid[r][col].value;
+    filled++;
+  }
+  return { sum, complete: filled === n, valid: sum === G.puzzle.magicSum };
+}
+
+function checkDiag1() {
+  let n = G.puzzle.size;
+  let sum = 0;
+  let filled = 0;
+  for (let i = 0; i < n; i++) {
+    if (G.grid[i][i].value === 0) return { sum: 0, complete: false };
+    sum += G.grid[i][i].value;
+    filled++;
+  }
+  return { sum, complete: filled === n, valid: sum === G.puzzle.magicSum };
+}
+
+function checkDiag2() {
+  let n = G.puzzle.size;
+  let sum = 0;
+  let filled = 0;
+  for (let i = 0; i < n; i++) {
+    if (G.grid[i][n-1-i].value === 0) return { sum: 0, complete: false };
+    sum += G.grid[i][n-1-i].value;
+    filled++;
+  }
+  return { sum, complete: filled === n, valid: sum === G.puzzle.magicSum };
+}
+
+function validateGrid() {
+  let n = G.puzzle.size;
+  let errors = new Set();
+  for (let r = 0; r < n; r++) {
+    let result = checkRow(r);
+    if (result.complete && !result.valid) {
+      for (let c = 0; c < n; c++) errors.add(`${r},${c}`);
+    }
+  }
+  for (let c = 0; c < n; c++) {
+    let result = checkCol(c);
+    if (result.complete && !result.valid) {
+      for (let r = 0; r < n; r++) errors.add(`${r},${c}`);
+    }
+  }
+  let d1 = checkDiag1();
+  if (d1.complete && !d1.valid) {
+    for (let i = 0; i < n; i++) errors.add(`${i},${i}`);
+  }
+  let d2 = checkDiag2();
+  if (d2.complete && !d2.valid) {
+    for (let i = 0; i < n; i++) errors.add(`${i},${n-1-i}`);
+  }
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      G.grid[r][c].error = errors.has(`${r},${c}`);
+    }
+  }
+}
+
+function checkWin() {
+  let n = G.puzzle.size;
+  for (let r = 0; r < n; r++) {
+    let result = checkRow(r);
+    if (!result.complete || !result.valid) return false;
+  }
+  for (let c = 0; c < n; c++) {
+    let result = checkCol(c);
+    if (!result.complete || !result.valid) return false;
+  }
+  if (!checkDiag1().valid || !checkDiag2().valid) return false;
+  return true;
+}
+
+function calculateScore() {
+  let n = G.puzzle.size;
+  let base = n * n * 100;
+  let timeBonus = Math.max(0, 300 - G.timer) * 10;
+  let movePenalty = G.moves * 2;
+  let mistakePenalty = G.mistakes * 50;
+  let hintPenalty = (3 - G.hints) * 100;
+  return Math.max(0, base + timeBonus - movePenalty - mistakePenalty - hintPenalty);
+}
+
+function formatTime(seconds) {
+  let m = Math.floor(seconds / 60);
+  let s = seconds % 60;
+  return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+}
+
+function loadHighScore() {
+  let key = `magic_square_${G.puzzle.id}`;
+  let saved = localStorage.getItem(key);
+  return saved ? parseInt(saved) : 0;
+}
+
+function saveHighScore(score) {
+  let key = `magic_square_${G.puzzle.id}`;
+  let current = loadHighScore();
+  if (score > current) {
+    localStorage.setItem(key, score.toString());
+  }
+}
+
+function useHint() {
+  if (G.hints <= 0 || !G.selected) return;
+  let { r, c } = G.selected;
+  if (G.grid[r][c].fixed || G.grid[r][c].value !== 0) return;
+  let n = G.puzzle.size;
+  let solution = generateSolution();
+  if (solution) {
+    G.grid[r][c].value = solution[r][c];
+    G.grid[r][c].hint = true;
+    G.hintCells.add(`${r},${c}`);
+    G.hints--;
+    G.moves++;
+    validateGrid();
+    if (checkWin()) {
+      G.score = calculateScore();
+      saveHighScore(G.score);
+      G.state = STATE.WIN;
+      spawnParticles(canvas.width/2, canvas.height/2, COLORS.gold, 50);
+      showInterstitialAd();
+    }
+  }
+}
+
+function generateSolution() {
+  let n = G.puzzle.size;
+  let target = G.puzzle.magicSum;
+  let solution = [];
+  for (let r = 0; r < n; r++) {
+    solution[r] = [];
+    for (let c = 0; c < n; c++) {
+      solution[r][c] = G.grid[r][c].value;
+    }
+  }
+  let empties = [];
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (!G.grid[r][c].fixed && G.grid[r][c].value === 0) {
+        empties.push([r, c]);
+      }
+    }
+  }
+  if (empties.length === 0) return solution;
+  let used = new Set();
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (G.grid[r][c].value > 0) used.add(G.grid[r][c].value);
+    }
+  }
+  function solve(idx) {
+    if (idx === empties.length) {
+      for (let r = 0; r < n; r++) {
+        if (checkRow(r).sum !== target) return false;
+      }
+      for (let c = 0; c < n; c++) {
+        if (checkCol(c).sum !== target) return false;
+      }
+      let d1 = 0, d2 = 0;
+      for (let i = 0; i < n; i++) { d1 += solution[i][i]; d2 += solution[i][n-1-i]; }
+      return d1 === target && d2 === target;
+    }
+    let [r, c] = empties[idx];
+    for (let num = 1; num <= n*n; num++) {
+      if (used.has(num)) continue;
+      solution[r][c] = num;
+      used.add(num);
+      if (solve(idx + 1)) return true;
+      solution[r][c] = 0;
+      used.delete(num);
+    }
+    return false;
+  }
+  if (solve(0)) return solution;
+  return null;
+}
+
+function undoMove() {
+  if (G.undoStack.length === 0) return;
+  let { r, c, value } = G.undoStack.pop();
+  G.grid[r][c].value = value;
+  G.grid[r][c].error = false;
+  G.grid[r][c].hint = G.hintCells.has(`${r},${c}`);
+  validateGrid();
+}
+
+function drawMenu() {
+  drawBg();
+  let cx = canvas.width / 2;
+  let cy = canvas.height / 2;
+  drawText('幻 方', cx, cy - 160, 48, COLORS.accent);
+  drawText('Magic Square', cx, cy - 110, 18, COLORS.dim);
+  let categories = [3, 4, 5, 6, 7];
+  let btnW = 120;
+  let btnH = 45;
+  let gap = 15;
+  let totalW = categories.length * (btnW + gap) - gap;
+  let startX = cx - totalW / 2;
+  for (let i = 0; i < categories.length; i++) {
+    let size = categories[i];
+    let x = startX + i * (btnW + gap);
+    let y = cy - 50;
+    let isHover = G.category === size;
+    drawButton(`${size}x${size}`, x, y, btnW, btnH, isHover);
+  }
+  let puzzles = PUZZLES[G.category] || [];
+  let puzzleBtnW = 200;
+  let puzzleBtnH = 40;
+  let puzzleGap = 12;
+  let puzzleStartY = cy + 20;
+  for (let i = 0; i < puzzles.length; i++) {
+    let p = puzzles[i];
+    let x = cx - puzzleBtnW / 2;
+    let y = puzzleStartY + i * (puzzleBtnH + puzzleGap);
+    let highScore = localStorage.getItem(`magic_square_${p.id}`) || 0;
+    drawButton(`${p.name} (最高分: ${highScore})`, x, y, puzzleBtnW, puzzleBtnH, G.level === i);
+  }
+  drawText('选择尺寸和难度开始游戏', cx, cy + 20 + puzzles.length * (puzzleBtnH + puzzleGap) + 20, 14, COLORS.dim);
+  drawText('键盘: 方向键移动 | 数字键填入 | 0/删除键清除 | H提示 | Z撤销', cx, canvas.height - 80, 12, COLORS.dim);
+  drawText('触屏: 点击格子选中 | 底部数字键盘填入', cx, canvas.height - 60, 12, COLORS.dim);
+}
+
+function drawGame() {
+  drawBg();
+  let area = getGridArea();
+  let n = G.puzzle.size;
+  let cs = area.cellSize;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.roundRect(area.x - 10, area.y - 10, area.w + 20, area.h + 20, 12);
+  ctx.fill();
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      let cell = G.grid[r][c];
+      let x = area.x + c * cs;
+      let y = area.y + r * cs;
+      if (cell.error) {
+        ctx.fillStyle = COLORS.cellError;
+      } else if (G.selected && G.selected.r === r && G.selected.c === c) {
+        ctx.fillStyle = COLORS.cellHover;
+      } else if (cell.fixed) {
+        ctx.fillStyle = COLORS.cellFixed;
+      } else {
+        ctx.fillStyle = COLORS.cell;
+      }
+      ctx.fillRect(x, y, cs, cs);
+      ctx.strokeStyle = COLORS.cellBorder;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, cs, cs);
+      if (cell.value > 0) {
+        let color = cell.fixed ? COLORS.accent : (cell.error ? COLORS.danger : (cell.hint ? COLORS.gold : COLORS.white));
+        drawText(cell.value.toString(), x + cs/2, y + cs/2, cs * 0.5, color);
+      }
+    }
+  }
+  ctx.strokeStyle = COLORS.white;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(area.x, area.y, area.w, area.h);
+  for (let i = 1; i < n; i++) {
+    ctx.beginPath();
+    ctx.moveTo(area.x + i * cs, area.y);
+    ctx.lineTo(area.x + i * cs, area.y + area.h);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(area.x, area.y + i * cs);
+    ctx.lineTo(area.x + area.w, area.y + i * cs);
+    ctx.stroke();
+  }
+  drawHUD();
+  if (G.showInterstitial) drawInterstitial();
+}
+
+function drawHUD() {
+  let y = 20;
+  let x = 20;
+  drawText(`${G.puzzle.name} (${G.puzzle.size}x${G.puzzle.size})`, x, y, 18, COLORS.accent, 'left');
+  drawText(`目标和: ${G.puzzle.magicSum}`, x, y + 25, 14, COLORS.dim, 'left');
+  drawText(`时间: ${formatTime(G.timer)}`, canvas.width - 20, y, 16, COLORS.white, 'right');
+  drawText(`步数: ${G.moves}`, canvas.width - 20, y + 22, 14, COLORS.dim, 'right');
+  drawText(`错误: ${G.mistakes}`, canvas.width - 20, y + 42, 14, G.mistakes > 0 ? COLORS.danger : COLORS.dim, 'right');
+  drawText(`提示: ${G.hints}`, canvas.width - 20, y + 62, 14, G.hints > 0 ? COLORS.gold : COLORS.dim, 'right');
+  let n = G.puzzle.size;
+  let area = getGridArea();
+  let sumY = area.y + area.h + 20;
+  for (let r = 0; r < n; r++) {
+    let result = checkRow(r);
+    let color = result.complete ? (result.valid ? COLORS.success : COLORS.danger) : COLORS.dim;
+    drawText(`${result.sum}`, area.x - 25, area.y + r * area.cellSize + area.cellSize/2, 12, color, 'center');
+  }
+  for (let c = 0; c < n; c++) {
+    let result = checkCol(c);
+    let color = result.complete ? (result.valid ? COLORS.success : COLORS.danger) : COLORS.dim;
+    drawText(`${result.sum}`, area.x + c * area.cellSize + area.cellSize/2, sumY, 12, color, 'center');
+  }
+  let d1 = checkDiag1();
+  let d2 = checkDiag2();
+  drawText(`\\: ${d1.sum}`, area.x + area.w + 30, area.y + 10, 12, d1.complete ? (d1.valid ? COLORS.success : COLORS.danger) : COLORS.dim, 'left');
+  drawText(`/: ${d2.sum}`, area.x + area.w + 30, area.y + 30, 12, d2.complete ? (d2.valid ? COLORS.success : COLORS.danger) : COLORS.dim, 'left');
+  let btnY = canvas.height - 100;
+  let btnW = 70;
+  let btnGap = 10;
+  let btnStartX = canvas.width / 2 - (btnW * 4 + btnGap * 3) / 2;
+  drawButton('撤销', btnStartX, btnY, btnW, 36, false);
+  drawButton('提示', btnStartX + btnW + btnGap, btnY, btnW, 36, false);
+  drawButton('检查', btnStartX + (btnW + btnGap) * 2, btnY, btnW, 36, false);
+  drawButton('返回', btnStartX + (btnW + btnGap) * 3, btnY, btnW, 36, false);
+  let numPadY = canvas.height - 55;
+  let numBtnSize = Math.min(36, (canvas.width - 40) / (n * n + 2));
+  let numStartX = canvas.width / 2 - (numBtnSize * (n * n + 2) + 6 * (n * n + 1)) / 2;
+  drawButton('X', numStartX, numPadY, numBtnSize, numBtnSize, false);
+  for (let i = 1; i <= n * n; i++) {
+    let x = numStartX + i * (numBtnSize + 6);
+    let isUsed = false;
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (G.grid[r][c].value === i) { isUsed = true; break; }
+      }
+      if (isUsed) break;
+    }
+    drawButton(i.toString(), x, numPadY, numBtnSize, numBtnSize, isUsed);
+  }
+}
+
+function drawWin() {
+  drawBg();
+  let cx = canvas.width / 2;
+  let cy = canvas.height / 2;
+  G.animation += 0.05;
+  let pulse = Math.sin(G.animation) * 0.1 + 1;
+  ctx.save();
+  ctx.translate(cx, cy - 80);
+  ctx.scale(pulse, pulse);
+  drawText('恭喜通关!', 0, 0, 42, COLORS.gold);
+  ctx.restore();
+  drawText(`${G.puzzle.name} (${G.puzzle.size}x${G.puzzle.size})`, cx, cy - 20, 20, COLORS.accent);
+  drawText(`用时: ${formatTime(G.timer)}`, cx, cy + 20, 18, COLORS.white);
+  drawText(`步数: ${G.moves} | 错误: ${G.mistakes}`, cx, cy + 50, 16, COLORS.dim);
+  drawText(`得分: ${G.score}`, cx, cy + 80, 24, COLORS.gold);
+  let highScore = loadHighScore();
+  if (G.score >= highScore) {
+    drawText('新纪录!', cx, cy + 110, 18, COLORS.warning);
+  } else {
+    drawText(`最高分: ${highScore}`, cx, cy + 110, 16, COLORS.dim);
+  }
+  drawButton('下一关', cx - 110, cy + 150, 100, 40, false);
+  drawButton('返回菜单', cx + 10, cy + 150, 100, 40, false);
+  updateParticles();
+  drawParticles();
+}
+
+function drawPaused() {
+  drawGame();
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  let cx = canvas.width / 2;
+  let cy = canvas.height / 2;
+  drawText('游戏暂停', cx, cy - 30, 32, COLORS.white);
+  drawButton('继续游戏', cx - 80, cy + 10, 160, 40, false);
+  drawButton('返回菜单', cx - 80, cy + 60, 160, 40, false);
+}
+
+function drawInterstitial() {
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  let cx = canvas.width / 2;
+  let cy = canvas.height / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.beginPath();
+  ctx.roundRect(cx - 160, cy - 80, 320, 160, 16);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.stroke();
+  drawText('感谢游玩', cx, cy - 30, 20, COLORS.dim);
+  drawText(`广告 ${G.interstitialTimer}`, cx, cy, 14, COLORS.dim);
+  drawButton('跳过', cx - 40, cy + 30, 80, 35, false);
+}
+
+function showInterstitialAd() {
+  G.adsShown++;
+  if (G.adsShown % 2 === 0) {
+    G.showInterstitial = true;
+    G.interstitialTimer = 3;
+    let interval = setInterval(() => {
+      G.interstitialTimer--;
+      if (G.interstitialTimer <= 0) {
+        clearInterval(interval);
+        G.showInterstitial = false;
+      }
+    }, 1000);
+  }
+}
+
+function handleClick(x, y) {
+  if (G.state === STATE.MENU) {
+    let cx = canvas.width / 2;
+    let cy = canvas.height / 2;
+    let categories = [3, 4, 5, 6, 7];
+    let btnW = 120;
+    let btnH = 45;
+    let gap = 15;
+    let totalW = categories.length * (btnW + gap) - gap;
+    let startX = cx - totalW / 2;
+    for (let i = 0; i < categories.length; i++) {
+      let bx = startX + i * (btnW + gap);
+      let by = cy - 50;
+      if (x >= bx && x <= bx + btnW && y >= by && y <= by + btnH) {
+        G.category = categories[i];
+        G.level = 0;
+        return;
+      }
+    }
+    let puzzles = PUZZLES[G.category] || [];
+    let puzzleBtnW = 200;
+    let puzzleBtnH = 40;
+    let puzzleGap = 12;
+    let puzzleStartY = cy + 20;
+    for (let i = 0; i < puzzles.length; i++) {
+      let bx = cx - puzzleBtnW / 2;
+      let by = puzzleStartY + i * (puzzleBtnH + puzzleGap);
+      if (x >= bx && x <= bx + puzzleBtnW && y >= by && y <= by + puzzleBtnH) {
+        G.level = i;
+        initPuzzle(puzzles[i]);
+        return;
+      }
+    }
+    return;
+  }
+  if (G.state === STATE.WIN) {
+    let cx = canvas.width / 2;
+    let cy = canvas.height / 2;
+    if (x >= cx - 110 && x <= cx - 10 && y >= cy + 150 && y <= cy + 190) {
+      let puzzles = PUZZLES[G.puzzle.size] || [];
+      let idx = puzzles.findIndex(p => p.id === G.puzzle.id);
+      if (idx < puzzles.length - 1) {
+        initPuzzle(puzzles[idx + 1]);
+      } else {
+        let sizes = Object.keys(PUZZLES).map(Number);
+        let sizeIdx = sizes.indexOf(G.puzzle.size);
+        if (sizeIdx < sizes.length - 1) {
+          let nextSize = sizes[sizeIdx + 1];
+          G.category = nextSize;
+          initPuzzle(PUZZLES[nextSize][0]);
+        } else {
+          G.state = STATE.MENU;
+        }
+      }
+      return;
+    }
+    if (x >= cx + 10 && x <= cx + 110 && y >= cy + 150 && y <= cy + 190) {
+      G.state = STATE.MENU;
+      return;
+    }
+    return;
+  }
+  if (G.state === STATE.PAUSED) {
+    let cx = canvas.width / 2;
+    let cy = canvas.height / 2;
+    if (x >= cx - 80 && x <= cx + 80 && y >= cy + 10 && y <= cy + 50) {
+      G.state = STATE.PLAYING;
+      return;
+    }
+    if (x >= cx - 80 && x <= cx + 80 && y >= cy + 60 && y <= cy + 100) {
+      G.state = STATE.MENU;
+      if (G.timerInterval) clearInterval(G.timerInterval);
+      return;
+    }
+    return;
+  }
+  if (G.showInterstitial) {
+    let cx = canvas.width / 2;
+    let cy = canvas.height / 2;
+    if (x >= cx - 40 && x <= cx + 40 && y >= cy + 30 && y <= cy + 65) {
+      G.showInterstitial = false;
+      return;
+    }
+    return;
+  }
+  if (G.state !== STATE.PLAYING) return;
+  let area = getGridArea();
+  let n = G.puzzle.size;
+  if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
+    let c = Math.floor((x - area.x) / area.cellSize);
+    let r = Math.floor((y - area.y) / area.cellSize);
+    if (r >= 0 && r < n && c >= 0 && c < n && !G.grid[r][c].fixed) {
+      G.selected = { r, c };
+    }
+    return;
+  }
+  let btnY = canvas.height - 100;
+  let btnW = 70;
+  let btnGap = 10;
+  let btnStartX = canvas.width / 2 - (btnW * 4 + btnGap * 3) / 2;
+  if (y >= btnY && y <= btnY + 36) {
+    if (x >= btnStartX && x <= btnStartX + btnW) { undoMove(); return; }
+    if (x >= btnStartX + btnW + btnGap && x <= btnStartX + btnW * 2 + btnGap) { useHint(); return; }
+    if (x >= btnStartX + (btnW + btnGap) * 2 && x <= btnStartX + btnW * 3 + btnGap * 2) { validateGrid(); return; }
+    if (x >= btnStartX + (btnW + btnGap) * 3 && x <= btnStartX + btnW * 4 + btnGap * 3) {
+      G.state = STATE.MENU;
+      if (G.timerInterval) clearInterval(G.timerInterval);
+      return;
+    }
+  }
+  let numPadY = canvas.height - 55;
+  let numBtnSize = Math.min(36, (canvas.width - 40) / (n * n + 2));
+  let numStartX = canvas.width / 2 - (numBtnSize * (n * n + 2) + 6 * (n * n + 1)) / 2;
+  if (y >= numPadY && y <= numPadY + numBtnSize) {
+    if (x >= numStartX && x <= numStartX + numBtnSize) {
+      if (G.selected && !G.grid[G.selected.r][G.selected.c].fixed) {
+        G.undoStack.push({ r: G.selected.r, c: G.selected.c, value: G.grid[G.selected.r][G.selected.c].value });
+        G.grid[G.selected.r][G.selected.c].value = 0;
+        G.grid[G.selected.r][G.selected.c].error = false;
+        G.grid[G.selected.r][G.selected.c].hint = false;
+        G.moves++;
+        validateGrid();
+      }
+      return;
+    }
+    for (let i = 1; i <= n * n; i++) {
+      let bx = numStartX + i * (numBtnSize + 6);
+      if (x >= bx && x <= bx + numBtnSize) {
+        if (G.selected && !G.grid[G.selected.r][G.selected.c].fixed) {
+          G.undoStack.push({ r: G.selected.r, c: G.selected.c, value: G.grid[G.selected.r][G.selected.c].value });
+          G.grid[G.selected.r][G.selected.c].value = i;
+          G.grid[G.selected.r][G.selected.c].error = false;
+          G.grid[G.selected.r][G.selected.c].hint = false;
+          G.moves++;
+          validateGrid();
+          if (checkWin()) {
+            G.score = calculateScore();
+            saveHighScore(G.score);
+            G.state = STATE.WIN;
+            spawnParticles(canvas.width/2, canvas.height/2, COLORS.gold, 50);
+            showInterstitialAd();
+          }
+        }
+        return;
+      }
+    }
+  }
+}
+
+let touchStart = null;
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  let touch = e.touches[0];
+  let rect = canvas.getBoundingClientRect();
+  touchStart = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+});
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (touchStart) {
+    handleClick(touchStart.x, touchStart.y);
+    touchStart = null;
+  }
+});
+
+canvas.addEventListener('click', (e) => {
+  let rect = canvas.getBoundingClientRect();
+  handleClick(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (G.state === STATE.MENU) {
+    if (e.key === 'Enter') {
+      let puzzles = PUZZLES[G.category] || [];
+      if (puzzles[G.level]) initPuzzle(puzzles[G.level]);
+    }
+    return;
+  }
+  if (G.state === STATE.WIN) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      let puzzles = PUZZLES[G.puzzle.size] || [];
+      let idx = puzzles.findIndex(p => p.id === G.puzzle.id);
+      if (idx < puzzles.length - 1) initPuzzle(puzzles[idx + 1]);
+      else G.state = STATE.MENU;
+    }
+    return;
+  }
+  if (G.state === STATE.PAUSED) {
+    if (e.key === 'Escape' || e.key === 'p') G.state = STATE.PLAYING;
+    return;
+  }
+  if (G.state !== STATE.PLAYING) return;
+  if (e.key === 'Escape' || e.key === 'p') {
+    G.state = STATE.PAUSED;
+    return;
+  }
+  if (!G.selected) return;
+  let { r, c } = G.selected;
+  if (G.grid[r][c].fixed) return;
+  let n = G.puzzle.size;
+  if (e.key === 'ArrowUp' && r > 0) { G.selected.r--; return; }
+  if (e.key === 'ArrowDown' && r < n - 1) { G.selected.r++; return; }
+  if (e.key === 'ArrowLeft' && c > 0) { G.selected.c--; return; }
+  if (e.key === 'ArrowRight' && c < n - 1) { G.selected.c++; return; }
+  if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') {
+    G.undoStack.push({ r, c, value: G.grid[r][c].value });
+    G.grid[r][c].value = 0;
+    G.grid[r][c].error = false;
+    G.grid[r][c].hint = false;
+    G.moves++;
+    validateGrid();
+    return;
+  }
+  if (e.key === 'h' || e.key === 'H') { useHint(); return; }
+  if ((e.key === 'z' || e.key === 'Z') && !e.ctrlKey) { undoMove(); return; }
+  let num = parseInt(e.key);
+  if (!isNaN(num) && num >= 1 && num <= 9) {
+    let val = num;
+    if (val <= n * n) {
+      G.undoStack.push({ r, c, value: G.grid[r][c].value });
+      G.grid[r][c].value = val;
+      G.grid[r][c].error = false;
+      G.grid[r][c].hint = false;
+      G.moves++;
+      validateGrid();
+      if (checkWin()) {
+        G.score = calculateScore();
+        saveHighScore(G.score);
+        G.state = STATE.WIN;
+        spawnParticles(canvas.width/2, canvas.height/2, COLORS.gold, 50);
+        showInterstitialAd();
+      }
+    }
+  }
+});
+
+document.getElementById('sponsorBtn').addEventListener('click', () => {
+  document.getElementById('sponsorPanel').style.display = 'flex';
+});
+
+document.getElementById('sponsorClose').addEventListener('click', () => {
+  document.getElementById('sponsorPanel').style.display = 'none';
+});
+
+function gameLoop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  switch (G.state) {
+    case STATE.MENU: drawMenu(); break;
+    case STATE.PLAYING: drawGame(); break;
+    case STATE.PAUSED: drawPaused(); break;
+    case STATE.WIN: drawWin(); break;
+  }
+  requestAnimationFrame(gameLoop);
+}
+
+initBgParticles();
+gameLoop();
+})();
+</script>
+</body>
+</html>

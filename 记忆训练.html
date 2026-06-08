@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>记忆训练</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a2e; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
+canvas { display: block; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+
+var canvas = document.getElementById("c");
+var ctx = canvas.getContext("2d");
+
+// ============ 响应式 ============
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ============ 常量 ============
+var SYMBOLS = ["★","❤","◆","●","▲","■","♦","♣","♠","⬟","⬢","◈","◉","◎","◐","◑",
+               "✿","❀","♪","♫","☀","☁","☂","⚡","❄","☘","⚡","⚓","⚔","⚙","☯","✦"];
+var COLORS = ["#ff6b6b","#feca57","#48dbfb","#ff9ff3","#54a0ff","#5f27cd","#01a3a4",
+              "#f368e0","#ff9f43","#00d2d3","#c8d6e5","#576574","#22a6b3","#be2edd",
+              "#eb4d4b","#6ab04c","#e056fd","#686de0","#30336b","#7ed6df"];
+
+var DIFFICULTIES = [
+    { name: "简单", cols: 4, rows: 4, time: 120, stars: 1 },
+    { name: "普通", cols: 4, rows: 5, time: 150, stars: 2 },
+    { name: "困难", cols: 6, rows: 5, time: 180, stars: 3 },
+    { name: "大师", cols: 6, rows: 6, time: 210, stars: 4 },
+    { name: "噩梦", cols: 8, rows: 6, time: 300, stars: 5 },
+    { name: "炼狱", cols: 8, rows: 8, time: 360, stars: 6 }
+];
+
+// ============ 游戏状态 ============
+var STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, WIN: 3, LOSE: 4, SHOWING: 5 };
+
+var G = {
+    state: STATE.MENU,
+    difficulty: 0,
+    board: [],
+    cols: 4,
+    rows: 4,
+    cardW: 0,
+    cardH: 0,
+    offsetX: 0,
+    offsetY: 0,
+    flipped: [],
+    matched: [],
+    firstCard: -1,
+    secondCard: -1,
+    waitTimer: 0,
+    moves: 0,
+    matches: 0,
+    totalPairs: 0,
+    timeLeft: 120,
+    totalTime: 120,
+    score: 0,
+    combo: 0,
+    maxCombo: 0,
+    bestScores: [],
+    particles: [],
+    bgParticles: [],
+    showTimer: 0,
+    showDuration: 3,
+    menuAnim: 0,
+    selectedDiff: 0,
+    shakeTimer: 0,
+    shakeX: 0,
+    shakeY: 0
+};
+
+// 加载最高分
+function loadBest() {
+    try {
+        var d = localStorage.getItem("memory_best");
+        G.bestScores = d ? JSON.parse(d) : [0,0,0,0,0,0];
+    } catch(e) { G.bestScores = [0,0,0,0,0,0]; }
+}
+function saveBest() {
+    try { localStorage.setItem("memory_best", JSON.stringify(G.bestScores)); } catch(e) {}
+}
+loadBest();
+
+// ============ 背景粒子 ============
+function initBgParticles() {
+    G.bgParticles = [];
+    for (var i = 0; i < 50; i++) {
+        G.bgParticles.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            r: Math.random() * 2 + 1,
+            a: Math.random() * 0.3 + 0.1
+        });
+    }
+}
+initBgParticles();
+
+function updateBgParticles() {
+    for (var i = 0; i < G.bgParticles.length; i++) {
+        var p = G.bgParticles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+    }
+}
+
+// ============ 粒子特效 ============
+function spawnParticles(x, y, color, count) {
+    for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = Math.random() * 4 + 2;
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay: Math.random() * 0.02 + 0.01,
+            r: Math.random() * 4 + 2,
+            color: color
+        });
+    }
+}
+
+function spawnMatchParticles(x, y, w, h) {
+    var color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    spawnParticles(x + w/2, y + h/2, color, 15);
+}
+
+function updateParticles() {
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= p.decay;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ============ 计算卡牌布局 ============
+function calcLayout() {
+    var d = DIFFICULTIES[G.difficulty];
+    G.cols = d.cols;
+    G.rows = d.rows;
+    G.totalPairs = (G.cols * G.rows) / 2;
+    G.totalTime = d.time;
+    G.timeLeft = d.time;
+
+    var margin = 10;
+    var topBar = 80;
+    var bottomBar = 60;
+    var availW = canvas.width - margin * 2;
+    var availH = canvas.height - topBar - bottomBar - margin * 2;
+    G.cardW = Math.floor(availW / G.cols) - 4;
+    G.cardH = Math.floor(availH / G.rows) - 4;
+    // 保持卡片比例
+    var maxCard = Math.min(G.cardW, G.cardH, 120);
+    G.cardW = maxCard;
+    G.cardH = maxCard;
+    G.offsetX = Math.floor((canvas.width - G.cols * (G.cardW + 4)) / 2);
+    G.offsetY = Math.floor((canvas.height - G.rows * (G.cardH + 4)) / 2) + 10;
+}
+
+// ============ 初始化游戏 ============
+function initGame() {
+    calcLayout();
+    G.board = [];
+    G.flipped = [];
+    G.matched = [];
+    G.firstCard = -1;
+    G.secondCard = -1;
+    G.waitTimer = 0;
+    G.moves = 0;
+    G.matches = 0;
+    G.score = 0;
+    G.combo = 0;
+    G.maxCombo = 0;
+    G.particles = [];
+    G.shakeTimer = 0;
+
+    // 生成配对
+    var total = G.cols * G.rows;
+    var pairs = total / 2;
+    var indices = [];
+    for (var i = 0; i < pairs; i++) {
+        indices.push(i);
+        indices.push(i);
+    }
+    // Fisher-Yates洗牌
+    for (var i = indices.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = indices[i];
+        indices[i] = indices[j];
+        indices[j] = tmp;
+    }
+
+    for (var i = 0; i < total; i++) {
+        G.board.push({
+            symbol: SYMBOLS[indices[i] % SYMBOLS.length],
+            color: COLORS[indices[i] % COLORS.length],
+            type: indices[i],
+            flipAnim: 0,    // 0=背面, 1=正面
+            flipTarget: 0,
+            matchedAnim: 0
+        });
+        G.flipped.push(false);
+        G.matched.push(false);
+    }
+
+    // 展示阶段
+    G.state = STATE.SHOWING;
+    G.showTimer = G.showDuration;
+    // 翻开所有牌
+    for (var i = 0; i < G.board.length; i++) {
+        G.board[i].flipAnim = 1;
+        G.board[i].flipTarget = 1;
+    }
+}
+
+// ============ 翻牌逻辑 ============
+function getCardAt(mx, my) {
+    for (var r = 0; r < G.rows; r++) {
+        for (var c = 0; c < G.cols; c++) {
+            var idx = r * G.cols + c;
+            var x = G.offsetX + c * (G.cardW + 4);
+            var y = G.offsetY + r * (G.cardH + 4);
+            if (mx >= x && mx <= x + G.cardW && my >= y && my <= y + G.cardH) {
+                return idx;
+            }
+        }
+    }
+    return -1;
+}
+
+function flipCard(idx) {
+    if (idx < 0 || idx >= G.board.length) return;
+    if (G.matched[idx] || G.flipped[idx]) return;
+    if (G.firstCard >= 0 && G.secondCard >= 0) return;
+
+    G.flipped[idx] = true;
+    G.board[idx].flipTarget = 1;
+
+    if (G.firstCard < 0) {
+        G.firstCard = idx;
+    } else {
+        G.secondCard = idx;
+        G.moves++;
+        // 检查匹配
+        if (G.board[G.firstCard].type === G.board[G.secondCard].type) {
+            // 匹配成功
+            G.waitTimer = 0.3;
+            G.combo++;
+            if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+            var bonus = 100 + G.combo * 20;
+            G.score += bonus;
+            G.matches++;
+            var x1 = G.offsetX + (G.firstCard % G.cols) * (G.cardW + 4);
+            var y1 = G.offsetY + Math.floor(G.firstCard / G.cols) * (G.cardH + 4);
+            var x2 = G.offsetX + (G.secondCard % G.cols) * (G.cardW + 4);
+            var y2 = G.offsetY + Math.floor(G.secondCard / G.cols) * (G.cardH + 4);
+            spawnMatchParticles(x1, y1, G.cardW, G.cardH);
+            spawnMatchParticles(x2, y2, G.cardW, G.cardH);
+        } else {
+            // 匹配失败
+            G.waitTimer = 0.8;
+            G.combo = 0;
+            G.shakeTimer = 0.3;
+        }
+    }
+}
+
+// ============ 更新 ============
+var lastTime = performance.now();
+
+function update(now) {
+    var dt = Math.min((now - lastTime) / 1000, 0.1);
+    lastTime = now;
+
+    updateBgParticles();
+    updateParticles();
+
+    // 动画更新
+    for (var i = 0; i < G.board.length; i++) {
+        var card = G.board[i];
+        var target = card.flipTarget;
+        if (card.flipAnim < target) {
+            card.flipAnim = Math.min(card.flipAnim + dt * 4, target);
+        } else if (card.flipAnim > target) {
+            card.flipAnim = Math.max(card.flipAnim - dt * 4, target);
+        }
+        if (G.matched[i]) {
+            card.matchedAnim = Math.min(card.matchedAnim + dt * 2, 1);
+        }
+    }
+
+    // 震动
+    if (G.shakeTimer > 0) {
+        G.shakeTimer -= dt;
+        G.shakeX = (Math.random() - 0.5) * 6;
+        G.shakeY = (Math.random() - 0.5) * 6;
+    } else {
+        G.shakeX = 0;
+        G.shakeY = 0;
+    }
+
+    // 展示阶段
+    if (G.state === STATE.SHOWING) {
+        G.showTimer -= dt;
+        if (G.showTimer <= 0) {
+            // 盖上所有牌
+            for (var i = 0; i < G.board.length; i++) {
+                G.board[i].flipTarget = 0;
+                G.flipped[i] = false;
+            }
+            G.state = STATE.PLAYING;
+        }
+        return;
+    }
+
+    if (G.state !== STATE.PLAYING) return;
+
+    // 计时
+    G.timeLeft -= dt;
+    if (G.timeLeft <= 0) {
+        G.timeLeft = 0;
+        G.state = STATE.LOSE;
+        return;
+    }
+
+    // 等待翻回
+    if (G.waitTimer > 0) {
+        G.waitTimer -= dt;
+        if (G.waitTimer <= 0) {
+            if (G.board[G.firstCard] && G.board[G.secondCard]) {
+                var isMatch = G.board[G.firstCard].type === G.board[G.secondCard].type;
+                if (isMatch) {
+                    G.matched[G.firstCard] = true;
+                    G.matched[G.secondCard] = true;
+                } else {
+                    G.board[G.firstCard].flipTarget = 0;
+                    G.board[G.secondCard].flipTarget = 0;
+                    G.flipped[G.firstCard] = false;
+                    G.flipped[G.secondCard] = false;
+                }
+            }
+            G.firstCard = -1;
+            G.secondCard = -1;
+
+            // 检查胜利
+            if (G.matches >= G.totalPairs) {
+                // 时间奖励
+                var timeBonus = Math.floor(G.timeLeft * 10);
+                G.score += timeBonus;
+                // 更新最高分
+                if (G.score > G.bestScores[G.difficulty]) {
+                    G.bestScores[G.difficulty] = G.score;
+                    saveBest();
+                }
+                G.state = STATE.WIN;
+                // 胜利粒子
+                for (var k = 0; k < 5; k++) {
+                    spawnParticles(Math.random() * canvas.width, Math.random() * canvas.height,
+                        COLORS[Math.floor(Math.random() * COLORS.length)], 20);
+                }
+            }
+        }
+    }
+}
+
+// ============ 绘制 ============
+function drawBg() {
+    var grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    grad.addColorStop(0, "#0a0a2e");
+    grad.addColorStop(0.5, "#1a1a4e");
+    grad.addColorStop(1, "#0a0a2e");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 背景粒子
+    for (var i = 0; i < G.bgParticles.length; i++) {
+        var p = G.bgParticles[i];
+        ctx.globalAlpha = p.a;
+        ctx.fillStyle = "#4a4a8a";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawCard(idx) {
+    var col = idx % G.cols;
+    var row = Math.floor(idx / G.cols);
+    var x = G.offsetX + col * (G.cardW + 4) + G.shakeX;
+    var y = G.offsetY + row * (G.cardH + 4) + G.shakeY;
+    var card = G.board[idx];
+    var flip = card.flipAnim;
+
+    // 卡片尺寸动画（翻转效果）
+    var scaleX = Math.abs(Math.cos(flip * Math.PI));
+    var midX = x + G.cardW / 2;
+    var drawX = midX - (G.cardW / 2) * scaleX;
+    var drawW = G.cardW * scaleX;
+
+    if (drawW < 1) return;
+
+    ctx.save();
+
+    // 卡片背景
+    var r = 8;
+    ctx.beginPath();
+    ctx.moveTo(drawX + r, y);
+    ctx.lineTo(drawX + drawW - r, y);
+    ctx.quadraticCurveTo(drawX + drawW, y, drawX + drawW, y + r);
+    ctx.lineTo(drawX + drawW, y + G.cardH - r);
+    ctx.quadraticCurveTo(drawX + drawW, y + G.cardH, drawX + drawW - r, y + G.cardH);
+    ctx.lineTo(drawX + r, y + G.cardH);
+    ctx.quadraticCurveTo(drawX, y + G.cardH, drawX, y + G.cardH - r);
+    ctx.lineTo(drawX, y + r);
+    ctx.quadraticCurveTo(drawX, y, drawX + r, y);
+    ctx.closePath();
+
+    if (flip < 0.5) {
+        // 背面
+        var grad = ctx.createLinearGradient(drawX, y, drawX + drawW, y + G.cardH);
+        grad.addColorStop(0, "#2d3561");
+        grad.addColorStop(1, "#1e2749");
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.strokeStyle = "#4a5580";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // 背面图案
+        if (drawW > 20) {
+            ctx.fillStyle = "#3a4570";
+            ctx.font = Math.floor(G.cardW * 0.3) + "px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("?", midX, y + G.cardH / 2);
+        }
+    } else {
+        // 正面
+        if (G.matched[idx]) {
+            // 已匹配 - 发光
+            var glow = ctx.createRadialGradient(midX, y + G.cardH/2, 0, midX, y + G.cardH/2, G.cardW);
+            glow.addColorStop(0, card.color + "40");
+            glow.addColorStop(1, "transparent");
+            ctx.fillStyle = "#1a2a3a";
+            ctx.fill();
+            ctx.fillStyle = glow;
+            ctx.fillRect(drawX, y, drawW, G.cardH);
+            ctx.strokeStyle = card.color + "80";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        } else {
+            ctx.fillStyle = "#1a2a3a";
+            ctx.fill();
+            ctx.strokeStyle = "#5a6a8a";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // 符号
+        if (drawW > 15) {
+            ctx.fillStyle = card.color;
+            var fontSize = Math.floor(G.cardW * 0.5);
+            ctx.font = fontSize + "px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(card.symbol, midX, y + G.cardH / 2);
+        }
+    }
+
+    ctx.restore();
+}
+
+function drawUI() {
+    var barH = 70;
+    // 顶部栏背景
+    var grad = ctx.createLinearGradient(0, 0, canvas.width, barH);
+    grad.addColorStop(0, "rgba(10,10,40,0.9)");
+    grad.addColorStop(1, "rgba(10,10,40,0.7)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, barH);
+
+    ctx.textBaseline = "middle";
+    var baseY = barH / 2;
+
+    // 难度
+    ctx.fillStyle = "#aaa";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(DIFFICULTIES[G.difficulty].name + " " + G.cols + "x" + G.rows, 15, baseY - 12);
+
+    // 得分
+    ctx.fillStyle = "#feca57";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText("分数: " + G.score, 15, baseY + 12);
+
+    // 计时
+    var timeColor = G.timeLeft > 30 ? "#48dbfb" : G.timeLeft > 10 ? "#feca57" : "#ff6b6b";
+    ctx.fillStyle = timeColor;
+    ctx.font = "bold 22px sans-serif";
+    ctx.textAlign = "center";
+    var min = Math.floor(G.timeLeft / 60);
+    var sec = Math.floor(G.timeLeft % 60);
+    ctx.fillText((min < 10 ? "0" : "") + min + ":" + (sec < 10 ? "0" : "") + sec, canvas.width / 2, baseY);
+
+    // 步数和配对
+    ctx.fillStyle = "#aaa";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText("步数: " + G.moves, canvas.width - 15, baseY - 12);
+    ctx.fillStyle = "#54a0ff";
+    ctx.fillText("配对: " + G.matches + "/" + G.totalPairs, canvas.width - 15, baseY + 12);
+
+    // 连击
+    if (G.combo > 1) {
+        ctx.fillStyle = "#ff9ff3";
+        ctx.font = "bold 18px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("连击 x" + G.combo + "!", canvas.width / 2, barH + 20);
+    }
+
+    // 暂停按钮
+    drawPauseBtn();
+}
+
+function drawPauseBtn() {
+    var bx = canvas.width - 55;
+    var by = 80;
+    var bs = 40;
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillRect(bx, by, bs, bs);
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bs, bs);
+    ctx.fillStyle = "#ccc";
+    ctx.fillRect(bx + 13, by + 10, 5, 20);
+    ctx.fillRect(bx + 23, by + 10, 5, 20);
+}
+
+function drawShowTimer() {
+    // 展示阶段倒计时
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 36px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("记忆时间: " + Math.ceil(G.showTimer) + "秒", canvas.width/2, canvas.height/2 - 30);
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = "#aaa";
+    ctx.fillText("记住卡牌位置！", canvas.width/2, canvas.height/2 + 20);
+}
+
+function drawMenu() {
+    G.menuAnim += 0.016;
+
+    // 标题
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 48px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    var titleY = canvas.height * 0.2 + Math.sin(G.menuAnim * 2) * 5;
+    ctx.fillText("记忆训练", canvas.width / 2, titleY);
+
+    ctx.fillStyle = "#888";
+    ctx.font = "18px sans-serif";
+    ctx.fillText("翻牌配对 | 记忆挑战", canvas.width / 2, titleY + 40);
+
+    // 难度选择
+    var startY = canvas.height * 0.4;
+    var btnW = Math.min(300, canvas.width - 60);
+    var btnH = 50;
+    var gap = 12;
+
+    for (var i = 0; i < DIFFICULTIES.length; i++) {
+        var by = startY + i * (btnH + gap);
+        var bx = canvas.width / 2 - btnW / 2;
+        var selected = i === G.selectedDiff;
+
+        // 按钮背景
+        var grad = ctx.createLinearGradient(bx, by, bx + btnW, by);
+        if (selected) {
+            grad.addColorStop(0, "#2d5aa0");
+            grad.addColorStop(1, "#1a3a6a");
+        } else {
+            grad.addColorStop(0, "#1a1a3a");
+            grad.addColorStop(1, "#151530");
+        }
+        ctx.fillStyle = grad;
+        roundRect(bx, by, btnW, btnH, 10);
+        ctx.fill();
+        ctx.strokeStyle = selected ? "#4a8aff" : "#333";
+        ctx.lineWidth = selected ? 2 : 1;
+        roundRect(bx, by, btnW, btnH, 10);
+        ctx.stroke();
+
+        // 难度名称和星级
+        ctx.textAlign = "left";
+        ctx.fillStyle = selected ? "#fff" : "#aaa";
+        ctx.font = "bold 18px sans-serif";
+        ctx.fillText(DIFFICULTIES[i].name, bx + 15, by + btnH / 2 - 1);
+
+        // 星级
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#feca57";
+        ctx.font = "16px sans-serif";
+        var stars = "";
+        for (var s = 0; s < DIFFICULTIES[i].stars; s++) stars += "★";
+        ctx.fillText(stars, bx + btnW - 15, by + btnH / 2 - 8);
+
+        // 最高分
+        ctx.fillStyle = "#666";
+        ctx.font = "12px sans-serif";
+        var best = G.bestScores[i];
+        ctx.fillText(best > 0 ? "最高: " + best : "", bx + btnW - 15, by + btnH / 2 + 12);
+
+        // 格子信息
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#777";
+        ctx.font = "13px sans-serif";
+        ctx.fillText(DIFFICULTIES[i].cols + "x" + DIFFICULTIES[i].rows + " | " + DIFFICULTIES[i].time + "秒", bx + btnW / 2, by + btnH / 2 + 15);
+    }
+
+    // 开始按钮
+    var startBtnY = startY + DIFFICULTIES.length * (btnH + gap) + 20;
+    var startBtnW = 200;
+    var startBtnH = 55;
+    var startBtnX = canvas.width / 2 - startBtnW / 2;
+
+    var pulse = 1 + Math.sin(G.menuAnim * 4) * 0.03;
+    ctx.save();
+    ctx.translate(canvas.width / 2, startBtnY + startBtnH / 2);
+    ctx.scale(pulse, pulse);
+    ctx.translate(-canvas.width / 2, -(startBtnY + startBtnH / 2));
+
+    var grad2 = ctx.createLinearGradient(startBtnX, startBtnY, startBtnX + startBtnW, startBtnY + startBtnH);
+    grad2.addColorStop(0, "#4a8aff");
+    grad2.addColorStop(1, "#2d5aa0");
+    ctx.fillStyle = grad2;
+    roundRect(startBtnX, startBtnY, startBtnW, startBtnH, 12);
+    ctx.fill();
+    ctx.strokeStyle = "#6aa0ff";
+    ctx.lineWidth = 2;
+    roundRect(startBtnX, startBtnY, startBtnW, startBtnH, 12);
+    ctx.stroke();
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("开始游戏", canvas.width / 2, startBtnY + startBtnH / 2);
+    ctx.restore();
+
+    // 操作提示
+    ctx.fillStyle = "#555";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("↑↓ 选择难度 | 回车/点击开始", canvas.width / 2, canvas.height - 30);
+}
+
+function drawPause() {
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 40px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("暂停", canvas.width / 2, canvas.height / 2 - 60);
+
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = "#aaa";
+    ctx.fillText("点击任意位置继续", canvas.width / 2, canvas.height / 2 + 10);
+    ctx.fillText("按 R 重新开始", canvas.width / 2, canvas.height / 2 + 45);
+}
+
+function drawWin() {
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#48dbfb";
+    ctx.font = "bold 48px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("恭喜通关!", canvas.width / 2, canvas.height / 2 - 80);
+
+    ctx.fillStyle = "#feca57";
+    ctx.font = "bold 28px sans-serif";
+    ctx.fillText("得分: " + G.score, canvas.width / 2, canvas.height / 2 - 25);
+
+    ctx.fillStyle = "#aaa";
+    ctx.font = "18px sans-serif";
+    ctx.fillText("步数: " + G.moves + " | 最大连击: " + G.maxCombo, canvas.width / 2, canvas.height / 2 + 15);
+    ctx.fillText("剩余时间: " + Math.floor(G.timeLeft) + "秒", canvas.width / 2, canvas.height / 2 + 45);
+
+    if (G.score >= G.bestScores[G.difficulty]) {
+        ctx.fillStyle = "#ff6b6b";
+        ctx.font = "bold 22px sans-serif";
+        ctx.fillText("新纪录!", canvas.width / 2, canvas.height / 2 + 85);
+    }
+
+    ctx.fillStyle = "#666";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("点击返回菜单 | 按 R 再来一局", canvas.width / 2, canvas.height / 2 + 130);
+}
+
+function drawLose() {
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#ff6b6b";
+    ctx.font = "bold 48px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("时间到!", canvas.width / 2, canvas.height / 2 - 60);
+
+    ctx.fillStyle = "#aaa";
+    ctx.font = "22px sans-serif";
+    ctx.fillText("得分: " + G.score, canvas.width / 2, canvas.height / 2);
+    ctx.fillText("配对: " + G.matches + "/" + G.totalPairs, canvas.width / 2, canvas.height / 2 + 35);
+
+    ctx.fillStyle = "#666";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("点击返回菜单 | 按 R 重新挑战", canvas.width / 2, canvas.height / 2 + 90);
+}
+
+function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function render() {
+    drawBg();
+
+    if (G.state === STATE.MENU) {
+        drawMenu();
+    } else if (G.state === STATE.SHOWING) {
+        for (var i = 0; i < G.board.length; i++) drawCard(i);
+        drawUI();
+        drawShowTimer();
+    } else if (G.state === STATE.PLAYING) {
+        for (var i = 0; i < G.board.length; i++) drawCard(i);
+        drawUI();
+    } else if (G.state === STATE.PAUSED) {
+        for (var i = 0; i < G.board.length; i++) drawCard(i);
+        drawUI();
+        drawPause();
+    } else if (G.state === STATE.WIN) {
+        for (var i = 0; i < G.board.length; i++) drawCard(i);
+        drawUI();
+        drawWin();
+    } else if (G.state === STATE.LOSE) {
+        for (var i = 0; i < G.board.length; i++) drawCard(i);
+        drawUI();
+        drawLose();
+    }
+
+    drawParticles();
+}
+
+// ============ 主循环 ============
+function gameLoop(now) {
+    update(now);
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ============ 输入处理 ============
+function handleClick(mx, my) {
+    if (G.state === STATE.MENU) {
+        // 检查难度按钮
+        var btnW = Math.min(300, canvas.width - 60);
+        var btnH = 50;
+        var gap = 12;
+        var startY = canvas.height * 0.4;
+
+        for (var i = 0; i < DIFFICULTIES.length; i++) {
+            var by = startY + i * (btnH + gap);
+            var bx = canvas.width / 2 - btnW / 2;
+            if (mx >= bx && mx <= bx + btnW && my >= by && my <= by + btnH) {
+                G.selectedDiff = i;
+                return;
+            }
+        }
+
+        // 检查开始按钮
+        var startBtnY = startY + DIFFICULTIES.length * (btnH + gap) + 20;
+        var startBtnW = 200;
+        var startBtnH = 55;
+        var startBtnX = canvas.width / 2 - startBtnW / 2;
+        if (mx >= startBtnX && mx <= startBtnX + startBtnW && my >= startBtnY && my <= startBtnY + startBtnH) {
+            G.difficulty = G.selectedDiff;
+            initGame();
+            return;
+        }
+    } else if (G.state === STATE.SHOWING) {
+        // 展示阶段不响应
+        return;
+    } else if (G.state === STATE.PLAYING) {
+        // 暂停按钮
+        var bx = canvas.width - 55;
+        var by = 80;
+        if (mx >= bx && mx <= bx + 40 && my >= by && my <= by + 40) {
+            G.state = STATE.PAUSED;
+            return;
+        }
+        // 翻牌
+        var idx = getCardAt(mx, my);
+        if (idx >= 0) flipCard(idx);
+    } else if (G.state === STATE.PAUSED) {
+        G.state = STATE.PLAYING;
+    } else if (G.state === STATE.WIN || G.state === STATE.LOSE) {
+        G.state = STATE.MENU;
+    }
+}
+
+function handleKey(key) {
+    if (G.state === STATE.MENU) {
+        if (key === "ArrowUp") {
+            G.selectedDiff = (G.selectedDiff - 1 + DIFFICULTIES.length) % DIFFICULTIES.length;
+        } else if (key === "ArrowDown") {
+            G.selectedDiff = (G.selectedDiff + 1) % DIFFICULTIES.length;
+        } else if (key === "Enter" || key === " ") {
+            G.difficulty = G.selectedDiff;
+            initGame();
+        }
+    } else if (G.state === STATE.PLAYING) {
+        if (key === "p" || key === "P" || key === "Escape") {
+            G.state = STATE.PAUSED;
+        }
+    } else if (G.state === STATE.PAUSED) {
+        if (key === "p" || key === "P" || key === "Escape") {
+            G.state = STATE.PLAYING;
+        } else if (key === "r" || key === "R") {
+            initGame();
+        }
+    } else if (G.state === STATE.WIN || G.state === STATE.LOSE) {
+        if (key === "r" || key === "R") {
+            initGame();
+        } else if (key === "Escape") {
+            G.state = STATE.MENU;
+        }
+    }
+}
+
+canvas.addEventListener("click", function(e) {
+    handleClick(e.clientX, e.clientY);
+});
+
+canvas.addEventListener("touchstart", function(e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    handleClick(t.clientX, t.clientY);
+}, { passive: false });
+
+document.addEventListener("keydown", function(e) {
+    handleKey(e.key);
+});
+
+// ============ 启动 ============
+requestAnimationFrame(gameLoop);
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

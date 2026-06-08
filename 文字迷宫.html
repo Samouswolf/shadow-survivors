@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>文字迷宫</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e}
+canvas{display:block;position:absolute;top:0;left:0}
+#ui{position:absolute;top:0;left:0;width:100%;pointer-events:none;z-index:10}
+#pauseBtn{position:absolute;top:10px;left:10px;width:44px;height:44px;border-radius:50%;
+background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.5);color:#fff;
+font-size:22px;cursor:pointer;pointer-events:auto;display:none;z-index:20}
+#speedBtn{position:absolute;top:10px;right:10px;width:44px;height:44px;border-radius:50%;
+background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.5);color:#fff;
+font-size:14px;cursor:pointer;pointer-events:auto;display:none;z-index:20;line-height:40px;text-align:center}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="pauseBtn" onclick="togglePause()">||</button>
+<div id="ui"></div>
+<script>
+// ========== 常量 ==========
+const C = document.getElementById('c');
+const ctx = C.getContext('2d');
+const UI = document.getElementById('ui');
+const PB = document.getElementById('pauseBtn');
+
+// ========== 游戏数据 ==========
+// 成语库：每个成语附带释义
+const IDIOM_DB = [
+    {word:"一马当先",hint:"形容领先或带头"},
+    {word:"三心二意",hint:"形容犹豫不决"},
+    {word:"四面楚歌",hint:"形容四面受敌、孤立无援"},
+    {word:"五光十色",hint:"形容色彩鲜艳、花样繁多"},
+    {word:"六神无主",hint:"形容心慌意乱、没有主意"},
+    {word:"七上八下",hint:"形容心神不定"},
+    {word:"八仙过海",hint:"比喻各自有一套办法"},
+    {word:"九牛一毛",hint:"比喻极大数量中微不足道"},
+    {word:"十全十美",hint:"形容各方面都完美"},
+    {word:"百发百中",hint:"形容射术或预言非常准确"},
+    {word:"千军万马",hint:"形容兵马很多、声势浩大"},
+    {word:"万水千山",hint:"形容路途遥远艰难"},
+    {word:"画蛇添足",hint:"比喻做了多余的事"},
+    {word:"守株待兔",hint:"比喻不劳而获"},
+    {word:"亡羊补牢",hint:"比喻出了问题及时补救"},
+    {word:"掩耳盗铃",hint:"比喻自欺欺人"},
+    {word:"刻舟求剑",hint:"比喻不知变通"},
+    {word:"叶公好龙",hint:"比喻表面上爱好实际害怕"},
+    {word:"狐假虎威",hint:"比喻借别人的势力欺压人"},
+    {word:"鹤立鸡群",hint:"比喻才能或仪表出众"},
+    {word:"龙飞凤舞",hint:"形容书法笔势生动活泼"},
+    {word:"虎头蛇尾",hint:"比喻做事有始无终"},
+    {word:"鸡犬不宁",hint:"形容骚扰得厉害"},
+    {word:"鸟语花香",hint:"形容春天美好的景色"},
+    {word:"风花雪月",hint:"指四时景色或浮华辞藻"},
+    {word:"山清水秀",hint:"形容风景优美"},
+    {word:"水落石出",hint:"比喻真相大白"},
+    {word:"火树银花",hint:"形容灯火辉煌的夜景"},
+    {word:"花好月圆",hint:"比喻美好圆满"},
+    {word:"月明星稀",hint:"月光明亮时星星显得稀少"},
+    {word:"日积月累",hint:"形容长时间积累"},
+    {word:"春风得意",hint:"形容人处境顺利、心情愉快"},
+    {word:"秋高气爽",hint:"形容秋天晴朗宜人"},
+    {word:"冬暖夏凉",hint:"形容气候宜人"},
+    {word:"开门见山",hint:"比喻说话直截了当"},
+    {word:"胸有成竹",hint:"比喻做事前已有把握"},
+    {word:"对牛弹琴",hint:"比喻对不懂道理的人讲道理"},
+    {word:"井底之蛙",hint:"比喻见识狭隘的人"},
+    {word:"破釜沉舟",hint:"比喻下定决心不留退路"},
+    {word:"卧薪尝胆",hint:"形容刻苦自励、发愤图强"},
+    {word:"纸上谈兵",hint:"比喻空谈理论不切实际"},
+    {word:"负荆请罪",hint:"表示向人认错赔罪"},
+    {word:"完璧归赵",hint:"比喻原物完好归还"},
+    {word:"望梅止渴",hint:"比喻用空想来安慰自己"},
+    {word:"闻鸡起舞",hint:"比喻有志之士奋发图强"},
+    {word:"悬梁刺股",hint:"形容刻苦学习"},
+    {word:"凿壁偷光",hint:"形容家境贫寒仍刻苦读书"},
+    {word:"精卫填海",hint:"比喻意志坚定不怕困难"},
+    {word:"愚公移山",hint:"比喻坚持不懈终能成功"},
+    {word:"大器晚成",hint:"指能担当大事的人要经过长期锻炼"},
+    {word:"天衣无缝",hint:"比喻事物完美自然"},
+    {word:"锦上添花",hint:"比喻好上加好"},
+    {word:"雪中送炭",hint:"比喻在别人急需时给予帮助"},
+    {word:"落花流水",hint:"形容残败零落的样子"},
+    {word:"风调雨顺",hint:"形容风雨适合农时"},
+    {word:"国泰民安",hint:"国家太平人民安乐"},
+    {word:"安居乐业",hint:"形容生活安定工作愉快"},
+    {word:"心想事成",hint:"心里想的都能实现"},
+    {word:"万事如意",hint:"一切事情都称心如意"}
+];
+
+// 关卡配置：每个关卡指定网格大小、需要完成的成语数量、步数限制
+const LEVELS = [
+    {rows:4,cols:4,idiomCount:1,maxSteps:12,name:"初入迷阵",gridChars:"常用"},
+    {rows:4,cols:4,idiomCount:1,maxSteps:10,name:"小试牛刀",gridChars:"常用"},
+    {rows:4,cols:5,idiomCount:1,maxSteps:12,name:"渐入佳境",gridChars:"常用"},
+    {rows:5,cols:5,idiomCount:1,maxSteps:14,name:"初窥门径",gridChars:"常用"},
+    {rows:5,cols:5,idiomCount:2,maxSteps:18,name:"步步为营",gridChars:"常用"},
+    {rows:5,cols:5,idiomCount:2,maxSteps:16,name:"融会贯通",gridChars:"常用"},
+    {rows:5,cols:6,idiomCount:2,maxSteps:20,name:"登堂入室",gridChars:"常用"},
+    {rows:6,cols:6,idiomCount:2,maxSteps:22,name:"炉火纯青",gridChars:"常用"},
+    {rows:6,cols:6,idiomCount:2,maxSteps:20,name:"游刃有余",gridChars:"常用"},
+    {rows:6,cols:6,idiomCount:3,maxSteps:26,name:"出类拔萃",gridChars:"常用"},
+    {rows:6,cols:7,idiomCount:3,maxSteps:28,name:"登峰造极",gridChars:"常用"},
+    {rows:7,cols:7,idiomCount:3,maxSteps:30,name:"博大精深",gridChars:"常用"},
+    {rows:7,cols:7,idiomCount:3,maxSteps:28,name:"妙笔生花",gridChars:"常用"},
+    {rows:7,cols:7,idiomCount:3,maxSteps:26,name:"才华横溢",gridChars:"常用"},
+    {rows:7,cols:7,idiomCount:4,maxSteps:34,name:"学富五车",gridChars:"常用"},
+    {rows:7,cols:8,idiomCount:4,maxSteps:36,name:"满腹经纶",gridChars:"常用"},
+    {rows:8,cols:8,idiomCount:4,maxSteps:38,name:"出口成章",gridChars:"常用"},
+    {rows:8,cols:8,idiomCount:4,maxSteps:36,name:"文思泉涌",gridChars:"常用"},
+    {rows:8,cols:8,idiomCount:4,maxSteps:34,name:"笔下生花",gridChars:"常用"},
+    {rows:8,cols:8,idiomCount:5,maxSteps:42,name:"字字珠玑",gridChars:"常用"},
+    {rows:8,cols:9,idiomCount:5,maxSteps:44,name:"行云流水",gridChars:"常用"},
+    {rows:9,cols:9,idiomCount:5,maxSteps:46,name:"气吞山河",gridChars:"常用"},
+    {rows:9,cols:9,idiomCount:5,maxSteps:44,name:"纵横捭阖",gridChars:"常用"},
+    {rows:9,cols:9,idiomCount:5,maxSteps:42,name:"运筹帷幄",gridChars:"常用"},
+    {rows:9,cols:9,idiomCount:6,maxSteps:52,name:"高屋建瓴",gridChars:"常用"},
+    {rows:9,cols:10,idiomCount:6,maxSteps:54,name:"深谋远虑",gridChars:"常用"},
+    {rows:10,cols:10,idiomCount:6,maxSteps:56,name:"雄才大略",gridChars:"常用"},
+    {rows:10,cols:10,idiomCount:6,maxSteps:54,name:"经天纬地",gridChars:"常用"},
+    {rows:10,cols:10,idiomCount:6,maxSteps:52,name:"通今博古",gridChars:"常用"},
+    {rows:10,cols:10,idiomCount:7,maxSteps:60,name:"超凡入圣",gridChars:"常用"},
+    {rows:10,cols:10,idiomCount:7,maxSteps:58,name:"登峰造极",gridChars:"常用"},
+    {rows:10,cols:10,idiomCount:7,maxSteps:56,name:"独步天下",gridChars:"常用"}
+];
+
+// 常用汉字池（用于填充网格空白位置）
+const COMMON_CHARS = "的了一是不在有人大这中上为子和我他来会说道也要你就着对能说些让她把还用样们从种被所如已它与过好当下时间里事可开起发前面点走向后长得见方关于理心手知日月年水火山石花草树木天地人情道理学问思言行身语意力动定成实新旧远近高低大小多少长短轻重快慢冷热深浅明暗";
+
+// ========== 游戏状态 ==========
+var G = {
+    state: 'menu',     // menu, playing, paused, levelComplete, gameOver, win
+    level: 0,
+    score: 0,
+    totalScore: 0,
+    highScore: parseInt(localStorage.getItem('textMazeHighScore') || '0'),
+    grid: [],          // 二维数组存储汉字
+    rows: 0,
+    cols: 0,
+    cellSize: 0,
+    offsetX: 0,
+    offsetY: 0,
+    path: [],          // [{r,c}] 玩家走过的路径
+    currentIdioms: [],  // 当前关卡需要完成的成语
+    completedIdioms: [],// 已完成的成语索引
+    steps: 0,
+    maxSteps: 0,
+    scoreForLevel: 0,
+    hintPaths: [],     // 每个成语的正确路径
+    foundPaths: [],    // 已找到的路径
+    particles: [],
+    floatingTexts: [],
+    animTime: 0,
+    combo: 0,
+    lastClickTime: 0,
+    shakeTime: 0,
+    shakeDir: 0,
+    // 动画相关
+    cellRevealAnim: 0,
+    // 触屏
+    touchStartPos: null,
+    isTouch: false,
+    // 绘制缓存
+    needsRedraw: true,
+    // 菜单动画
+    menuParticles: [],
+    menuTime: 0
+};
+
+// ========== 工具函数 ==========
+function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        let j = rand(0, i);
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+function dist(x1, y1, x2, y2) { return Math.sqrt((x1-x2)**2 + (y1-y2)**2); }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeOut(t) { return 1 - (1 - t) ** 3; }
+function easeInOut(t) { return t < 0.5 ? 4*t*t*t : 1 - (-2*t+2)**3/2; }
+
+// ========== 响应式 ==========
+function resize() {
+    C.width = window.innerWidth;
+    C.height = window.innerHeight;
+    G.needsRedraw = true;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ========== 粒子系统 ==========
+function spawnParticles(x, y, count, color, speed) {
+    for (let i = 0; i < count; i++) {
+        let angle = Math.random() * Math.PI * 2;
+        let spd = (Math.random() * 0.7 + 0.3) * (speed || 2);
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            life: 1,
+            decay: 0.015 + Math.random() * 0.02,
+            size: 2 + Math.random() * 3,
+            color: color || '#fff'
+        });
+    }
+}
+
+function spawnFloatingText(x, y, text, color, size) {
+    G.floatingTexts.push({
+        x: x, y: y, text: text,
+        color: color || '#FFD700',
+        size: size || 20,
+        life: 1, decay: 0.02,
+        vy: -1.5
+    });
+}
+
+function updateParticles() {
+    for (let i = G.particles.length - 1; i >= 0; i--) {
+        let p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.02;
+        p.life -= p.decay;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+    for (let i = G.floatingTexts.length - 1; i >= 0; i--) {
+        let f = G.floatingTexts[i];
+        f.y += f.vy;
+        f.life -= f.decay;
+        if (f.life <= 0) G.floatingTexts.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    G.particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    G.floatingTexts.forEach(f => {
+        ctx.globalAlpha = f.life;
+        ctx.fillStyle = f.color;
+        ctx.font = `bold ${f.size}px "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(f.text, f.x, f.y);
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ========== 菜单粒子 ==========
+function initMenuParticles() {
+    G.menuParticles = [];
+    for (let i = 0; i < 50; i++) {
+        G.menuParticles.push({
+            x: Math.random() * C.width,
+            y: Math.random() * C.height,
+            size: 1 + Math.random() * 2,
+            speed: 0.2 + Math.random() * 0.5,
+            opacity: 0.2 + Math.random() * 0.5,
+            char: COMMON_CHARS[rand(0, COMMON_CHARS.length - 1)]
+        });
+    }
+}
+
+function updateMenuParticles() {
+    G.menuTime += 0.016;
+    G.menuParticles.forEach(p => {
+        p.y -= p.speed;
+        if (p.y < -20) {
+            p.y = C.height + 20;
+            p.x = Math.random() * C.width;
+            p.char = COMMON_CHARS[rand(0, COMMON_CHARS.length - 1)];
+        }
+    });
+}
+
+function drawMenuParticles() {
+    G.menuParticles.forEach(p => {
+        ctx.globalAlpha = p.opacity * (0.5 + 0.5 * Math.sin(G.menuTime * 2 + p.x));
+        ctx.fillStyle = '#8be9fd';
+        ctx.font = `${p.size * 8}px "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(p.char, p.x, p.y);
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ========== 关卡生成 ==========
+function generateLevel(lvl) {
+    let cfg = LEVELS[Math.min(lvl, LEVELS.length - 1)];
+    G.rows = cfg.rows;
+    G.cols = cfg.cols;
+    G.maxSteps = cfg.maxSteps;
+    G.steps = 0;
+    G.path = [];
+    G.completedIdioms = [];
+    G.foundPaths = [];
+    G.combo = 0;
+    G.scoreForLevel = 0;
+
+    // 选择成语
+    let available = shuffle([...IDIOM_DB]);
+    G.currentIdioms = [];
+    let usedChars = new Set();
+
+    for (let i = 0; i < cfg.idiomCount && available.length > 0; i++) {
+        let idiom = available[i];
+        G.currentIdioms.push(idiom);
+        for (let ch of idiom.word) usedChars.add(ch);
+    }
+
+    // 计算网格大小和偏移
+    let maxCellW = (C.width - 40) / G.cols;
+    let maxCellH = (C.height - 180) / G.rows;
+    G.cellSize = Math.min(maxCellW, maxCellH, 70);
+    G.cellSize = Math.max(G.cellSize, 30);
+    G.offsetX = (C.width - G.cols * G.cellSize) / 2;
+    G.offsetY = (C.height - G.rows * G.cellSize) / 2 + 30;
+
+    // 生成网格
+    G.grid = [];
+    for (let r = 0; r < G.rows; r++) {
+        G.grid[r] = [];
+        for (let c = 0; c < G.cols; c++) {
+            G.grid[r][c] = { char: '', revealed: false, isPath: false, animDelay: 0 };
+        }
+    }
+
+    // 放置成语到网格中（确保每个成语有可行路径）
+    G.hintPaths = [];
+    let placed = [];
+
+    for (let idx = 0; idx < G.currentIdioms.length; idx++) {
+        let idiom = G.currentIdioms[idx];
+        let word = idiom.word;
+        let path = findPathForWord(word, placed);
+        if (path) {
+            placed.push({ path: path, word: word });
+            G.hintPaths.push(path);
+            for (let i = 0; i < path.length; i++) {
+                G.grid[path[i].r][path[i].c].char = word[i];
+                G.grid[path[i].r][path[i].c].isPath = true;
+                G.grid[path[i].r][path[i].c].animDelay = idx * 0.15 + i * 0.05;
+            }
+        } else {
+            // 放不下就减少一个成语
+            G.currentIdioms.splice(idx, 1);
+            G.hintPaths.splice(idx, 1);
+            idx--;
+        }
+    }
+
+    // 用随机汉字填充空位
+    for (let r = 0; r < G.rows; r++) {
+        for (let c = 0; c < G.cols; c++) {
+            if (!G.grid[r][c].char) {
+                // 确保不放与成语首字相同的字（避免干扰）
+                let ch;
+                do {
+                    ch = COMMON_CHARS[rand(0, COMMON_CHARS.length - 1)];
+                } while (G.currentIdioms.some(id => id.word[0] === ch));
+                G.grid[r][c].char = ch;
+                G.grid[r][c].animDelay = 0.5 + Math.random() * 0.5;
+            }
+        }
+    }
+
+    G.cellRevealAnim = 0;
+    G.needsRedraw = true;
+}
+
+function findPathForWord(word, placed) {
+    // 尝试多次随机放置
+    let attempts = 200;
+    let wordLen = word.length;
+
+    for (let att = 0; att < attempts; att++) {
+        // 随机起点和方向
+        let r = rand(0, G.rows - 1);
+        let c = rand(0, G.cols - 1);
+
+        // 随机选择方向序列：右、下、左、上
+        let dirs = shuffle([
+            {dr:0,dc:1}, {dr:1,dc:0}, {dr:0,dc:-1}, {dr:-1,dc:0}
+        ]);
+
+        for (let dir of dirs) {
+            let path = [{r, c}];
+            let valid = true;
+            let cr = r, cc = c;
+
+            for (let i = 1; i < wordLen; i++) {
+                cr += dir.dr;
+                cc += dir.dc;
+                if (cr < 0 || cr >= G.rows || cc < 0 || cc >= G.cols) {
+                    valid = false;
+                    break;
+                }
+                // 检查是否与已有路径冲突
+                let conflict = false;
+                for (let p of placed) {
+                    if (p.path.some(pp => pp.r === cr && pp.c === cc)) {
+                        conflict = true;
+                        break;
+                    }
+                }
+                if (conflict) {
+                    valid = false;
+                    break;
+                }
+                path.push({r: cr, c: cc});
+            }
+
+            if (valid && path.length === wordLen) {
+                return path;
+            }
+        }
+
+        // 尝试折线路径
+        let path = [{r, c}];
+        let valid = true;
+        let cr = r, cc = c;
+        let directions = shuffle([
+            {dr:0,dc:1}, {dr:1,dc:0}, {dr:0,dc:-1}, {dr:-1,dc:0}
+        ]);
+
+        for (let i = 1; i < wordLen; i++) {
+            // 每隔几步可能换方向
+            if (i > 1 && i % 2 === 0 && Math.random() < 0.5) {
+                directions = shuffle(directions);
+            }
+            let moved = false;
+            for (let d of directions) {
+                let nr = cr + d.dr;
+                let nc = cc + d.dc;
+                if (nr < 0 || nr >= G.rows || nc < 0 || nc >= G.cols) continue;
+                if (path.some(p => p.r === nr && p.c === nc)) continue;
+                let conflict = false;
+                for (let p of placed) {
+                    if (p.path.some(pp => pp.r === nr && pp.c === nc)) {
+                        conflict = true;
+                        break;
+                    }
+                }
+                if (conflict) continue;
+                cr = nr; cc = nc;
+                path.push({r: cr, c: cc});
+                moved = true;
+                break;
+            }
+            if (!moved) { valid = false; break; }
+        }
+
+        if (valid && path.length === wordLen) {
+            return path;
+        }
+    }
+    return null;
+}
+
+// ========== 游戏逻辑 ==========
+function getCellFromPos(px, py) {
+    let c = Math.floor((px - G.offsetX) / G.cellSize);
+    let r = Math.floor((py - G.offsetY) / G.cellSize);
+    if (r >= 0 && r < G.rows && c >= 0 && c < G.cols) {
+        return { r, c };
+    }
+    return null;
+}
+
+function isAdjacent(r1, c1, r2, c2) {
+    return (Math.abs(r1 - r2) + Math.abs(c1 - c2)) === 1;
+}
+
+function isOnPath(r, c) {
+    return G.path.some(p => p.r === r && p.c === c);
+}
+
+function handleCellClick(r, c) {
+    if (G.state !== 'playing') return;
+
+    // 检查是否点击了路径上的最后一个格子（回退）
+    if (G.path.length >= 2) {
+        let last = G.path[G.path.length - 1];
+        let secondLast = G.path[G.path.length - 2];
+        if (r === secondLast.r && c === secondLast.c) {
+            // 回退
+            G.path.pop();
+            G.steps++;
+            G.needsRedraw = true;
+            checkIdioms();
+            return;
+        }
+    }
+
+    // 检查是否可以扩展路径
+    if (G.path.length === 0) {
+        // 第一步：任意格子
+        G.path.push({ r, c });
+        G.steps++;
+        spawnParticles(
+            G.offsetX + c * G.cellSize + G.cellSize / 2,
+            G.offsetY + r * G.cellSize + G.cellSize / 2,
+            8, '#50fa7b', 2
+        );
+    } else {
+        let last = G.path[G.path.length - 1];
+        if (isAdjacent(last.r, last.c, r, c) && !isOnPath(r, c)) {
+            G.path.push({ r, c });
+            G.steps++;
+            spawnParticles(
+                G.offsetX + c * G.cellSize + G.cellSize / 2,
+                G.offsetY + r * G.cellSize + G.cellSize / 2,
+                5, '#8be9fd', 1.5
+            );
+        } else if (isOnPath(r, c) && G.path.length > 1) {
+            // 点击路径中间的格子，截断到该位置
+            let idx = G.path.findIndex(p => p.r === r && p.c === c);
+            if (idx >= 0) {
+                G.path = G.path.slice(0, idx + 1);
+                G.steps++;
+            }
+        }
+    }
+
+    G.needsRedraw = true;
+    checkIdioms();
+
+    // 检查步数限制
+    if (G.steps >= G.maxSteps && G.completedIdioms.length < G.currentIdioms.length) {
+        G.state = 'gameOver';
+        G.shakeTime = 30;
+        PB.style.display = 'none';
+    }
+}
+
+function getPathString() {
+    return G.path.map(p => G.grid[p.r][p.c].char).join('');
+}
+
+function checkIdioms() {
+    let pathStr = getPathString();
+
+    for (let i = 0; i < G.currentIdioms.length; i++) {
+        if (G.completedIdioms.includes(i)) continue;
+        let word = G.currentIdioms[i].word;
+
+        // 检查路径末尾是否匹配成语（从路径任意位置开始）
+        if (pathStr.length >= word.length) {
+            let tail = pathStr.slice(-word.length);
+            if (tail === word) {
+                // 找到成语！
+                completeIdiom(i, word);
+            }
+            // 也检查路径中是否有连续匹配
+            for (let start = 0; start <= pathStr.length - word.length; start++) {
+                if (pathStr.substr(start, word.length) === word) {
+                    completeIdiom(i, word);
+                    break;
+                }
+            }
+        }
+    }
+
+    // 检查是否全部完成
+    if (G.completedIdioms.length >= G.currentIdioms.length) {
+        G.state = 'levelComplete';
+        let bonus = Math.max(0, (G.maxSteps - G.steps) * 10);
+        let levelScore = G.currentIdioms.length * 100 + G.combo * 50 + bonus;
+        G.scoreForLevel = levelScore;
+        G.totalScore += levelScore;
+        G.combo++;
+
+        // 烟花效果
+        for (let i = 0; i < 5; i++) {
+            setTimeout(() => {
+                spawnParticles(
+                    C.width * (0.2 + Math.random() * 0.6),
+                    C.height * (0.2 + Math.random() * 0.4),
+                    30, ['#ff79c6','#50fa7b','#f1fa8c','#8be9fd','#bd93f9'][i], 4
+                );
+            }, i * 200);
+        }
+
+        // 保存最高分
+        if (G.totalScore > G.highScore) {
+            G.highScore = G.totalScore;
+            localStorage.setItem('textMazeHighScore', G.highScore.toString());
+        }
+
+        PB.style.display = 'none';
+    }
+}
+
+function completeIdiom(idx, word) {
+    G.completedIdioms.push(idx);
+
+    let score = 100 + G.combo * 25;
+    G.scoreForLevel += score;
+
+    // 找到这个成语在网格中的路径
+    let path = G.hintPaths[idx];
+    if (path) {
+        G.foundPaths.push({ path: path, time: G.animTime });
+        // 粒子效果
+        for (let i = 0; i < path.length; i++) {
+            let p = path[i];
+            spawnParticles(
+                G.offsetX + p.c * G.cellSize + G.cellSize / 2,
+                G.offsetY + p.r * G.cellSize + G.cellSize / 2,
+                10, '#FFD700', 3
+            );
+        }
+    }
+
+    // 浮动文字
+    spawnFloatingText(
+        C.width / 2, C.height / 2 - 50,
+        `${word} +${score}`, '#FFD700', 28
+    );
+
+    G.shakeTime = 8;
+    G.needsRedraw = true;
+}
+
+function startLevel(lvl) {
+    G.level = lvl;
+    G.state = 'playing';
+    G.scoreForLevel = 0;
+    generateLevel(lvl);
+    PB.style.display = 'block';
+}
+
+function nextLevel() {
+    if (G.level + 1 >= LEVELS.length) {
+        G.state = 'win';
+        PB.style.display = 'none';
+    } else {
+        startLevel(G.level + 1);
+    }
+}
+
+function restartGame() {
+    G.level = 0;
+    G.totalScore = 0;
+    G.combo = 0;
+    G.state = 'menu';
+    PB.style.display = 'none';
+}
+
+function togglePause() {
+    if (G.state === 'playing') {
+        G.state = 'paused';
+    } else if (G.state === 'paused') {
+        G.state = 'playing';
+    }
+}
+
+// ========== 绘制函数 ==========
+function drawBackground() {
+    // 渐变背景
+    let grad = ctx.createLinearGradient(0, 0, 0, C.height);
+    grad.addColorStop(0, '#0f0c29');
+    grad.addColorStop(0.5, '#302b63');
+    grad.addColorStop(1, '#24243e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, C.width, C.height);
+}
+
+function drawMenu() {
+    drawBackground();
+    updateMenuParticles();
+    drawMenuParticles();
+
+    let cx = C.width / 2;
+    let cy = C.height / 2;
+    let t = G.menuTime;
+
+    // 标题
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 标题光晕
+    ctx.shadowColor = '#bd93f9';
+    ctx.shadowBlur = 20 + 10 * Math.sin(t * 2);
+    ctx.fillStyle = '#f8f8f2';
+    ctx.font = `bold ${Math.min(C.width * 0.1, 56)}px "Microsoft YaHei", sans-serif`;
+    ctx.fillText('文字迷宫', cx, cy - 120);
+    ctx.shadowBlur = 0;
+
+    // 副标题
+    ctx.fillStyle = '#8be9fd';
+    ctx.font = `${Math.min(C.width * 0.04, 20)}px "Microsoft YaHei", sans-serif`;
+    ctx.fillText('汉字阵中走出成语路径', cx, cy - 65);
+
+    // 装饰线
+    ctx.strokeStyle = '#6272a4';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 120, cy - 40);
+    ctx.lineTo(cx + 120, cy - 40);
+    ctx.stroke();
+
+    // 开始按钮
+    let btnW = Math.min(200, C.width * 0.5);
+    let btnH = 50;
+    let btnX = cx - btnW / 2;
+    let btnY = cy - 10;
+    let pulse = 1 + 0.03 * Math.sin(t * 3);
+
+    ctx.save();
+    ctx.translate(cx, btnY + btnH / 2);
+    ctx.scale(pulse, pulse);
+    ctx.translate(-cx, -(btnY + btnH / 2));
+
+    let btnGrad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY + btnH);
+    btnGrad.addColorStop(0, '#bd93f9');
+    btnGrad.addColorStop(1, '#ff79c6');
+    ctx.fillStyle = btnGrad;
+    ctx.beginPath();
+    roundRect(ctx, btnX, btnY, btnW, btnH, 25);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(22, C.width * 0.05)}px "Microsoft YaHei", sans-serif`;
+    ctx.fillText('开始游戏', cx, btnY + btnH / 2);
+    ctx.restore();
+
+    // 最高分
+    if (G.highScore > 0) {
+        ctx.fillStyle = '#f1fa8c';
+        ctx.font = `${Math.min(16, C.width * 0.035)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText(`最高分: ${G.highScore}`, cx, btnY + btnH + 40);
+    }
+
+    // 操作说明
+    ctx.fillStyle = '#6272a4';
+    ctx.font = `${Math.min(14, C.width * 0.03)}px "Microsoft YaHei", sans-serif`;
+    ctx.fillText('点击格子连线组成成语 | 路径可回退 | 步数有限', cx, C.height - 60);
+    ctx.fillText('键盘方向键移动 | 空格回退 | R重新开始', cx, C.height - 35);
+
+    ctx.restore();
+
+    // 存储按钮区域供点击检测
+    G._menuBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+}
+
+function drawGame() {
+    drawBackground();
+    let t = G.animTime;
+
+    // 顶部信息栏
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, 0, C.width, 65);
+
+    ctx.fillStyle = '#f8f8f2';
+    ctx.font = `bold ${Math.min(16, C.width * 0.035)}px "Microsoft YaHei", sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`第 ${G.level + 1} 关: ${LEVELS[Math.min(G.level, LEVELS.length - 1)].name}`, 60, 22);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#8be9fd';
+    ctx.fillText(`步数: ${G.steps}/${G.maxSteps}`, C.width / 2, 22);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#f1fa8c';
+    ctx.fillText(`分数: ${G.totalScore + G.scoreForLevel}`, C.width - 15, 22);
+
+    // 当前成语提示
+    ctx.textAlign = 'center';
+    ctx.font = `${Math.min(14, C.width * 0.03)}px "Microsoft YaHei", sans-serif`;
+    let hintY = 45;
+    for (let i = 0; i < G.currentIdioms.length; i++) {
+        let idiom = G.currentIdioms[i];
+        let completed = G.completedIdioms.includes(i);
+        ctx.fillStyle = completed ? '#50fa7b' : '#bd93f9';
+        let status = completed ? ' [已完成]' : '';
+        let display = `${idiom.word[0]}${idiom.word[1]}__${idiom.word[3] || ''}`;
+        if (completed) display = idiom.word;
+        ctx.fillText(`${display}${status}`, C.width / 2, hintY);
+        hintY += 18;
+    }
+
+    // 当前路径字符串
+    let pathStr = getPathString();
+    if (pathStr.length > 0) {
+        ctx.fillStyle = '#ff79c6';
+        ctx.font = `bold ${Math.min(18, C.width * 0.04)}px "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`当前路径: ${pathStr}`, C.width / 2, G.offsetY - 15);
+    }
+
+    // 绘制网格
+    let shakeX = 0, shakeY = 0;
+    if (G.shakeTime > 0) {
+        shakeX = (Math.random() - 0.5) * G.shakeDir * 4;
+        shakeY = (Math.random() - 0.5) * 4;
+        G.shakeTime--;
+    }
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    // 网格背景
+    ctx.fillStyle = 'rgba(40, 42, 54, 0.8)';
+    ctx.beginPath();
+    roundRect(ctx, G.offsetX - 5, G.offsetY - 5, G.cols * G.cellSize + 10, G.rows * G.cellSize + 10, 8);
+    ctx.fill();
+
+    // 已找到的路径高亮
+    for (let fp of G.foundPaths) {
+        let alpha = 0.3 + 0.1 * Math.sin(t * 3);
+        ctx.fillStyle = `rgba(80, 250, 123, ${alpha})`;
+        for (let p of fp.path) {
+            ctx.beginPath();
+            roundRect(ctx, G.offsetX + p.c * G.cellSize + 2, G.offsetY + p.r * G.cellSize + 2,
+                G.cellSize - 4, G.cellSize - 4, 4);
+            ctx.fill();
+        }
+    }
+
+    // 当前路径高亮
+    if (G.path.length > 1) {
+        ctx.strokeStyle = '#ff79c6';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        ctx.lineDashOffset = -t * 30;
+        ctx.beginPath();
+        for (let i = 0; i < G.path.length; i++) {
+            let x = G.offsetX + G.path[i].c * G.cellSize + G.cellSize / 2;
+            let y = G.offsetY + G.path[i].r * G.cellSize + G.cellSize / 2;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // 绘制格子
+    for (let r = 0; r < G.rows; r++) {
+        for (let c = 0; c < G.cols; c++) {
+            let cell = G.grid[r][c];
+            let x = G.offsetX + c * G.cellSize;
+            let y = G.offsetY + r * G.cellSize;
+
+            // 揭示动画
+            let revealT = clamp((G.cellRevealAnim - cell.animDelay) / 0.3, 0, 1);
+            if (revealT <= 0) continue;
+            let scale = easeOut(revealT);
+
+            let onPath = G.path.some(p => p.r === r && p.c === c);
+            let isLast = G.path.length > 0 && G.path[G.path.length - 1].r === r && G.path[G.path.length - 1].c === c;
+            let isStart = G.path.length > 0 && G.path[0].r === r && G.path[0].c === c;
+
+            // 格子背景
+            ctx.save();
+            ctx.translate(x + G.cellSize / 2, y + G.cellSize / 2);
+            ctx.scale(scale, scale);
+            ctx.translate(-(x + G.cellSize / 2), -(y + G.cellSize / 2));
+
+            if (onPath) {
+                if (isLast) {
+                    ctx.fillStyle = '#ff79c6';
+                } else if (isStart) {
+                    ctx.fillStyle = '#50fa7b';
+                } else {
+                    ctx.fillStyle = '#bd93f9';
+                }
+            } else {
+                ctx.fillStyle = 'rgba(68, 71, 90, 0.9)';
+            }
+
+            ctx.beginPath();
+            roundRect(ctx, x + 2, y + 2, G.cellSize - 4, G.cellSize - 4, 6);
+            ctx.fill();
+
+            // 边框
+            ctx.strokeStyle = onPath ? '#f8f8f2' : 'rgba(98, 114, 164, 0.5)';
+            ctx.lineWidth = onPath ? 2 : 1;
+            ctx.stroke();
+
+            // 汉字
+            ctx.fillStyle = onPath ? '#fff' : '#f8f8f2';
+            ctx.font = `bold ${G.cellSize * 0.55}px "Microsoft YaHei", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(cell.char, x + G.cellSize / 2, y + G.cellSize / 2 + 1);
+
+            ctx.restore();
+        }
+    }
+
+    ctx.restore();
+
+    // 绘制粒子
+    drawParticles();
+
+    // 暂停界面
+    if (G.state === 'paused') {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, C.width, C.height);
+        ctx.fillStyle = '#f8f8f2';
+        ctx.font = `bold ${Math.min(36, C.width * 0.08)}px "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('游戏暂停', C.width / 2, C.height / 2 - 30);
+
+        ctx.fillStyle = '#8be9fd';
+        ctx.font = `${Math.min(18, C.width * 0.04)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText('点击继续 | 按R重新开始', C.width / 2, C.height / 2 + 20);
+    }
+
+    // 关卡完成界面
+    if (G.state === 'levelComplete') {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, C.width, C.height);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#50fa7b';
+        ctx.font = `bold ${Math.min(36, C.width * 0.08)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText('关卡通过!', C.width / 2, C.height / 2 - 80);
+
+        ctx.fillStyle = '#f1fa8c';
+        ctx.font = `${Math.min(20, C.width * 0.045)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText(`本关得分: ${G.scoreForLevel}`, C.width / 2, C.height / 2 - 30);
+        ctx.fillText(`总分: ${G.totalScore}`, C.width / 2, C.height / 2);
+
+        // 完成的成语列表
+        ctx.fillStyle = '#bd93f9';
+        ctx.font = `${Math.min(16, C.width * 0.035)}px "Microsoft YaHei", sans-serif`;
+        let yy = C.height / 2 + 35;
+        G.completedIdioms.forEach(idx => {
+            ctx.fillText(G.currentIdioms[idx].word + ' - ' + G.currentIdioms[idx].hint, C.width / 2, yy);
+            yy += 22;
+        });
+
+        // 下一关按钮
+        let btnW = Math.min(180, C.width * 0.45);
+        let btnH = 45;
+        let btnX = C.width / 2 - btnW / 2;
+        let btnY = yy + 15;
+
+        let btnGrad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY + btnH);
+        btnGrad.addColorStop(0, '#50fa7b');
+        btnGrad.addColorStop(1, '#8be9fd');
+        ctx.fillStyle = btnGrad;
+        ctx.beginPath();
+        roundRect(ctx, btnX, btnY, btnW, btnH, 22);
+        ctx.fill();
+
+        ctx.fillStyle = '#1a1a2e';
+        ctx.font = `bold ${Math.min(18, C.width * 0.04)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText(G.level + 1 >= LEVELS.length ? '通关!' : '下一关', C.width / 2, btnY + btnH / 2);
+
+        G._nextBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+    }
+
+    // 游戏结束界面
+    if (G.state === 'gameOver') {
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, C.width, C.height);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ff5555';
+        ctx.font = `bold ${Math.min(36, C.width * 0.08)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText('步数用尽!', C.width / 2, C.height / 2 - 80);
+
+        ctx.fillStyle = '#f1fa8c';
+        ctx.font = `${Math.min(20, C.width * 0.045)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText(`总分: ${G.totalScore}`, C.width / 2, C.height / 2 - 30);
+
+        ctx.fillStyle = '#bd93f9';
+        ctx.font = `${Math.min(16, C.width * 0.035)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText(`已完成: ${G.completedIdioms.length}/${G.currentIdioms.length} 个成语`, C.width / 2, C.height / 2 + 5);
+
+        // 重试按钮
+        let btnW = Math.min(160, C.width * 0.4);
+        let btnH = 45;
+        let btnX = C.width / 2 - btnW / 2;
+        let btnY = C.height / 2 + 40;
+
+        ctx.fillStyle = '#ff79c6';
+        ctx.beginPath();
+        roundRect(ctx, btnX, btnY, btnW, btnH, 22);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.min(18, C.width * 0.04)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText('重新挑战', C.width / 2, btnY + btnH / 2);
+
+        G._retryBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+        // 返回主菜单
+        btnY += 60;
+        ctx.fillStyle = '#6272a4';
+        ctx.beginPath();
+        roundRect(ctx, btnX, btnY, btnW, btnH, 22);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText('返回主菜单', C.width / 2, btnY + btnH / 2);
+
+        G._menuBtn2 = { x: btnX, y: btnY, w: btnW, h: btnH };
+    }
+
+    // 通关界面
+    if (G.state === 'win') {
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, C.width, C.height);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#FFD700';
+        ctx.font = `bold ${Math.min(42, C.width * 0.09)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText('恭喜通关!', C.width / 2, C.height / 2 - 100);
+
+        ctx.fillStyle = '#f1fa8c';
+        ctx.font = `bold ${Math.min(24, C.width * 0.05)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText(`最终得分: ${G.totalScore}`, C.width / 2, C.height / 2 - 40);
+
+        ctx.fillStyle = '#8be9fd';
+        ctx.font = `${Math.min(18, C.width * 0.04)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText(`最高分: ${G.highScore}`, C.width / 2, C.height / 2);
+
+        ctx.fillStyle = '#bd93f9';
+        ctx.font = `${Math.min(16, C.width * 0.035)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText('你是真正的文字大师!', C.width / 2, C.height / 2 + 35);
+
+        // 再玩一次
+        let btnW = Math.min(180, C.width * 0.45);
+        let btnH = 45;
+        let btnX = C.width / 2 - btnW / 2;
+        let btnY = C.height / 2 + 70;
+
+        let btnGrad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY + btnH);
+        btnGrad.addColorStop(0, '#bd93f9');
+        btnGrad.addColorStop(1, '#ff79c6');
+        ctx.fillStyle = btnGrad;
+        ctx.beginPath();
+        roundRect(ctx, btnX, btnY, btnW, btnH, 22);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.min(18, C.width * 0.04)}px "Microsoft YaHei", sans-serif`;
+        ctx.fillText('再玩一次', C.width / 2, btnY + btnH / 2);
+
+        G._replayBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+    }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// ========== 输入处理 ==========
+function handleClick(px, py) {
+    if (G.state === 'menu') {
+        if (G._menuBtn) {
+            let b = G._menuBtn;
+            if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+                startLevel(0);
+                return;
+            }
+        }
+        return;
+    }
+
+    if (G.state === 'playing') {
+        let cell = getCellFromPos(px, py);
+        if (cell) {
+            handleCellClick(cell.r, cell.c);
+        }
+        return;
+    }
+
+    if (G.state === 'paused') {
+        G.state = 'playing';
+        return;
+    }
+
+    if (G.state === 'levelComplete') {
+        if (G._nextBtn) {
+            let b = G._nextBtn;
+            if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+                nextLevel();
+                return;
+            }
+        }
+        return;
+    }
+
+    if (G.state === 'gameOver') {
+        if (G._retryBtn) {
+            let b = G._retryBtn;
+            if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+                startLevel(G.level);
+                return;
+            }
+        }
+        if (G._menuBtn2) {
+            let b = G._menuBtn2;
+            if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+                restartGame();
+                return;
+            }
+        }
+        return;
+    }
+
+    if (G.state === 'win') {
+        if (G._replayBtn) {
+            let b = G._replayBtn;
+            if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+                restartGame();
+                return;
+            }
+        }
+        return;
+    }
+}
+
+// 鼠标
+C.addEventListener('click', e => {
+    handleClick(e.clientX, e.clientY);
+});
+
+// 触屏
+C.addEventListener('touchstart', e => {
+    e.preventDefault();
+    G.isTouch = true;
+    let t = e.touches[0];
+    handleClick(t.clientX, t.clientY);
+}, { passive: false });
+
+// 键盘
+document.addEventListener('keydown', e => {
+    if (G.state === 'menu') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            startLevel(0);
+            return;
+        }
+    }
+
+    if (G.state === 'playing') {
+        let last = G.path.length > 0 ? G.path[G.path.length - 1] : null;
+        let targetR, targetC;
+
+        switch(e.key) {
+            case 'ArrowUp':
+            case 'w':
+            case 'W':
+                if (last) { targetR = last.r - 1; targetC = last.c; }
+                break;
+            case 'ArrowDown':
+            case 's':
+            case 'S':
+                if (last) { targetR = last.r + 1; targetC = last.c; }
+                break;
+            case 'ArrowLeft':
+            case 'a':
+            case 'A':
+                if (last) { targetR = last.r; targetC = last.c - 1; }
+                break;
+            case 'ArrowRight':
+            case 'd':
+            case 'D':
+                if (last) { targetR = last.r; targetC = last.c + 1; }
+                break;
+            case ' ':
+                // 回退
+                if (G.path.length > 1) {
+                    G.path.pop();
+                    G.steps++;
+                    G.needsRedraw = true;
+                    checkIdioms();
+                }
+                e.preventDefault();
+                return;
+            case 'r':
+            case 'R':
+                if (G.state === 'playing' || G.state === 'paused') {
+                    startLevel(G.level);
+                }
+                return;
+            case 'Escape':
+                togglePause();
+                return;
+        }
+
+        if (targetR !== undefined && targetC !== undefined) {
+            if (targetR >= 0 && targetR < G.rows && targetC >= 0 && targetC < G.cols) {
+                handleCellClick(targetR, targetC);
+            }
+        }
+        e.preventDefault();
+        return;
+    }
+
+    if (G.state === 'paused') {
+        if (e.key === 'Escape' || e.key === ' ') {
+            G.state = 'playing';
+            return;
+        }
+        if (e.key === 'r' || e.key === 'R') {
+            startLevel(G.level);
+            return;
+        }
+    }
+
+    if (G.state === 'levelComplete') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            nextLevel();
+            return;
+        }
+    }
+
+    if (G.state === 'gameOver') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            startLevel(G.level);
+            return;
+        }
+    }
+
+    if (G.state === 'win') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            restartGame();
+            return;
+        }
+    }
+});
+
+// ========== 主循环 ==========
+function gameLoop() {
+    G.animTime += 0.016;
+    G.cellRevealAnim += 0.016;
+
+    updateParticles();
+
+    ctx.clearRect(0, 0, C.width, C.height);
+
+    if (G.state === 'menu') {
+        drawMenu();
+    } else {
+        drawGame();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ========== 启动 ==========
+initMenuParticles();
+gameLoop();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

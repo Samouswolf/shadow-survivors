@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>数字消除</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a2e; font-family: 'Microsoft YaHei', sans-serif; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ============================================================
+//  数字消除 — 相邻数字相加消除，策略得分
+// ============================================================
+
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+
+// --- Responsive Canvas ---
+var W, H, SCALE;
+function resizeCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    SCALE = Math.min(W, H) / 600;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// --- Colors & Theme ---
+var COLORS = {
+    bg1: '#0a0a2e', bg2: '#1a1a4e', bg3: '#2a1a5e',
+    gold: '#ffd700', white: '#ffffff', gray: '#888888',
+    accent: '#00e5ff', danger: '#ff4444', success: '#44ff44',
+    boardBg: 'rgba(255,255,255,0.05)', boardBorder: 'rgba(255,255,255,0.15)',
+    cellBg: 'rgba(255,255,255,0.08)', cellHover: 'rgba(255,255,255,0.2)',
+    cellSelected: 'rgba(0,229,255,0.4)', cellHint: 'rgba(255,215,0,0.3)'
+};
+
+var NUM_COLORS = {
+    1: '#4fc3f7', 2: '#4dd0e1', 3: '#4db6ac', 4: '#81c784',
+    5: '#aed581', 6: '#dce775', 7: '#fff176', 8: '#ffd54f',
+    9: '#ffb74d', 10: '#ff8a65', 11: '#f06292', 12: '#ba68c8',
+    13: '#9575cd', 14: '#7986cb', 15: '#64b5f6', 16: '#e57373',
+    17: '#f44336', 18: '#9c27b0', 19: '#673ab7', 20: '#3f51b5'
+};
+
+// --- Game Config ---
+var CONFIG = {
+    ROWS: 7,
+    COLS: 7,
+    MAX_NUM: 12,
+    MERGE_TARGETS: [3, 5, 8, 10, 12, 15, 20],
+    BASE_SCORE: 10,
+    COMBO_MULT: 1.5,
+    HINT_DELAY: 8000,
+    MOVE_LIMIT: 30,
+    LEVELS: [
+        { name: '新手入门', target: 200, moves: 35, maxNum: 6, desc: '消除相邻数字之和为目标值' },
+        { name: '渐入佳境', target: 500, moves: 30, maxNum: 8, desc: '更高数字，更大挑战' },
+        { name: '策略大师', target: 1000, moves: 28, maxNum: 10, desc: '需要精心规划每一步' },
+        { name: '极限挑战', target: 2000, moves: 25, maxNum: 12, desc: '你能坚持多久？' },
+        { name: '无尽模式', target: Infinity, moves: 999, maxNum: 15, desc: '挑战你的极限！' }
+    ]
+};
+
+// --- Game State ---
+var G = {
+    state: 'menu', // menu, playing, paused, gameOver, levelSelect
+    board: [],
+    rows: CONFIG.ROWS,
+    cols: CONFIG.COLS,
+    score: 0,
+    highScore: parseInt(localStorage.getItem('numberMerge_highScore') || '0'),
+    combo: 0,
+    maxCombo: 0,
+    movesLeft: CONFIG.MOVE_LIMIT,
+    level: 0,
+    target: 200,
+    selected: null, // {r, c}
+    hintCells: null,
+    hintTimer: 0,
+    particles: [],
+    floatingTexts: [],
+    shakeTimer: 0,
+    shakeX: 0,
+    shakeY: 0,
+    animations: [],
+    cellAnimations: [],
+    boardX: 0,
+    boardY: 0,
+    cellSize: 0,
+    boardW: 0,
+    boardH: 0,
+    hoverCell: null,
+    totalMerges: 0,
+    biggestNumber: 0,
+    timePlayed: 0,
+    startTime: 0
+};
+
+// --- Particles ---
+function spawnParticles(x, y, color, count, speed) {
+    for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var spd = (Math.random() * 0.7 + 0.3) * (speed || 3);
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            life: 1,
+            decay: 0.015 + Math.random() * 0.02,
+            size: 2 + Math.random() * 4,
+            color: color
+        });
+    }
+}
+
+function spawnFloatingText(x, y, text, color, size) {
+    G.floatingTexts.push({
+        x: x, y: y, text: text, color: color || '#fff',
+        size: size || 20, life: 1, vy: -1.5
+    });
+}
+
+// --- Board Logic ---
+function initBoard() {
+    G.board = [];
+    var maxNum = CONFIG.LEVELS[G.level].maxNum;
+    for (var r = 0; r < G.rows; r++) {
+        G.board[r] = [];
+        for (var c = 0; c < G.cols; c++) {
+            G.board[r][c] = {
+                num: randNum(maxNum),
+                animScale: 0,
+                animAlpha: 1,
+                removing: false
+            };
+        }
+    }
+    // Ensure at least one valid merge exists
+    ensureValidMoves();
+    calcBoardLayout();
+}
+
+function randNum(max) {
+    // Weighted: lower numbers more common
+    var weights = [];
+    for (var i = 1; i <= max; i++) {
+        weights.push(Math.max(1, max - i + 2));
+    }
+    var total = weights.reduce(function(a, b) { return a + b; }, 0);
+    var r = Math.random() * total;
+    var sum = 0;
+    for (var i = 0; i < weights.length; i++) {
+        sum += weights[i];
+        if (r < sum) return i + 1;
+    }
+    return 1;
+}
+
+function calcBoardLayout() {
+    var maxBoardW = W * 0.9;
+    var maxBoardH = H * 0.65;
+    var cellFromW = Math.floor(maxBoardW / G.cols);
+    var cellFromH = Math.floor(maxBoardH / G.rows);
+    G.cellSize = Math.min(cellFromW, cellFromH, 70);
+    G.boardW = G.cellSize * G.cols;
+    G.boardH = G.cellSize * G.rows;
+    G.boardX = (W - G.boardW) / 2;
+    G.boardY = H * 0.22;
+}
+
+function getCellAt(px, py) {
+    var x = px - G.boardX;
+    var y = py - G.boardY;
+    if (x < 0 || y < 0 || x >= G.boardW || y >= G.boardH) return null;
+    return { r: Math.floor(y / G.cellSize), c: Math.floor(x / G.cellSize) };
+}
+
+function areAdjacent(r1, c1, r2, c2) {
+    return (Math.abs(r1 - r2) + Math.abs(c1 - c2)) === 1;
+}
+
+function findValidMerges() {
+    var merges = [];
+    for (var r = 0; r < G.rows; r++) {
+        for (var c = 0; c < G.cols; c++) {
+            if (!G.board[r][c]) continue;
+            var num = G.board[r][c].num;
+            // Check right
+            if (c + 1 < G.cols && G.board[r][c + 1]) {
+                var sum = num + G.board[r][c + 1].num;
+                if (isTarget(sum)) {
+                    merges.push({ r1: r, c1: c, r2: r, c2: c + 1, sum: sum });
+                }
+            }
+            // Check down
+            if (r + 1 < G.rows && G.board[r + 1] && G.board[r + 1][c]) {
+                var sum = num + G.board[r + 1][c].num;
+                if (isTarget(sum)) {
+                    merges.push({ r1: r, c1: c, r2: r + 1, c2: c, sum: sum });
+                }
+            }
+        }
+    }
+    return merges;
+}
+
+function isTarget(num) {
+    return CONFIG.MERGE_TARGETS.indexOf(num) >= 0 || num >= 20;
+}
+
+function ensureValidMoves() {
+    var merges = findValidMerges();
+    var attempts = 0;
+    while (merges.length === 0 && attempts < 100) {
+        // Randomly change some numbers
+        var r = Math.floor(Math.random() * G.rows);
+        var c = Math.floor(Math.random() * G.cols);
+        var maxNum = CONFIG.LEVELS[G.level].maxNum;
+        G.board[r][c].num = randNum(maxNum);
+        merges = findValidMerges();
+        attempts++;
+    }
+    if (merges.length === 0) {
+        // Force a merge pair
+        G.board[0][0].num = 1;
+        G.board[0][1].num = 2; // 1+2=3 target
+    }
+}
+
+function tryMerge(r1, c1, r2, c2) {
+    if (!areAdjacent(r1, c1, r2, c2)) return false;
+    if (!G.board[r1][c1] || !G.board[r2][c2]) return false;
+
+    var num1 = G.board[r1][c1].num;
+    var num2 = G.board[r2][c2].num;
+    var sum = num1 + num2;
+
+    if (!isTarget(sum)) {
+        // Invalid merge - shake
+        G.shakeTimer = 10;
+        spawnFloatingText(G.boardX + (c1 + c2 + 1) / 2 * G.cellSize,
+            G.boardY + (r1 + r2 + 1) / 2 * G.cellSize, '无效!', '#ff4444', 16);
+        return false;
+    }
+
+    // Valid merge!
+    G.movesLeft--;
+    G.combo++;
+    if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+
+    // Calculate score
+    var baseScore = sum * CONFIG.BASE_SCORE;
+    var comboBonus = Math.floor(baseScore * (G.combo - 1) * 0.5);
+    var totalScore = baseScore + comboBonus;
+
+    G.score += totalScore;
+    if (sum > G.biggestNumber) G.biggestNumber = sum;
+    G.totalMerges++;
+
+    // Merge animation
+    var midR = r1; // Merge into first cell
+    var midC = c1;
+
+    // Remove second cell
+    var cell2X = G.boardX + c2 * G.cellSize + G.cellSize / 2;
+    var cell2Y = G.boardY + r2 * G.cellSize + G.cellSize / 2;
+    spawnParticles(cell2X, cell2Y, NUM_COLORS[Math.min(sum, 20)] || '#fff', 15, 4);
+
+    // Create merged cell
+    G.board[r1][c1] = {
+        num: sum,
+        animScale: 1.5,
+        animAlpha: 1,
+        removing: false
+    };
+    G.board[r2][c2] = null;
+
+    // Floating text
+    var fx = G.boardX + c1 * G.cellSize + G.cellSize / 2;
+    var fy = G.boardY + r1 * G.cellSize;
+    spawnFloatingText(fx, fy, '+' + totalScore, '#ffd700', 22);
+    if (G.combo > 1) {
+        spawnFloatingText(fx, fy - 25, G.combo + '连击!', '#00e5ff', 18);
+    }
+
+    // Gravity: fill empty spaces
+    setTimeout(function() {
+        applyGravity();
+        fillEmpty();
+        ensureValidMoves();
+        G.hintTimer = 0;
+        G.hintCells = null;
+
+        // Check game state
+        checkGameState();
+    }, 200);
+
+    return true;
+}
+
+function applyGravity() {
+    for (var c = 0; c < G.cols; c++) {
+        var writeRow = G.rows - 1;
+        for (var r = G.rows - 1; r >= 0; r--) {
+            if (G.board[r][c] !== null) {
+                if (r !== writeRow) {
+                    G.board[writeRow][c] = G.board[r][c];
+                    G.board[r][c] = null;
+                    G.board[writeRow][c].animScale = 1.1;
+                }
+                writeRow--;
+            }
+        }
+    }
+}
+
+function fillEmpty() {
+    var maxNum = CONFIG.LEVELS[G.level].maxNum;
+    for (var r = 0; r < G.rows; r++) {
+        for (var c = 0; c < G.cols; c++) {
+            if (G.board[r][c] === null) {
+                G.board[r][c] = {
+                    num: randNum(maxNum),
+                    animScale: 0,
+                    animAlpha: 1,
+                    removing: false
+                };
+            }
+        }
+    }
+}
+
+function checkGameState() {
+    if (G.score >= G.target && G.target !== Infinity) {
+        // Level complete
+        G.state = 'gameOver';
+        saveHighScore();
+        return;
+    }
+    if (G.movesLeft <= 0) {
+        G.state = 'gameOver';
+        saveHighScore();
+        return;
+    }
+    // Check if any valid moves remain
+    var merges = findValidMerges();
+    if (merges.length === 0) {
+        // No moves - shuffle board
+        shuffleBoard();
+    }
+}
+
+function shuffleBoard() {
+    spawnFloatingText(W / 2, H / 2, '重新洗牌!', '#00e5ff', 28);
+    var maxNum = CONFIG.LEVELS[G.level].maxNum;
+    for (var r = 0; r < G.rows; r++) {
+        for (var c = 0; c < G.cols; c++) {
+            if (G.board[r][c]) {
+                G.board[r][c].num = randNum(maxNum);
+                G.board[r][c].animScale = 0.5;
+            }
+        }
+    }
+    ensureValidMoves();
+}
+
+function saveHighScore() {
+    if (G.score > G.highScore) {
+        G.highScore = G.score;
+        localStorage.setItem('numberMerge_highScore', String(G.highScore));
+    }
+}
+
+// --- Hint System ---
+function updateHint(dt) {
+    G.hintTimer += dt;
+    if (G.hintTimer > CONFIG.HINT_DELAY && !G.hintCells) {
+        var merges = findValidMerges();
+        if (merges.length > 0) {
+            var m = merges[Math.floor(Math.random() * merges.length)];
+            G.hintCells = [{ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 }];
+        }
+    }
+}
+
+// --- Input Handling ---
+var touchStartPos = null;
+var isDragging = false;
+
+function handlePointerDown(px, py) {
+    if (G.state === 'menu') {
+        handleMenuClick(px, py);
+        return;
+    }
+    if (G.state === 'levelSelect') {
+        handleLevelClick(px, py);
+        return;
+    }
+    if (G.state === 'gameOver') {
+        handleGameOverClick(px, py);
+        return;
+    }
+    if (G.state === 'paused') {
+        handlePausedClick(px, py);
+        return;
+    }
+    if (G.state !== 'playing') return;
+
+    var cell = getCellAt(px, py);
+    if (!cell) return;
+
+    if (G.selected) {
+        // Try merge
+        if (cell.r === G.selected.r && cell.c === G.selected.c) {
+            G.selected = null;
+            G.hintTimer = 0;
+            return;
+        }
+        if (areAdjacent(G.selected.r, G.selected.c, cell.r, cell.c)) {
+            tryMerge(G.selected.r, G.selected.c, cell.r, cell.c);
+            G.selected = null;
+        } else {
+            G.selected = { r: cell.r, c: cell.c };
+        }
+    } else {
+        G.selected = { r: cell.r, c: cell.c };
+    }
+    G.hintTimer = 0;
+    G.hintCells = null;
+}
+
+function handlePointerMove(px, py) {
+    if (G.state !== 'playing') return;
+    G.hoverCell = getCellAt(px, py);
+}
+
+function handlePointerUp() {
+    isDragging = false;
+    touchStartPos = null;
+}
+
+// Mouse events
+canvas.addEventListener('mousedown', function(e) {
+    handlePointerDown(e.clientX, e.clientY);
+});
+canvas.addEventListener('mousemove', function(e) {
+    handlePointerMove(e.clientX, e.clientY);
+});
+canvas.addEventListener('mouseup', handlePointerUp);
+
+// Touch events
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    handlePointerDown(t.clientX, t.clientY);
+}, { passive: false });
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    handlePointerMove(t.clientX, t.clientY);
+}, { passive: false });
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    handlePointerUp();
+}, { passive: false });
+
+// Keyboard
+document.addEventListener('keydown', function(e) {
+    if (G.state === 'menu') {
+        if (e.key === 'Enter' || e.key === ' ') startLevelSelect();
+        return;
+    }
+    if (G.state === 'levelSelect') {
+        if (e.key === 'Escape') G.state = 'menu';
+        return;
+    }
+    if (G.state === 'gameOver') {
+        if (e.key === 'Enter' || e.key === ' ') startLevelSelect();
+        if (e.key === 'Escape') G.state = 'menu';
+        return;
+    }
+    if (G.state === 'paused') {
+        if (e.key === 'Escape' || e.key === 'p') G.state = 'playing';
+        return;
+    }
+    if (G.state !== 'playing') return;
+
+    if (e.key === 'Escape' || e.key === 'p') {
+        G.state = 'paused';
+        return;
+    }
+    if (e.key === 'h') {
+        // Show hint
+        var merges = findValidMerges();
+        if (merges.length > 0) {
+            var m = merges[0];
+            G.hintCells = [{ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 }];
+            G.hintTimer = 0;
+        }
+        return;
+    }
+
+    if (!G.selected) return;
+    var dr = 0, dc = 0;
+    if (e.key === 'ArrowUp' || e.key === 'w') dr = -1;
+    if (e.key === 'ArrowDown' || e.key === 's') dr = 1;
+    if (e.key === 'ArrowLeft' || e.key === 'a') dc = -1;
+    if (e.key === 'ArrowRight' || e.key === 'd') dc = 1;
+    if (e.key === 'Enter' || e.key === ' ') {
+        // Confirm selection - find adjacent and merge
+        var sr = G.selected.r, sc = G.selected.c;
+        var dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+        for (var i = 0; i < dirs.length; i++) {
+            var nr = sr + dirs[i][0], nc = sc + dirs[i][1];
+            if (nr >= 0 && nr < G.rows && nc >= 0 && nc < G.cols && G.board[nr][nc]) {
+                if (isTarget(G.board[sr][sc].num + G.board[nr][nc].num)) {
+                    tryMerge(sr, sc, nr, nc);
+                    G.selected = null;
+                    return;
+                }
+            }
+        }
+        return;
+    }
+
+    if (dr !== 0 || dc !== 0) {
+        var nr = G.selected.r + dr;
+        var nc = G.selected.c + dc;
+        if (nr >= 0 && nr < G.rows && nc >= 0 && nc < G.cols) {
+            if (G.board[nr][nc]) {
+                // Try merge
+                if (isTarget(G.board[G.selected.r][G.selected.c].num + G.board[nr][nc].num)) {
+                    tryMerge(G.selected.r, G.selected.c, nr, nc);
+                    G.selected = null;
+                } else {
+                    G.selected = { r: nr, c: nc };
+                }
+            }
+        }
+    }
+});
+
+// --- Menu Click Handlers ---
+var menuButtons = {};
+var levelButtons = {};
+var gameOverButtons = {};
+var pausedButtons = {};
+
+function handleMenuClick(px, py) {
+    if (isInRect(px, py, menuButtons.start)) {
+        startLevelSelect();
+    }
+}
+
+function startLevelSelect() {
+    G.state = 'levelSelect';
+}
+
+function handleLevelClick(px, py) {
+    for (var i = 0; i < CONFIG.LEVELS.length; i++) {
+        if (levelButtons['level_' + i] && isInRect(px, py, levelButtons['level_' + i])) {
+            startGame(i);
+            return;
+        }
+    }
+    if (isInRect(px, py, levelButtons.back)) {
+        G.state = 'menu';
+    }
+}
+
+function handleGameOverClick(px, py) {
+    if (isInRect(px, py, gameOverButtons.retry)) {
+        startGame(G.level);
+    }
+    if (isInRect(px, py, gameOverButtons.menu)) {
+        G.state = 'menu';
+    }
+}
+
+function handlePausedClick(px, py) {
+    if (isInRect(px, py, pausedButtons.resume)) {
+        G.state = 'playing';
+    }
+    if (isInRect(px, py, pausedButtons.restart)) {
+        startGame(G.level);
+    }
+    if (isInRect(px, py, pausedButtons.menu)) {
+        G.state = 'menu';
+    }
+}
+
+function isInRect(px, py, rect) {
+    return rect && px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+}
+
+// --- Start Game ---
+function startGame(level) {
+    G.level = level;
+    G.score = 0;
+    G.combo = 0;
+    G.maxCombo = 0;
+    G.movesLeft = CONFIG.LEVELS[level].moves;
+    G.target = CONFIG.LEVELS[level].target;
+    G.selected = null;
+    G.hintCells = null;
+    G.hintTimer = 0;
+    G.particles = [];
+    G.floatingTexts = [];
+    G.animations = [];
+    G.totalMerges = 0;
+    G.biggestNumber = 0;
+    G.startTime = Date.now();
+    G.state = 'playing';
+    initBoard();
+}
+
+// --- Drawing Functions ---
+function drawGradientBg() {
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, COLORS.bg1);
+    grad.addColorStop(0.5, COLORS.bg2);
+    grad.addColorStop(1, COLORS.bg3);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grid pattern
+    ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+    ctx.lineWidth = 1;
+    var gridSize = 40 * SCALE;
+    for (var x = 0; x < W; x += gridSize) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (var y = 0; y < H; y += gridSize) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+}
+
+function drawText(text, x, y, size, color, align, baseline) {
+    ctx.font = 'bold ' + Math.round(size * SCALE) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = color || '#fff';
+    ctx.textAlign = align || 'center';
+    ctx.textBaseline = baseline || 'middle';
+    ctx.fillText(text, x, y);
+}
+
+function drawButton(text, rect, color, textColor) {
+    var r = 12 * SCALE;
+    ctx.fillStyle = color || 'rgba(0,229,255,0.2)';
+    ctx.strokeStyle = COLORS.accent;
+    ctx.lineWidth = 2 * SCALE;
+
+    // Rounded rect
+    ctx.beginPath();
+    ctx.moveTo(rect.x + r, rect.y);
+    ctx.lineTo(rect.x + rect.w - r, rect.y);
+    ctx.quadraticCurveTo(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + r);
+    ctx.lineTo(rect.x + rect.w, rect.y + rect.h - r);
+    ctx.quadraticCurveTo(rect.x + rect.w, rect.y + rect.h, rect.x + rect.w - r, rect.y + rect.h);
+    ctx.lineTo(rect.x + r, rect.y + rect.h);
+    ctx.quadraticCurveTo(rect.x, rect.y + rect.h, rect.x, rect.y + rect.h - r);
+    ctx.lineTo(rect.x, rect.y + r);
+    ctx.quadraticCurveTo(rect.x, rect.y, rect.x + r, rect.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    drawText(text, rect.x + rect.w / 2, rect.y + rect.h / 2, 16, textColor || '#fff');
+}
+
+function drawNumberCell(x, y, size, num, selected, hint, animScale, alpha) {
+    var s = size * (animScale || 1);
+    var offset = (size - s) / 2;
+    var cx = x + size / 2;
+    var cy = y + size / 2;
+    var half = s / 2;
+
+    ctx.save();
+    ctx.globalAlpha = alpha !== undefined ? alpha : 1;
+
+    // Background
+    var color = NUM_COLORS[Math.min(num, 20)] || '#888';
+    if (selected) {
+        ctx.fillStyle = COLORS.cellSelected;
+        ctx.shadowColor = COLORS.accent;
+        ctx.shadowBlur = 15 * SCALE;
+    } else if (hint) {
+        ctx.fillStyle = COLORS.cellHint;
+        ctx.shadowColor = COLORS.gold;
+        ctx.shadowBlur = 10 * SCALE;
+    } else {
+        ctx.fillStyle = COLORS.cellBg;
+    }
+
+    var r = 8 * SCALE;
+    ctx.beginPath();
+    ctx.moveTo(x + offset + r, y + offset);
+    ctx.lineTo(x + offset + s - r, y + offset);
+    ctx.quadraticCurveTo(x + offset + s, y + offset, x + offset + s, y + offset + r);
+    ctx.lineTo(x + offset + s, y + offset + s - r);
+    ctx.quadraticCurveTo(x + offset + s, y + offset + s, x + offset + s - r, y + offset + s);
+    ctx.lineTo(x + offset + r, y + offset + s);
+    ctx.quadraticCurveTo(x + offset, y + offset + s, x + offset, y + offset + s - r);
+    ctx.lineTo(x + offset, y + offset + r);
+    ctx.quadraticCurveTo(x + offset, y + offset, x + offset + r, y + offset);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // Border
+    ctx.strokeStyle = selected ? COLORS.accent : (hint ? COLORS.gold : 'rgba(255,255,255,0.15)');
+    ctx.lineWidth = (selected || hint) ? 2.5 * SCALE : 1 * SCALE;
+    ctx.stroke();
+
+    // Number
+    var fontSize = num >= 10 ? 18 : 22;
+    drawText(String(num), cx, cy, fontSize, color, 'center', 'middle');
+
+    ctx.restore();
+}
+
+function drawBoard() {
+    // Board background
+    ctx.fillStyle = COLORS.boardBg;
+    ctx.strokeStyle = COLORS.boardBorder;
+    ctx.lineWidth = 2 * SCALE;
+    var br = 12 * SCALE;
+    ctx.beginPath();
+    ctx.moveTo(G.boardX - 8 + br, G.boardY - 8);
+    ctx.lineTo(G.boardX + G.boardW + 8 - br, G.boardY - 8);
+    ctx.quadraticCurveTo(G.boardX + G.boardW + 8, G.boardY - 8, G.boardX + G.boardW + 8, G.boardY - 8 + br);
+    ctx.lineTo(G.boardX + G.boardW + 8, G.boardY + G.boardH + 8 - br);
+    ctx.quadraticCurveTo(G.boardX + G.boardW + 8, G.boardY + G.boardH + 8, G.boardX + G.boardW + 8 - br, G.boardY + G.boardH + 8);
+    ctx.lineTo(G.boardX - 8 + br, G.boardY + G.boardH + 8);
+    ctx.quadraticCurveTo(G.boardX - 8, G.boardY + G.boardH + 8, G.boardX - 8, G.boardY + G.boardH + 8 - br);
+    ctx.lineTo(G.boardX - 8, G.boardY - 8 + br);
+    ctx.quadraticCurveTo(G.boardX - 8, G.boardY - 8, G.boardX - 8 + br, G.boardY - 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Draw cells
+    for (var r = 0; r < G.rows; r++) {
+        for (var c = 0; c < G.cols; c++) {
+            if (!G.board[r][c]) continue;
+            var x = G.boardX + c * G.cellSize;
+            var y = G.boardY + r * G.cellSize;
+            var isSelected = G.selected && G.selected.r === r && G.selected.c === c;
+            var isHint = G.hintCells && G.hintCells.some(function(h) { return h.r === r && h.c === c; });
+            var cell = G.board[r][c];
+            drawNumberCell(x, y, G.cellSize - 4, cell.num, isSelected, isHint, cell.animScale, cell.animAlpha);
+        }
+    }
+}
+
+function drawHUD() {
+    var pad = 15 * SCALE;
+
+    // Level name
+    drawText(CONFIG.LEVELS[G.level].name, W / 2, pad + 10 * SCALE, 20, COLORS.accent);
+
+    // Score
+    drawText('分数: ' + G.score, W / 2, pad + 38 * SCALE, 16, '#fff');
+
+    // Target
+    var targetText = G.target === Infinity ? '目标: 无尽' : '目标: ' + G.target;
+    drawText(targetText, W / 2, pad + 60 * SCALE, 14, COLORS.gold);
+
+    // Moves left - left side
+    drawText('步数: ' + G.movesLeft, pad + 50 * SCALE, pad + 10 * SCALE, 14, G.movesLeft <= 5 ? COLORS.danger : '#fff');
+
+    // Combo - right side
+    if (G.combo > 0) {
+        drawText('连击: ' + G.combo, W - pad - 50 * SCALE, pad + 10 * SCALE, 14, COLORS.accent);
+    }
+
+    // High score
+    drawText('最高: ' + G.highScore, W - pad - 50 * SCALE, pad + 30 * SCALE, 12, COLORS.gray);
+
+    // Progress bar
+    if (G.target !== Infinity) {
+        var barW = W * 0.6;
+        var barH = 8 * SCALE;
+        var barX = (W - barW) / 2;
+        var barY = pad + 80 * SCALE;
+        var progress = Math.min(1, G.score / G.target);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.fillRect(barX, barY, barW, barH);
+
+        var progGrad = ctx.createLinearGradient(barX, barY, barX + barW * progress, barY);
+        progGrad.addColorStop(0, COLORS.accent);
+        progGrad.addColorStop(1, COLORS.success);
+        ctx.fillStyle = progGrad;
+        ctx.fillRect(barX, barY, barW * progress, barH);
+    }
+
+    // Hint text
+    drawText('点击两个相邻数字相加消除 | H键提示', W / 2, G.boardY + G.boardH + 25 * SCALE, 11, COLORS.gray);
+}
+
+function drawParticles() {
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * SCALE, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawFloatingTexts() {
+    for (var i = 0; i < G.floatingTexts.length; i++) {
+        var ft = G.floatingTexts[i];
+        ctx.globalAlpha = ft.life;
+        drawText(ft.text, ft.x, ft.y, ft.size, ft.color);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawMenu() {
+    drawGradientBg();
+
+    // Title
+    var titleY = H * 0.25;
+    drawText('数', W / 2 - 80 * SCALE, titleY, 48, '#4fc3f7');
+    drawText('字', W / 2 - 20 * SCALE, titleY, 48, '#4dd0e1');
+    drawText('消', W / 2 + 40 * SCALE, titleY, 48, '#81c784');
+    drawText('除', W / 2 + 100 * SCALE, titleY, 48, '#ffd54f');
+
+    drawText('相邻数字相加消除', W / 2, titleY + 50 * SCALE, 16, COLORS.gray);
+    drawText('策略得分 · 多种规则', W / 2, titleY + 75 * SCALE, 14, 'rgba(255,255,255,0.5)');
+
+    // Start button
+    var btnW = 200 * SCALE;
+    var btnH = 50 * SCALE;
+    var btnX = (W - btnW) / 2;
+    var btnY = H * 0.55;
+    menuButtons.start = { x: btnX, y: btnY, w: btnW, h: btnH };
+    drawButton('开始游戏', menuButtons.start, 'rgba(0,229,255,0.15)');
+
+    // High score
+    drawText('最高分: ' + G.highScore, W / 2, H * 0.7, 16, COLORS.gold);
+
+    // Instructions
+    var instY = H * 0.8;
+    drawText('玩法说明:', W / 2, instY, 14, '#fff');
+    drawText('选择两个相邻的数字，相加之和为目标值即可消除', W / 2, instY + 22 * SCALE, 12, COLORS.gray);
+    drawText('连续消除获得连击加分！', W / 2, instY + 42 * SCALE, 12, COLORS.gray);
+
+    // Decorative floating numbers
+    var time = Date.now() / 1000;
+    for (var i = 0; i < 8; i++) {
+        var nx = W * (0.1 + 0.8 * ((i * 0.137 + time * 0.02) % 1));
+        var ny = H * (0.1 + 0.8 * ((i * 0.213 + time * 0.015) % 1));
+        ctx.globalAlpha = 0.15;
+        drawText(String(i + 1), nx, ny, 30, NUM_COLORS[i + 1] || '#fff');
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawLevelSelect() {
+    drawGradientBg();
+
+    drawText('选择关卡', W / 2, H * 0.1, 28, COLORS.accent);
+
+    var btnW = Math.min(280 * SCALE, W * 0.8);
+    var btnH = 60 * SCALE;
+    var startY = H * 0.2;
+    var gap = 15 * SCALE;
+
+    for (var i = 0; i < CONFIG.LEVELS.length; i++) {
+        var lv = CONFIG.LEVELS[i];
+        var btnX = (W - btnW) / 2;
+        var btnY = startY + i * (btnH + gap);
+        levelButtons['level_' + i] = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+        var color = 'rgba(0,229,255,0.1)';
+        if (i === 4) color = 'rgba(255,215,0,0.15)'; // Endless mode
+        drawButton(lv.name, levelButtons['level_' + i], color);
+
+        drawText(lv.desc, W / 2, btnY + btnH + 8 * SCALE, 10, COLORS.gray);
+    }
+
+    // Back button
+    var backY = startY + CONFIG.LEVELS.length * (btnH + gap) + 10 * SCALE;
+    levelButtons.back = { x: (W - 120 * SCALE) / 2, y: backY, w: 120 * SCALE, h: 40 * SCALE };
+    drawButton('返回', levelButtons.back, 'rgba(255,255,255,0.1)');
+}
+
+function drawGameOver() {
+    // Overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    var centerY = H * 0.3;
+    var won = G.score >= G.target && G.target !== Infinity;
+
+    drawText(won ? '关卡通过!' : '游戏结束', W / 2, centerY, 32, won ? COLORS.success : COLORS.danger);
+    drawText('最终分数: ' + G.score, W / 2, centerY + 45 * SCALE, 20, '#fff');
+    drawText('最大连击: ' + G.maxCombo, W / 2, centerY + 75 * SCALE, 16, COLORS.accent);
+    drawText('消除次数: ' + G.totalMerges, W / 2, centerY + 100 * SCALE, 16, COLORS.gray);
+    drawText('最大数字: ' + G.biggestNumber, W / 2, centerY + 125 * SCALE, 16, COLORS.gray);
+
+    if (G.score > G.highScore) {
+        drawText('新纪录!', W / 2, centerY + 155 * SCALE, 18, COLORS.gold);
+    }
+
+    var btnW = 160 * SCALE;
+    var btnH = 45 * SCALE;
+    var btnGap = 20 * SCALE;
+
+    gameOverButtons.retry = { x: W / 2 - btnW - btnGap / 2, y: centerY + 185 * SCALE, w: btnW, h: btnH };
+    gameOverButtons.menu = { x: W / 2 + btnGap / 2, y: centerY + 185 * SCALE, w: btnW, h: btnH };
+
+    drawButton('再来一局', gameOverButtons.retry, 'rgba(0,229,255,0.15)');
+    drawButton('返回菜单', gameOverButtons.menu, 'rgba(255,255,255,0.1)');
+}
+
+function drawPaused() {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    drawText('游戏暂停', W / 2, H * 0.3, 32, '#fff');
+
+    var btnW = 180 * SCALE;
+    var btnH = 45 * SCALE;
+    var gap = 15 * SCALE;
+    var startY = H * 0.45;
+
+    pausedButtons.resume = { x: (W - btnW) / 2, y: startY, w: btnW, h: btnH };
+    pausedButtons.restart = { x: (W - btnW) / 2, y: startY + btnH + gap, w: btnW, h: btnH };
+    pausedButtons.menu = { x: (W - btnW) / 2, y: startY + (btnH + gap) * 2, w: btnW, h: btnH };
+
+    drawButton('继续游戏', pausedButtons.resume, 'rgba(0,229,255,0.15)');
+    drawButton('重新开始', pausedButtons.restart, 'rgba(255,255,255,0.1)');
+    drawButton('返回菜单', pausedButtons.menu, 'rgba(255,255,255,0.1)');
+}
+
+// --- Update ---
+function update(dt) {
+    // Update particles
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= p.decay;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+
+    // Update floating texts
+    for (var i = G.floatingTexts.length - 1; i >= 0; i--) {
+        var ft = G.floatingTexts[i];
+        ft.y += ft.vy;
+        ft.life -= 0.02;
+        if (ft.life <= 0) G.floatingTexts.splice(i, 1);
+    }
+
+    // Update cell animations
+    for (var r = 0; r < G.rows; r++) {
+        for (var c = 0; c < G.cols; c++) {
+            if (G.board[r] && G.board[r][c]) {
+                var cell = G.board[r][c];
+                if (cell.animScale > 1.01) {
+                    cell.animScale += (1 - cell.animScale) * 0.15;
+                } else if (cell.animScale < 0.99) {
+                    cell.animScale += (1 - cell.animScale) * 0.15;
+                } else {
+                    cell.animScale = 1;
+                }
+            }
+        }
+    }
+
+    // Shake
+    if (G.shakeTimer > 0) {
+        G.shakeTimer--;
+        G.shakeX = (Math.random() - 0.5) * G.shakeTimer;
+        G.shakeY = (Math.random() - 0.5) * G.shakeTimer;
+    } else {
+        G.shakeX = 0;
+        G.shakeY = 0;
+    }
+
+    // Hint
+    if (G.state === 'playing') {
+        updateHint(dt);
+    }
+}
+
+// --- Main Loop ---
+var lastTime = 0;
+function gameLoop(timestamp) {
+    var dt = timestamp - lastTime;
+    lastTime = timestamp;
+    if (dt > 100) dt = 16;
+
+    resizeCanvas();
+    update(dt);
+
+    ctx.save();
+    if (G.shakeTimer > 0) {
+        ctx.translate(G.shakeX, G.shakeY);
+    }
+
+    switch (G.state) {
+        case 'menu':
+            drawMenu();
+            break;
+        case 'levelSelect':
+            drawLevelSelect();
+            break;
+        case 'playing':
+            drawGradientBg();
+            drawBoard();
+            drawHUD();
+            drawParticles();
+            drawFloatingTexts();
+            break;
+        case 'paused':
+            drawGradientBg();
+            drawBoard();
+            drawHUD();
+            drawPaused();
+            break;
+        case 'gameOver':
+            drawGradientBg();
+            drawBoard();
+            drawHUD();
+            drawParticles();
+            drawFloatingTexts();
+            drawGameOver();
+            break;
+    }
+
+    ctx.restore();
+    requestAnimationFrame(gameLoop);
+}
+
+// --- Init ---
+G.state = 'menu';
+requestAnimationFrame(gameLoop);
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

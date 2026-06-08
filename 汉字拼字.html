@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>汉字拼字</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    background: #0a0a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    touch-action: none;
+}
+#gameCanvas {
+    background: #0f0f2a;
+    border: 2px solid #1a1a3a;
+    border-radius: 10px;
+}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const BASE_WIDTH = 420;
+const BASE_HEIGHT = 750;
+let scale = 1;
+
+function resizeCanvas() {
+    const maxW = window.innerWidth;
+    const maxH = window.innerHeight;
+    scale = Math.min(maxW / BASE_WIDTH, maxH / BASE_HEIGHT, 1);
+    canvas.width = BASE_WIDTH;
+    canvas.height = BASE_HEIGHT;
+    canvas.style.width = (BASE_WIDTH * scale) + 'px';
+    canvas.style.height = (BASE_HEIGHT * scale) + 'px';
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAME_OVER: 3 };
+
+const HANZI_DATA = [
+    { char: '明', hint: '日+月，光明', parts: ['日', '月', '口', '田'] },
+    { char: '好', hint: '女+子，美好', parts: ['女', '子', '口', '人'] },
+    { char: '林', hint: '木+木，树林', parts: ['木', '木', '本', '十'] },
+    { char: '森', hint: '木+木+木，森林', parts: ['木', '木', '木', '口'] },
+    { char: '休', hint: '亻+木，休息', parts: ['亻', '木', '口', '十'] },
+    { char: '从', hint: '人+人，跟从', parts: ['人', '人', '大', '一'] },
+    { char: '众', hint: '人+人+人，大众', parts: ['人', '人', '人', '大'] },
+    { char: '品', hint: '口+口+口，品质', parts: ['口', '口', '口', '日'] },
+    { char: '晶', hint: '日+日+日，晶莹', parts: ['日', '日', '日', '月'] },
+    { char: '磊', hint: '石+石+石，磊落', parts: ['石', '石', '石', '口'] },
+    { char: '炎', hint: '火+火，炎热', parts: ['火', '火', '水', '山'] },
+    { char: '鑫', hint: '金+金+金，兴旺', parts: ['金', '金', '金', '铁'] },
+    { char: '淼', hint: '水+水+水，水大', parts: ['水', '水', '水', '火'] },
+    { char: '鲜', hint: '鱼+羊，新鲜', parts: ['鱼', '羊', '田', '口'] },
+    { char: '歪', hint: '不+正，歪斜', parts: ['不', '正', '足', '走'] },
+    { char: '尖', hint: '小+大，尖锐', parts: ['小', '大', '少', '太'] },
+    { char: '拿', hint: '合+手，拿取', parts: ['合', '手', '口', '十'] },
+    { char: '劣', hint: '少+力，低劣', parts: ['少', '力', '小', '刀'] },
+    { char: '夯', hint: '大+力，夯实', parts: ['大', '力', '太', '刀'] },
+    { char: '灭', hint: '火上一横，消灭', parts: ['火', '一', '水', '口'] },
+    { char: '旦', hint: '日出地平，元旦', parts: ['日', '一', '月', '口'] },
+    { char: '闪', hint: '门+人，闪光', parts: ['门', '人', '口', '大'] },
+    { char: '问', hint: '门+口，问题', parts: ['门', '口', '人', '日'] },
+    { char: '间', hint: '门+日，中间', parts: ['门', '日', '口', '月'] },
+    { char: '闯', hint: '门+马，闯荡', parts: ['门', '马', '口', '牛'] },
+    { char: '闻', hint: '门+耳，新闻', parts: ['门', '耳', '口', '目'] },
+    { char: '闷', hint: '门+心，烦闷', parts: ['门', '心', '口', '火'] },
+    { char: '坐', hint: '土上两人，坐下', parts: ['土', '人', '人', '口'] },
+    { char: '尘', hint: '小+土，尘土', parts: ['小', '土', '大', '石'] },
+    { char: '岩', hint: '山+石，岩石', parts: ['山', '石', '土', '口'] },
+    { char: '岳', hint: '山+丘，五岳', parts: ['山', '丘', '石', '土'] },
+    { char: '岛', hint: '山+鸟，岛屿', parts: ['山', '鸟', '石', '口'] },
+    { char: '思', hint: '田+心，思考', parts: ['田', '心', '口', '目'] },
+    { char: '想', hint: '相+心，想念', parts: ['相', '心', '木', '目'] },
+    { char: '愁', hint: '秋+心，忧愁', parts: ['秋', '心', '火', '禾'] },
+    { char: '怒', hint: '奴+心，愤怒', parts: ['奴', '心', '女', '又'] },
+    { char: '忍', hint: '刃+心，忍耐', parts: ['刃', '心', '刀', '口'] },
+    { char: '忘', hint: '亡+心，忘记', parts: ['亡', '心', '口', '目'] },
+    { char: '忙', hint: '心+亡，忙碌', parts: ['心', '亡', '口', '十'] },
+    { char: '怕', hint: '心+白，害怕', parts: ['心', '白', '口', '日'] },
+    { char: '念', hint: '今+心，想念', parts: ['今', '心', '口', '十'] },
+    { char: '恩', hint: '因+心，恩情', parts: ['因', '心', '口', '大'] },
+    { char: '性', hint: '心+生，性格', parts: ['心', '生', '口', '牛'] },
+    { char: '情', hint: '心+青，感情', parts: ['心', '青', '口', '月'] },
+    { char: '您', hint: '你+心，尊敬', parts: ['你', '心', '人', '尔'] },
+    { char: '意', hint: '音+心，意思', parts: ['音', '心', '日', '口'] },
+    { char: '感', hint: '咸+心，感觉', parts: ['咸', '心', '口', '戈'] },
+    { char: '愿', hint: '原+心，愿望', parts: ['原', '心', '白', '小'] },
+    { char: '态', hint: '太+心，态度', parts: ['太', '心', '大', '口'] },
+    { char: '忠', hint: '中+心，忠诚', parts: ['中', '心', '口', '十'] },
+    { char: '花', hint: '艶+化，花朵', parts: ['艶', '化', '口', '十'] },
+    { char: '草', hint: '艶+早，青草', parts: ['艶', '早', '口', '日'] },
+    { char: '苗', hint: '艶+田，禾苗', parts: ['艶', '田', '口', '日'] },
+    { char: '茶', hint: '艶+人+木，茶叶', parts: ['艶', '人', '木', '口'] },
+    { char: '英', hint: '艶+央，英雄', parts: ['艶', '央', '口', '大'] },
+    { char: '节', hint: '艶+卩，节日', parts: ['艶', '卩', '口', '十'] },
+    { char: '菜', hint: '艶+采，蓔菜', parts: ['艶', '采', '口', '木'] },
+    { char: '蓝', hint: '艶+监，蓝天', parts: ['艶', '监', '口', '皿'] },
+    { char: '江', hint: '氵+工，长江', parts: ['氵', '工', '口', '十'] },
+    { char: '河', hint: '氵+可，黄河', parts: ['氵', '可', '口', '十'] },
+    { char: '湖', hint: '氵+胡，湖泊', parts: ['氵', '胡', '口', '月'] },
+    { char: '海', hint: '氵+每，大海', parts: ['氵', '每', '口', '母'] },
+    { char: '浪', hint: '氵+良，波浪', parts: ['氵', '良', '口', '日'] },
+    { char: '清', hint: '氵+青，清澈', parts: ['氵', '青', '口', '月'] },
+    { char: '洗', hint: '氵+先，洗澡', parts: ['氵', '先', '口', '儿'] },
+    { char: '深', hint: '氵+罢，深水', parts: ['氵', '罢', '口', '木'] },
+    { char: '淡', hint: '氵+炎，清淡', parts: ['氵', '炎', '口', '火'] },
+    { char: '洋', hint: '氵+羊，海洋', parts: ['氵', '羊', '口', '十'] },
+    { char: '泪', hint: '氵+目，眼泪', parts: ['氵', '目', '口', '日'] },
+    { char: '酒', hint: '氵+酉，喝酒', parts: ['氵', '酉', '口', '日'] },
+    { char: '油', hint: '氵+由，汽油', parts: ['氵', '由', '口', '日'] },
+    { char: '洞', hint: '氵+同，山洞', parts: ['氵', '同', '口', '冂'] },
+    { char: '吃', hint: '口+乞，吃饭', parts: ['口', '乞', '十', '一'] },
+    { char: '喝', hint: '口+曷，喝水', parts: ['口', '曷', '日', '十'] },
+    { char: '吹', hint: '口+欠，吹风', parts: ['口', '欠', '十', '一'] },
+    { char: '唱', hint: '口+昌，唱歌', parts: ['口', '昌', '日', '十'] },
+    { char: '听', hint: '口+斤，听话', parts: ['口', '斤', '十', '一'] },
+    { char: '吞', hint: '天+口，吞下', parts: ['天', '口', '大', '一'] },
+    { char: '吐', hint: '口+土，呕吐', parts: ['口', '土', '十', '一'] },
+    { char: '吓', hint: '口+下，吓人', parts: ['口', '下', '十', '一'] },
+    { char: '呀', hint: '口+牙，哎呀', parts: ['口', '牙', '十', '一'] },
+    { char: '吗', hint: '口+马，好吗', parts: ['口', '马', '十', '一'] },
+    { char: '吧', hint: '口+巴，好吧', parts: ['口', '巴', '十', '一'] },
+    { char: '呢', hint: '口+尼，人呢', parts: ['口', '尼', '十', '一'] },
+    { char: '咖', hint: '口+加，咖啡', parts: ['口', '加', '十', '力'] },
+    { char: '天', hint: '一+大，天空', parts: ['一', '大', '人', '口'] },
+    { char: '太', hint: '大+点，太阳', parts: ['大', '点', '人', '口'] },
+    { char: '夫', hint: '一+人，丈夫', parts: ['一', '人', '大', '口'] },
+    { char: '交', hint: '六+义，交通', parts: ['六', '义', '口', '十'] },
+    { char: '京', hint: '享+小，北京', parts: ['享', '小', '口', '十'] },
+    { char: '亮', hint: '享+几，明亮', parts: ['享', '几', '口', '日'] },
+];
+
+const CONFIG = {
+    partSize: 55,
+    timeLimit: 90,
+    scorePerChar: 100,
+    comboBonus: 50,
+    levelsPerRound: 15,
+};
+
+let gameState = STATE.MENU;
+let score = 0;
+let highScore = parseInt(localStorage.getItem('hanzi_highScore')) || 0;
+let currentLevel = 0;
+let combo = 0;
+let timeLeft = CONFIG.timeLimit;
+let lastTime = 0;
+
+let currentHanzi = null;
+let targetChar = '';
+let availableParts = [];
+let selectedParts = [];
+let partPositions = [];
+let dragging = null;
+let dragOffset = { x: 0, y: 0 };
+
+let particles = [];
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let fadeInAlpha = 0;
+let resultAnim = null;
+
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        const [tl, tr, br, bl] = r;
+        this.moveTo(x + tl, y);
+        this.lineTo(x + w - tr, y);
+        this.quadraticCurveTo(x + w, y, x + w, y + tr);
+        this.lineTo(x + w, y + h - br);
+        this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+        this.lineTo(x + bl, y + h);
+        this.quadraticCurveTo(x, y + h, x, y + h - bl);
+        this.lineTo(x, y + tl);
+        this.quadraticCurveTo(x, y, x + tl, y);
+        this.closePath();
+        return this;
+    };
+}
+
+function initGame() {
+    score = 0;
+    currentLevel = 0;
+    combo = 0;
+    timeLeft = CONFIG.timeLimit;
+    particles = [];
+    shakeTimer = 0;
+    shakeIntensity = 0;
+    fadeInAlpha = 0;
+    resultAnim = null;
+    loadLevel();
+}
+
+function loadLevel() {
+    if (currentLevel >= CONFIG.levelsPerRound) {
+        gameState = STATE.GAME_OVER;
+        if (score > highScore) {
+            highScore = score;
+            localStorage.setItem('hanzi_highScore', highScore);
+        }
+        return;
+    }
+
+    const idx = Math.floor(Math.random() * HANZI_DATA.length);
+    currentHanzi = HANZI_DATA[idx];
+    targetChar = currentHanzi.char;
+
+    availableParts = [...currentHanzi.parts].sort(() => Math.random() - 0.5);
+    selectedParts = [];
+
+    partPositions = [];
+    const cols = 4;
+    const gap = 15;
+    const totalW = cols * CONFIG.partSize + (cols - 1) * gap;
+    const startX = (BASE_WIDTH - totalW) / 2 + CONFIG.partSize / 2;
+    const startY = BASE_HEIGHT - 130;
+
+    for (let i = 0; i < availableParts.length; i++) {
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        partPositions.push({
+            x: startX + col * (CONFIG.partSize + gap),
+            y: startY + row * (CONFIG.partSize + gap),
+            origX: startX + col * (CONFIG.partSize + gap),
+            origY: startY + row * (CONFIG.partSize + gap),
+            partIndex: i,
+            placed: false
+        });
+    }
+
+    timeLeft = CONFIG.timeLimit;
+    fadeInAlpha = 0;
+    resultAnim = null;
+}
+
+function createParticles(x, y, count, color) {
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 8,
+            vy: (Math.random() - 0.5) * 8 - 3,
+            life: 1,
+            decay: 0.015 + Math.random() * 0.02,
+            size: 3 + Math.random() * 5,
+            color: color || '#ffd700'
+        });
+    }
+}
+
+function updateParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.15;
+        p.life -= p.decay;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+function drawGradientBg() {
+    const grd = ctx.createLinearGradient(0, 0, 0, BASE_HEIGHT);
+    grd.addColorStop(0, '#0a0a2e');
+    grd.addColorStop(0.3, '#1a1a4e');
+    grd.addColorStop(0.7, '#0d0d3d');
+    grd.addColorStop(1, '#050520');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    for (let i = 0; i < 50; i++) {
+        const x = (i * 137.5 + Date.now() * 0.001 * (i % 3 + 1)) % BASE_WIDTH;
+        const y = (i * 89.3 + Date.now() * 0.0005 * (i % 2 + 1)) % BASE_HEIGHT;
+        ctx.beginPath();
+        ctx.arc(x, y, 1 + Math.sin(Date.now() * 0.002 + i) * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function drawMenu() {
+    drawGradientBg();
+
+    const titleY = 180 + Math.sin(Date.now() * 0.002) * 10;
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 52px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 20;
+    ctx.fillText('汉字拼字', BASE_WIDTH / 2, titleY);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px "Microsoft YaHei", sans-serif';
+    ctx.fillText('拖拽部件，拼出正确汉字', BASE_WIDTH / 2, titleY + 50);
+
+    const btnX = BASE_WIDTH / 2, btnY = 380, btnW = 200, btnH = 60;
+    const btnGrd = ctx.createLinearGradient(btnX - btnW/2, btnY, btnX + btnW/2, btnY);
+    btnGrd.addColorStop(0, '#4CAF50');
+    btnGrd.addColorStop(1, '#45a049');
+    ctx.fillStyle = btnGrd;
+    ctx.beginPath();
+    ctx.roundRect(btnX - btnW/2, btnY - btnH/2, btnW, btnH, 15);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
+    ctx.fillText('开始游戏', btnX, btnY);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    ctx.fillText('最高分: ' + highScore, BASE_WIDTH / 2, 480);
+
+    ctx.fillStyle = '#666';
+    ctx.font = '14px "Microsoft YaHei", sans-serif';
+    ctx.fillText('拖拽汉字部件到目标位置', BASE_WIDTH / 2, 540);
+    ctx.fillText('拼出正确的汉字得分', BASE_WIDTH / 2, 565);
+    ctx.fillText('按 P 或 ESC 暂停', BASE_WIDTH / 2, 590);
+}
+
+function drawPlaying() {
+    drawGradientBg();
+
+    let sx = 0, sy = 0;
+    if (shakeTimer > 0) {
+        sx = (Math.random() - 0.5) * shakeIntensity;
+        sy = (Math.random() - 0.5) * shakeIntensity;
+        shakeTimer--;
+    }
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, BASE_WIDTH, 65);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('分数: ' + score, 20, 22);
+
+    ctx.textAlign = 'center';
+    ctx.fillText('第 ' + (currentLevel + 1) + '/' + CONFIG.levelsPerRound + ' 关', BASE_WIDTH / 2, 22);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = timeLeft < 10 ? '#ff4444' : '#fff';
+    ctx.fillText('时间: ' + Math.ceil(timeLeft) + 's', BASE_WIDTH - 20, 22);
+
+    if (combo > 1) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 18px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('连击 x' + combo, BASE_WIDTH / 2, 50);
+    }
+
+    const targetX = BASE_WIDTH / 2;
+    const targetY = 150;
+
+    ctx.strokeStyle = '#4CAF50';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(targetX - 65, targetY - 65, 130, 130, 12);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(76,175,80,0.1)';
+    ctx.fill();
+
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 80px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(targetChar, targetX, targetY);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText(currentHanzi.hint, targetX, targetY + 75);
+
+    const selectedY = 310;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath();
+    ctx.roundRect(30, selectedY - 40, BASE_WIDTH - 60, 80, 10);
+    ctx.fill();
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#777';
+    ctx.font = '13px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('已选部件（点击可移除）', BASE_WIDTH / 2, selectedY - 45);
+
+    selectedParts.forEach((part, i) => {
+        const px = 70 + i * 65;
+        const py = selectedY;
+
+        ctx.fillStyle = '#4CAF50';
+        ctx.beginPath();
+        ctx.arc(px, py, 28, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#66BB6A';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 30px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(part, px, py);
+    });
+
+    const partsAreaY = BASE_HEIGHT - 180;
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.beginPath();
+    ctx.roundRect(15, partsAreaY - 15, BASE_WIDTH - 30, 140, 10);
+    ctx.fill();
+
+    partPositions.forEach((pos, i) => {
+        if (pos.placed) return;
+        const part = availableParts[i];
+        const isDragging = dragging && dragging.index === i;
+
+        ctx.fillStyle = isDragging ? '#1565C0' : '#1a237e';
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, CONFIG.partSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = isDragging ? '#42A5F5' : '#3949AB';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 30px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(part, pos.x, pos.y);
+    });
+
+    ctx.fillStyle = '#555';
+    ctx.font = '13px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('拖拽部件到上方区域，拼出 "' + targetChar + '"', BASE_WIDTH / 2, BASE_HEIGHT - 15);
+
+    drawParticles();
+
+    if (resultAnim) {
+        ctx.globalAlpha = resultAnim.alpha;
+        ctx.fillStyle = resultAnim.color;
+        ctx.font = 'bold 52px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = resultAnim.color;
+        ctx.shadowBlur = 15;
+        ctx.fillText(resultAnim.text, BASE_WIDTH / 2, resultAnim.y);
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+}
+
+function drawPaused() {
+    drawGradientBg();
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('游戏暂停', BASE_WIDTH / 2, BASE_HEIGHT / 2 - 50);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px "Microsoft YaHei", sans-serif';
+    ctx.fillText('点击屏幕继续', BASE_WIDTH / 2, BASE_HEIGHT / 2 + 20);
+}
+
+function drawGameOver() {
+    drawGradientBg();
+
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 42px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('游戏结束', BASE_WIDTH / 2, 180);
+
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 30px "Microsoft YaHei", sans-serif';
+    ctx.fillText('最终得分: ' + score, BASE_WIDTH / 2, 260);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '22px "Microsoft YaHei", sans-serif';
+    ctx.fillText('最高分: ' + highScore, BASE_WIDTH / 2, 310);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px "Microsoft YaHei", sans-serif';
+    ctx.fillText('完成了 ' + Math.min(currentLevel, CONFIG.levelsPerRound) + ' 个汉字', BASE_WIDTH / 2, 355);
+
+    if (score >= highScore && score > 0) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 26px "Microsoft YaHei", sans-serif';
+        ctx.shadowColor = '#ffd700';
+        ctx.shadowBlur = 10;
+        ctx.fillText('新纪录！', BASE_WIDTH / 2, 400);
+        ctx.shadowBlur = 0;
+    }
+
+    const btnX = BASE_WIDTH / 2, btnY = 470, btnW = 200, btnH = 55;
+    const btnGrd = ctx.createLinearGradient(btnX - btnW/2, btnY, btnX + btnW/2, btnY);
+    btnGrd.addColorStop(0, '#2196F3');
+    btnGrd.addColorStop(1, '#1976D2');
+    ctx.fillStyle = btnGrd;
+    ctx.beginPath();
+    ctx.roundRect(btnX - btnW/2, btnY - btnH/2, btnW, btnH, 12);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px "Microsoft YaHei", sans-serif';
+    ctx.fillText('再来一局', btnX, btnY);
+}
+
+function update(dt) {
+    if (gameState !== STATE.PLAYING) return;
+
+    if (fadeInAlpha < 1) fadeInAlpha = Math.min(1, fadeInAlpha + dt * 3);
+
+    timeLeft -= dt;
+    if (timeLeft <= 0 && !resultAnim) {
+        timeLeft = 0;
+        gameState = STATE.GAME_OVER;
+        if (score > highScore) {
+            highScore = score;
+            localStorage.setItem('hanzi_highScore', highScore);
+        }
+        shakeTimer = 20;
+        shakeIntensity = 10;
+    }
+
+    updateParticles(dt);
+
+    if (resultAnim) {
+        resultAnim.y -= dt * 30;
+        resultAnim.timer -= dt;
+        if (resultAnim.timer < 0.5) resultAnim.alpha = resultAnim.timer * 2;
+        if (resultAnim.timer <= 0) {
+            resultAnim = null;
+            loadLevel();
+        }
+    }
+}
+
+let pointerDown = false;
+let pointerX = 0;
+let pointerY = 0;
+
+function getPointerPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+        x: (clientX - rect.left) / scale,
+        y: (clientY - rect.top) / scale
+    };
+}
+
+function getPointerEndPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+    const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
+    return {
+        x: (clientX - rect.left) / scale,
+        y: (clientY - rect.top) / scale
+    };
+}
+
+function handlePointerDown(e) {
+    e.preventDefault();
+    const pos = getPointerPos(e);
+    pointerDown = true;
+    pointerX = pos.x;
+    pointerY = pos.y;
+
+    if (gameState === STATE.MENU) {
+        if (pos.x > BASE_WIDTH/2 - 100 && pos.x < BASE_WIDTH/2 + 100 &&
+            pos.y > 350 && pos.y < 410) {
+            gameState = STATE.PLAYING;
+            initGame();
+        }
+        return;
+    }
+
+    if (gameState === STATE.GAME_OVER) {
+        if (pos.x > BASE_WIDTH/2 - 100 && pos.x < BASE_WIDTH/2 + 100 &&
+            pos.y > 442 && pos.y < 498) {
+            gameState = STATE.PLAYING;
+            initGame();
+        }
+        return;
+    }
+
+    if (gameState === STATE.PAUSED) {
+        gameState = STATE.PLAYING;
+        return;
+    }
+
+    if (gameState === STATE.PLAYING && !resultAnim) {
+        const selectedY = 310;
+        for (let i = selectedParts.length - 1; i >= 0; i--) {
+            const px = 70 + i * 65;
+            const dist = Math.sqrt((pos.x - px) ** 2 + (pos.y - selectedY) ** 2);
+            if (dist < 32) {
+                const removedPart = selectedParts.splice(i, 1)[0];
+                for (let j = 0; j < availableParts.length; j++) {
+                    if (availableParts[j] === removedPart && partPositions[j].placed) {
+                        partPositions[j].placed = false;
+                        partPositions[j].x = partPositions[j].origX;
+                        partPositions[j].y = partPositions[j].origY;
+                        break;
+                    }
+                }
+                return;
+            }
+        }
+
+        for (let i = 0; i < partPositions.length; i++) {
+            const pos2 = partPositions[i];
+            if (pos2.placed) continue;
+            const dist = Math.sqrt((pos.x - pos2.x) ** 2 + (pos.y - pos2.y) ** 2);
+            if (dist < CONFIG.partSize / 2 + 5) {
+                dragging = { index: i, part: availableParts[i] };
+                dragOffset.x = pos.x - pos2.x;
+                dragOffset.y = pos.y - pos2.y;
+                break;
+            }
+        }
+    }
+}
+
+function handlePointerMove(e) {
+    e.preventDefault();
+    if (!pointerDown || !dragging) return;
+    const pos = getPointerPos(e);
+    pointerX = pos.x;
+    pointerY = pos.y;
+    partPositions[dragging.index].x = pos.x - dragOffset.x;
+    partPositions[dragging.index].y = pos.y - dragOffset.y;
+}
+
+function handlePointerUp(e) {
+    e.preventDefault();
+    if (!pointerDown) return;
+    pointerDown = false;
+
+    if (dragging && gameState === STATE.PLAYING && !resultAnim) {
+        const pos = getPointerEndPos(e);
+        const selectedY = 310;
+
+        if (pos.y > selectedY - 60 && pos.y < selectedY + 60 && pos.x > 30 && pos.x < BASE_WIDTH - 30) {
+            selectedParts.push(dragging.part);
+            partPositions[dragging.index].placed = true;
+            checkAnswer();
+        } else {
+            partPositions[dragging.index].x = partPositions[dragging.index].origX;
+            partPositions[dragging.index].y = partPositions[dragging.index].origY;
+        }
+    }
+    dragging = null;
+}
+
+function checkAnswer() {
+    if (selectedParts.length < 2) return;
+
+    const targetParts = currentHanzi.parts.slice(0, 2);
+    const hasAll = targetParts.every(p => selectedParts.includes(p));
+
+    if (hasAll) {
+        const bonus = combo * CONFIG.comboBonus;
+        const earned = CONFIG.scorePerChar + bonus;
+        score += earned;
+        combo++;
+
+        resultAnim = { text: '+' + earned, color: '#4CAF50', y: 250, alpha: 1, timer: 1.2 };
+        createParticles(BASE_WIDTH / 2, 200, 30, '#4CAF50');
+        createParticles(BASE_WIDTH / 2, 200, 20, '#ffd700');
+        currentLevel++;
+    } else if (selectedParts.length >= availableParts.length) {
+        combo = 0;
+        shakeTimer = 10;
+        shakeIntensity = 5;
+        resultAnim = { text: '再试试', color: '#ff4444', y: 250, alpha: 1, timer: 1 };
+
+        setTimeout(() => {
+            selectedParts = [];
+            partPositions.forEach(p => {
+                p.placed = false;
+                p.x = p.origX;
+                p.y = p.origY;
+            });
+        }, 500);
+    }
+}
+
+canvas.addEventListener('mousedown', handlePointerDown);
+canvas.addEventListener('mousemove', handlePointerMove);
+canvas.addEventListener('mouseup', handlePointerUp);
+canvas.addEventListener('touchstart', handlePointerDown, { passive: false });
+canvas.addEventListener('touchmove', handlePointerMove, { passive: false });
+canvas.addEventListener('touchend', handlePointerUp, { passive: false });
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        if (gameState === STATE.PLAYING) gameState = STATE.PAUSED;
+        else if (gameState === STATE.PAUSED) gameState = STATE.PLAYING;
+    }
+    if (e.key === ' ' || e.key === 'Enter') {
+        if (gameState === STATE.MENU) { gameState = STATE.PLAYING; initGame(); }
+        else if (gameState === STATE.GAME_OVER) { gameState = STATE.PLAYING; initGame(); }
+    }
+});
+
+function gameLoop(timestamp) {
+    if (!lastTime) lastTime = timestamp;
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+    lastTime = timestamp;
+
+    update(dt);
+
+    switch (gameState) {
+        case STATE.MENU: drawMenu(); break;
+        case STATE.PLAYING: drawPlaying(); break;
+        case STATE.PAUSED: drawPaused(); break;
+        case STATE.GAME_OVER: drawGameOver(); break;
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

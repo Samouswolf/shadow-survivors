@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>纸牌接龙</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a1628; touch-action: none; }
+canvas { display: block; width: 100%; height: 100%; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+// ===================== 常量 =====================
+const SUITS_ALL = ['♠','♥','♦','♣'];
+const SUIT_COLORS = {'♠':'#e8e8e8','♥':'#ff4444','♦':'#ff4444','♣':'#e8e8e8'};
+const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const DIFFICULTY = {
+    easy:   { name:'简单', suits:1, desc:'只用♠', color:'#4CAF50' },
+    medium: { name:'中等', suits:2, desc:'♠+♥', color:'#FF9800' },
+    hard:   { name:'困难', suits:4, desc:'四花色', color:'#f44336' }
+};
+const COLS = 10;
+const STOCK_X = 20;
+const FOUNDATION_START_X_OFFSET = 5;
+const TABLEAU_Y_OFFSET = 130;
+const CARD_W_RATIO = 0.07;
+const CARD_H_RATIO = 0.15;
+const FACE_DOWN_OFFSET = 4;
+const FACE_UP_OFFSET = 22;
+
+// ===================== 游戏状态 =====================
+var canvas, ctx;
+var W, H, CW, CH, scale;
+var gameState = 'menu'; // menu | playing | win
+var difficulty = 'easy';
+var deck = [];
+var tableau = []; // 10 piles
+var foundation = []; // 8 completed suits
+var stock = []; // remaining cards to deal
+var score = 0;
+var moves = 0;
+var timer = 0;
+var timerInterval = null;
+var highScore = { easy: 0, medium: 0, hard: 0 };
+var hintCards = [];
+var hintTimer = 0;
+var autoHintTimer = 0;
+var dragging = null; // { cards, fromPile, fromIndex, offsetX, offsetY }
+var dragCards = [];
+var particles = [];
+var animating = false;
+var dealAnimQueue = [];
+var dealAnimTimer = 0;
+var winAnimTimer = 0;
+var undoStack = [];
+var lastMoveTime = 0;
+// menu animation
+var menuParticles = [];
+var menuTime = 0;
+
+// ===================== 粒子系统 =====================
+function spawnParticles(x, y, color, count) {
+    for (var i = 0; i < count; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 6,
+            vy: (Math.random() - 0.5) * 6 - 2,
+            life: 1,
+            decay: 0.015 + Math.random() * 0.02,
+            size: 2 + Math.random() * 4,
+            color: color
+        });
+    }
+}
+
+function updateParticles() {
+    for (var i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1;
+        p.life -= p.decay;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (var i = 0; i < particles.length; i++) {
+        var p = particles[i];
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ===================== 初始化 =====================
+function init() {
+    canvas = document.getElementById('c');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+    loadHighScore();
+    initMenuParticles();
+    // events
+    canvas.addEventListener('mousedown', onPointerDown);
+    canvas.addEventListener('mousemove', onPointerMove);
+    canvas.addEventListener('mouseup', onPointerUp);
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    document.addEventListener('keydown', onKeyDown);
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+    CW = W;
+    CH = H;
+    scale = Math.min(W / 1200, H / 800);
+}
+
+function loadHighScore() {
+    try {
+        var d = JSON.parse(localStorage.getItem('spider_hs'));
+        if (d) highScore = d;
+    } catch(e) {}
+}
+
+function saveHighScore() {
+    try {
+        localStorage.setItem('spider_hs', JSON.stringify(highScore));
+    } catch(e) {}
+}
+
+// ===================== 牌组生成 =====================
+function createDeck(numSuits) {
+    var suits = SUITS_ALL.slice(0, numSuits);
+    var d = [];
+    var sets = 8 / numSuits;
+    for (var s = 0; s < sets; s++) {
+        for (var si = 0; si < suits.length; si++) {
+            for (var ri = 0; ri < RANKS.length; ri++) {
+                d.push({ suit: suits[si], rank: RANKS[ri], faceUp: false, id: d.length });
+            }
+        }
+    }
+    // shuffle
+    for (var i = d.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = d[i]; d[i] = d[j]; d[j] = t;
+    }
+    return d;
+}
+
+// ===================== 发牌 =====================
+function dealCards() {
+    var numSuits = DIFFICULTY[difficulty].suits;
+    deck = createDeck(numSuits);
+    tableau = [];
+    foundation = [];
+    stock = [];
+    score = 500;
+    moves = 0;
+    timer = 0;
+    hintCards = [];
+    hintTimer = 0;
+    autoHintTimer = 0;
+    undoStack = [];
+    dragging = null;
+    dragCards = [];
+    particles = [];
+
+    // deal to tableau: first 4 piles get 6 cards, last 6 piles get 5 cards
+    for (var i = 0; i < COLS; i++) {
+        tableau.push([]);
+        var count = i < 4 ? 6 : 5;
+        for (var j = 0; j < count; j++) {
+            var card = deck.pop();
+            if (j === count - 1) card.faceUp = true;
+            tableau[i].push(card);
+        }
+    }
+    // remaining 50 cards go to stock
+    while (deck.length > 0) {
+        var c = deck.pop();
+        c.faceUp = false;
+        stock.push(c);
+    }
+
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(function() {
+        if (gameState === 'playing') timer++;
+    }, 1000);
+}
+
+// ===================== 发牌动画 =====================
+function startDealAnimation() {
+    dealAnimQueue = [];
+    for (var i = 0; i < COLS; i++) {
+        for (var j = 0; j < tableau[i].length; j++) {
+            dealAnimQueue.push({ col: i, row: j });
+        }
+    }
+    dealAnimTimer = 0;
+    animating = true;
+}
+
+function updateDealAnimation(dt) {
+    if (dealAnimQueue.length === 0) {
+        animating = false;
+        return;
+    }
+    dealAnimTimer += dt;
+    while (dealAnimTimer > 30 && dealAnimQueue.length > 0) {
+        dealAnimTimer -= 30;
+        dealAnimQueue.shift();
+    }
+}
+
+// ===================== 游戏逻辑 =====================
+function getCardW() { return CW * CARD_W_RATIO; }
+function getCardH() { return CH * CARD_H_RATIO; }
+function getColSpacing() { return (CW - getCardW() - 40) / (COLS - 1); }
+function getTableauY() { return TABLEAU_Y_OFFSET * scale; }
+
+function getTableauCardPos(col, row) {
+    var cw = getCardW();
+    var spacing = getColSpacing();
+    var x = 20 + col * spacing;
+    var y = getTableauY();
+    for (var i = 0; i < row; i++) {
+        if (tableau[col] && tableau[col][i]) {
+            y += tableau[col][i].faceUp ? FACE_UP_OFFSET * scale : FACE_DOWN_OFFSET * scale;
+        }
+    }
+    return { x: x, y: y };
+}
+
+function getStockPos() {
+    var cw = getCardW();
+    return { x: CW - cw - 20, y: getTableauY() };
+}
+
+function getFoundationPos(index) {
+    var cw = getCardW();
+    var spacing = getColSpacing();
+    return { x: 20 + (index + FOUNDATION_START_X_OFFSET) * spacing, y: 15 * scale };
+}
+
+function canPlaceOnTableau(card, col) {
+    var pile = tableau[col];
+    if (pile.length === 0) return true;
+    var top = pile[pile.length - 1];
+    if (!top.faceUp) return false;
+    var topIdx = RANKS.indexOf(top.rank);
+    var cardIdx = RANKS.indexOf(card.rank);
+    return cardIdx === topIdx - 1;
+}
+
+function canMoveSequence(col, startIndex) {
+    var pile = tableau[col];
+    if (!pile[startIndex] || !pile[startIndex].faceUp) return false;
+    // check if cards from startIndex to end form a descending sequence of same suit
+    for (var i = startIndex; i < pile.length - 1; i++) {
+        if (!pile[i].faceUp || !pile[i + 1].faceUp) return false;
+        if (pile[i].suit !== pile[i + 1].suit) return false;
+        var idx1 = RANKS.indexOf(pile[i].rank);
+        var idx2 = RANKS.indexOf(pile[i + 1].rank);
+        if (idx1 !== idx2 + 1) return false;
+    }
+    return true;
+}
+
+function checkCompleteSequence(col) {
+    var pile = tableau[col];
+    if (pile.length < 13) return false;
+    // check last 13 cards
+    var start = pile.length - 13;
+    if (!pile[start].faceUp || pile[start].rank !== 'K') return false;
+    var suit = pile[start].suit;
+    for (var i = start; i < pile.length; i++) {
+        if (!pile[i].faceUp || pile[i].suit !== suit) return false;
+        if (RANKS.indexOf(pile[i].rank) !== i - start) return false;
+    }
+    return true;
+}
+
+function removeCompleteSequence(col) {
+    var pile = tableau[col];
+    var removed = pile.splice(pile.length - 13, 13);
+    // flip new top card
+    if (pile.length > 0 && !pile[pile.length - 1].faceUp) {
+        pile[pile.length - 1].faceUp = true;
+    }
+    foundation.push(removed);
+    score += 100;
+    spawnParticles(CW / 2, CH / 2, '#FFD700', 50);
+}
+
+function moveCards(fromCol, fromIndex, toCol) {
+    var cards = tableau[fromCol].splice(fromIndex);
+    tableau[toCol] = tableau[toCol].concat(cards);
+    // flip new top card
+    if (tableau[fromCol].length > 0 && !tableau[fromCol][tableau[fromCol].length - 1].faceUp) {
+        tableau[fromCol][tableau[fromCol].length - 1].faceUp = true;
+        score += 5;
+    }
+    moves++;
+    score = Math.max(0, score - 1);
+    autoHintTimer = 0;
+    hintCards = [];
+    // check for complete sequence
+    checkCompleteSequence(toCol);
+    // check win
+    if (foundation.length === 8) {
+        gameState = 'win';
+        winAnimTimer = 0;
+        if (score > highScore[difficulty]) {
+            highScore[difficulty] = score;
+            saveHighScore();
+        }
+    }
+}
+
+function dealFromStock() {
+    if (stock.length === 0 || animating) return;
+    // check all tableau piles have at least 1 card
+    for (var i = 0; i < COLS; i++) {
+        if (tableau[i].length === 0) {
+            // show hint that all piles need cards
+            return;
+        }
+    }
+    var count = COLS;
+    if (stock.length < COLS) count = stock.length;
+    // save undo
+    saveUndo();
+    for (var i = 0; i < count; i++) {
+        var card = stock.pop();
+        card.faceUp = true;
+        tableau[i].push(card);
+    }
+    // check for complete sequences
+    for (var i = 0; i < COLS; i++) {
+        if (checkCompleteSequence(i)) {
+            removeCompleteSequence(i);
+        }
+    }
+    score = Math.max(0, score - 10);
+    autoHintTimer = 0;
+    hintCards = [];
+}
+
+function saveUndo() {
+    undoStack.push({
+        tableau: JSON.parse(JSON.stringify(tableau)),
+        stock: JSON.parse(JSON.stringify(stock)),
+        foundation: JSON.parse(JSON.stringify(foundation)),
+        score: score,
+        moves: moves
+    });
+    if (undoStack.length > 50) undoStack.shift();
+}
+
+function undo() {
+    if (undoStack.length === 0) return;
+    var state = undoStack.pop();
+    tableau = state.tableau;
+    stock = state.stock;
+    foundation = state.foundation;
+    score = state.score;
+    moves = state.moves;
+    hintCards = [];
+    autoHintTimer = 0;
+}
+
+function findHint() {
+    hintCards = [];
+    // 1. find complete sequences to move to foundation
+    for (var i = 0; i < COLS; i++) {
+        if (checkCompleteSequence(i)) {
+            hintCards = [{ col: i, index: tableau[i].length - 13 }];
+            return true;
+        }
+    }
+    // 2. find moves that reveal face-down cards
+    for (var i = 0; i < COLS; i++) {
+        var pile = tableau[i];
+        if (pile.length === 0) continue;
+        for (var j = 0; j < pile.length; j++) {
+            if (!pile[j].faceUp) continue;
+            if (!canMoveSequence(i, j)) continue;
+            for (var k = 0; k < COLS; k++) {
+                if (k === i) continue;
+                if (canPlaceOnTableau(pile[j], k)) {
+                    // prefer moves that reveal cards
+                    if (j > 0 && !pile[j - 1].faceUp) {
+                        hintCards = [{ col: i, index: j }, { col: k, index: -1 }];
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    // 3. any valid move
+    for (var i = 0; i < COLS; i++) {
+        var pile = tableau[i];
+        if (pile.length === 0) continue;
+        for (var j = 0; j < pile.length; j++) {
+            if (!pile[j].faceUp) continue;
+            if (!canMoveSequence(i, j)) continue;
+            for (var k = 0; k < COLS; k++) {
+                if (k === i) continue;
+                if (canPlaceOnTableau(pile[j], k)) {
+                    hintCards = [{ col: i, index: j }, { col: k, index: -1 }];
+                    return true;
+                }
+            }
+        }
+    }
+    // 4. suggest dealing from stock
+    if (stock.length > 0) {
+        hintCards = [{ col: -1, index: -1 }]; // stock
+        return true;
+    }
+    return false;
+}
+
+// ===================== 输入处理 =====================
+function getPointerPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    return {
+        x: (e.clientX - rect.left) * (W / rect.width),
+        y: (e.clientY - rect.top) * (H / rect.height)
+    };
+}
+
+function onTouchStart(e) { e.preventDefault(); onPointerDown(e.touches[0]); }
+function onTouchMove(e) { e.preventDefault(); onPointerMove(e.touches[0]); }
+function onTouchEnd(e) { e.preventDefault(); onPointerUp(e.changedTouches[0]); }
+
+function onPointerDown(e) {
+    var pos = getPointerPos(e);
+    var mx = pos.x, my = pos.y;
+
+    if (gameState === 'menu') {
+        handleMenuClick(mx, my);
+        return;
+    }
+    if (gameState === 'win') {
+        handleWinClick(mx, my);
+        return;
+    }
+    if (gameState !== 'playing' || animating) return;
+
+    // check hint button
+    var hb = getHintButtonRect();
+    if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+        findHint();
+        hintTimer = 2000;
+        return;
+    }
+    // check undo button
+    var ub = getUndoButtonRect();
+    if (mx >= ub.x && mx <= ub.x + ub.w && my >= ub.y && my <= ub.y + ub.h) {
+        undo();
+        return;
+    }
+    // check deal button (stock area)
+    var sp = getStockPos();
+    var cw = getCardW(), ch = getCardH();
+    if (stock.length > 0 && mx >= sp.x && mx <= sp.x + cw && my >= sp.y && my <= sp.y + ch) {
+        saveUndo();
+        dealFromStock();
+        return;
+    }
+    // check new game button
+    var nb = getNewGameButtonRect();
+    if (mx >= nb.x && mx <= nb.x + nb.w && my >= nb.y && my <= nb.y + nb.h) {
+        gameState = 'menu';
+        if (timerInterval) clearInterval(timerInterval);
+        return;
+    }
+
+    // check tableau for drag
+    for (var i = COLS - 1; i >= 0; i--) {
+        var pile = tableau[i];
+        for (var j = pile.length - 1; j >= 0; j--) {
+            var cp = getTableauCardPos(i, j);
+            var cardH = getCardH();
+            var cardW = getCardW();
+            // determine hit height
+            var hitH = (j < pile.length - 1) ? (FACE_UP_OFFSET * scale) : cardH;
+            if (mx >= cp.x && mx <= cp.x + cardW && my >= cp.y && my <= cp.y + hitH) {
+                if (!pile[j].faceUp) break;
+                if (!canMoveSequence(i, j)) break;
+                // start drag
+                saveUndo();
+                var cards = pile.splice(j);
+                dragging = {
+                    fromCol: i,
+                    fromIndex: j,
+                    offsetX: mx - cp.x,
+                    offsetY: my - cp.y,
+                    x: mx,
+                    y: my
+                };
+                dragCards = cards;
+                hintCards = [];
+                autoHintTimer = 0;
+                return;
+            }
+        }
+    }
+}
+
+function onPointerMove(e) {
+    if (!dragging) return;
+    var pos = getPointerPos(e);
+    dragging.x = pos.x;
+    dragging.y = pos.y;
+}
+
+function onPointerUp(e) {
+    if (!dragging) return;
+    var pos = getPointerPos(e);
+    var mx = pos.x, my = pos.y;
+    var cw = getCardW();
+
+    // find target column
+    var targetCol = -1;
+    var bestDist = Infinity;
+    for (var i = 0; i < COLS; i++) {
+        var cp = getTableauCardPos(i, 0);
+        var dist = Math.abs(mx - (cp.x + cw / 2));
+        if (dist < getColSpacing() / 2 && dist < bestDist) {
+            bestDist = dist;
+            targetCol = i;
+        }
+    }
+
+    if (targetCol >= 0 && targetCol !== dragging.fromCol && canPlaceOnTableau(dragCards[0], targetCol)) {
+        tableau[targetCol] = tableau[targetCol].concat(dragCards);
+        // flip new top card in source
+        if (tableau[dragging.fromCol].length > 0 && !tableau[dragging.fromCol][tableau[dragging.fromCol].length - 1].faceUp) {
+            tableau[dragging.fromCol][tableau[dragging.fromCol].length - 1].faceUp = true;
+            score += 5;
+        }
+        moves++;
+        score = Math.max(0, score - 1);
+        autoHintTimer = 0;
+        // check complete sequence
+        checkCompleteSequence(targetCol);
+        // check win
+        if (foundation.length === 8) {
+            gameState = 'win';
+            winAnimTimer = 0;
+            if (score > highScore[difficulty]) {
+                highScore[difficulty] = score;
+                saveHighScore();
+            }
+        }
+    } else {
+        // return cards to original pile
+        tableau[dragging.fromCol] = tableau[dragging.fromCol].concat(dragCards);
+    }
+
+    dragging = null;
+    dragCards = [];
+}
+
+function onKeyDown(e) {
+    if (gameState === 'menu') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            startGame();
+        }
+        if (e.key === '1') { difficulty = 'easy'; }
+        if (e.key === '2') { difficulty = 'medium'; }
+        if (e.key === '3') { difficulty = 'hard'; }
+        return;
+    }
+    if (gameState === 'win') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            gameState = 'menu';
+        }
+        return;
+    }
+    if (gameState !== 'playing') return;
+    if (e.key === 'h' || e.key === 'H') {
+        findHint();
+        hintTimer = 2000;
+    }
+    if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        undo();
+    }
+    if (e.key === 'd' || e.key === 'D') {
+        saveUndo();
+        dealFromStock();
+    }
+    if (e.key === 'n' || e.key === 'N') {
+        gameState = 'menu';
+        if (timerInterval) clearInterval(timerInterval);
+    }
+}
+
+// ===================== 菜单 =====================
+function initMenuParticles() {
+    menuParticles = [];
+    for (var i = 0; i < 60; i++) {
+        menuParticles.push({
+            x: Math.random() * 2000,
+            y: Math.random() * 1200,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: -0.3 - Math.random() * 0.5,
+            size: 2 + Math.random() * 3,
+            alpha: 0.3 + Math.random() * 0.5,
+            color: ['#FFD700','#FF6B6B','#4ECDC4','#45B7D1','#96CEB4'][Math.floor(Math.random()*5)]
+        });
+    }
+}
+
+function updateMenuParticles() {
+    for (var i = 0; i < menuParticles.length; i++) {
+        var p = menuParticles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.y < -10) { p.y = CH + 10; p.x = Math.random() * CW; }
+        if (p.x < -10) p.x = CW + 10;
+        if (p.x > CW + 10) p.x = -10;
+    }
+}
+
+function drawMenu() {
+    // gradient background
+    var grad = ctx.createLinearGradient(0, 0, 0, CH);
+    grad.addColorStop(0, '#0a1628');
+    grad.addColorStop(0.5, '#1a2a4a');
+    grad.addColorStop(1, '#0d1f3c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, CW, CH);
+
+    // particles
+    for (var i = 0; i < menuParticles.length; i++) {
+        var p = menuParticles[i];
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // title
+    var titleSize = Math.min(CW * 0.08, 72);
+    ctx.font = 'bold ' + titleSize + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText('纸牌接龙', CW / 2 + 3, CH * 0.22 + 3);
+    // gradient text
+    var tg = ctx.createLinearGradient(CW * 0.3, CH * 0.2, CW * 0.7, CH * 0.25);
+    tg.addColorStop(0, '#FFD700');
+    tg.addColorStop(0.5, '#FFA500');
+    tg.addColorStop(1, '#FFD700');
+    ctx.fillStyle = tg;
+    ctx.fillText('纸牌接龙', CW / 2, CH * 0.22);
+
+    // subtitle
+    ctx.font = Math.min(CW * 0.025, 20) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#8899aa';
+    ctx.fillText('Spider Solitaire', CW / 2, CH * 0.30);
+
+    // draw sample cards
+    drawSampleCards();
+
+    // difficulty buttons
+    var btnW = Math.min(CW * 0.25, 220);
+    var btnH = Math.min(CH * 0.07, 55);
+    var btnY = CH * 0.58;
+    var keys = ['easy', 'medium', 'hard'];
+    for (var i = 0; i < 3; i++) {
+        var bx = CW / 2 - btnW / 2;
+        var by = btnY + i * (btnH + 15);
+        var d = DIFFICULTY[keys[i]];
+        var isSelected = difficulty === keys[i];
+        // button bg
+        var bg = ctx.createLinearGradient(bx, by, bx, by + btnH);
+        if (isSelected) {
+            bg.addColorStop(0, d.color);
+            bg.addColorStop(1, shadeColor(d.color, -30));
+        } else {
+            bg.addColorStop(0, '#2a3a5a');
+            bg.addColorStop(1, '#1a2a4a');
+        }
+        ctx.fillStyle = bg;
+        roundRect(ctx, bx, by, btnW, btnH, 12);
+        ctx.fill();
+        if (isSelected) {
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 2;
+            roundRect(ctx, bx, by, btnW, btnH, 12);
+            ctx.stroke();
+        }
+        // text
+        ctx.font = 'bold ' + Math.min(CW * 0.028, 22) + 'px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = isSelected ? '#fff' : '#8899aa';
+        ctx.fillText(d.name + ' (' + d.desc + ')', CW / 2, by + btnH / 2);
+    }
+
+    // start button
+    var startBtnW = Math.min(CW * 0.35, 300);
+    var startBtnH = Math.min(CH * 0.08, 60);
+    var startBtnY = CH * 0.85;
+    var sbg = ctx.createLinearGradient(CW / 2 - startBtnW / 2, startBtnY, CW / 2 + startBtnW / 2, startBtnY);
+    sbg.addColorStop(0, '#4CAF50');
+    sbg.addColorStop(1, '#45a049');
+    ctx.fillStyle = sbg;
+    roundRect(ctx, CW / 2 - startBtnW / 2, startBtnY, startBtnW, startBtnH, 15);
+    ctx.fill();
+    // glow
+    ctx.shadowColor = '#4CAF50';
+    ctx.shadowBlur = 20;
+    roundRect(ctx, CW / 2 - startBtnW / 2, startBtnY, startBtnW, startBtnH, 15);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold ' + Math.min(CW * 0.035, 28) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('开始游戏', CW / 2, startBtnY + startBtnH / 2);
+
+    // high score
+    ctx.font = Math.min(CW * 0.02, 16) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#667788';
+    ctx.fillText('最高分: ' + (highScore[difficulty] || 0), CW / 2, CH * 0.95);
+
+    // keyboard hints
+    ctx.font = Math.min(CW * 0.015, 13) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#556677';
+    ctx.fillText('按键 1/2/3 选择难度 | Enter 开始', CW / 2, CH * 0.98);
+}
+
+function drawSampleCards() {
+    var cw = getCardW() * 0.8;
+    var ch = getCardH() * 0.8;
+    var cx = CW / 2;
+    var cy = CH * 0.43;
+    var cards = [
+        { suit: '♠', rank: 'A' },
+        { suit: '♥', rank: 'K' },
+        { suit: '♦', rank: 'Q' },
+        { suit: '♣', rank: 'J' }
+    ];
+    for (var i = 0; i < 4; i++) {
+        var x = cx - cw * 2.2 + i * cw * 1.2;
+        var y = cy + Math.sin(menuTime * 0.002 + i * 0.8) * 8;
+        var rot = Math.sin(menuTime * 0.001 + i * 1.2) * 0.05;
+        ctx.save();
+        ctx.translate(x + cw / 2, y + ch / 2);
+        ctx.rotate(rot);
+        drawCard(-cw / 2, -ch / 2, cw, ch, cards[i], true);
+        ctx.restore();
+    }
+}
+
+function shadeColor(color, percent) {
+    var num = parseInt(color.replace('#', ''), 16);
+    var r = Math.min(255, Math.max(0, (num >> 16) + percent));
+    var g = Math.min(255, Math.max(0, ((num >> 8) & 0x00FF) + percent));
+    var b = Math.min(255, Math.max(0, (num & 0x0000FF) + percent));
+    return '#' + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+}
+
+function handleMenuClick(mx, my) {
+    var btnW = Math.min(CW * 0.25, 220);
+    var btnH = Math.min(CH * 0.07, 55);
+    var btnY = CH * 0.58;
+    var keys = ['easy', 'medium', 'hard'];
+    for (var i = 0; i < 3; i++) {
+        var bx = CW / 2 - btnW / 2;
+        var by = btnY + i * (btnH + 15);
+        if (mx >= bx && mx <= bx + btnW && my >= by && my <= by + btnH) {
+            difficulty = keys[i];
+            return;
+        }
+    }
+    // start button
+    var startBtnW = Math.min(CW * 0.35, 300);
+    var startBtnH = Math.min(CH * 0.08, 60);
+    var startBtnY = CH * 0.85;
+    if (mx >= CW / 2 - startBtnW / 2 && mx <= CW / 2 + startBtnW / 2 &&
+        my >= startBtnY && my <= startBtnY + startBtnH) {
+        startGame();
+    }
+}
+
+function startGame() {
+    dealCards();
+    gameState = 'playing';
+    startDealAnimation();
+}
+
+// ===================== Win Screen =====================
+function handleWinClick(mx, my) {
+    var btnW = Math.min(CW * 0.35, 280);
+    var btnH = Math.min(CH * 0.07, 55);
+    var btnY = CH * 0.7;
+    if (mx >= CW / 2 - btnW / 2 && mx <= CW / 2 + btnW / 2 &&
+        my >= btnY && my <= btnY + btnH) {
+        gameState = 'menu';
+    }
+}
+
+function drawWinScreen() {
+    winAnimTimer += 16;
+    // overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, CW, CH);
+
+    // fireworks particles
+    if (winAnimTimer % 200 < 16) {
+        var colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FF69B4', '#00FF88'];
+        spawnParticles(
+            Math.random() * CW * 0.8 + CW * 0.1,
+            Math.random() * CH * 0.5 + CH * 0.1,
+            colors[Math.floor(Math.random() * colors.length)],
+            30
+        );
+    }
+
+    // title
+    var ts = Math.min(CW * 0.07, 60);
+    ctx.font = 'bold ' + ts + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('恭喜通关!', CW / 2, CH * 0.3);
+
+    // score
+    ctx.font = Math.min(CW * 0.04, 32) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('得分: ' + score, CW / 2, CH * 0.42);
+    ctx.fillText('步数: ' + moves, CW / 2, CH * 0.49);
+    ctx.fillText('用时: ' + formatTime(timer), CW / 2, CH * 0.56);
+
+    if (score >= highScore[difficulty]) {
+        ctx.font = Math.min(CW * 0.03, 24) + 'px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#FF6B6B';
+        ctx.fillText('新纪录!', CW / 2, CH * 0.63);
+    }
+
+    // back button
+    var btnW = Math.min(CW * 0.35, 280);
+    var btnH = Math.min(CH * 0.07, 55);
+    var btnY = CH * 0.7;
+    var bg = ctx.createLinearGradient(CW / 2 - btnW / 2, btnY, CW / 2 + btnW / 2, btnY);
+    bg.addColorStop(0, '#4CAF50');
+    bg.addColorStop(1, '#45a049');
+    ctx.fillStyle = bg;
+    roundRect(ctx, CW / 2 - btnW / 2, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.font = 'bold ' + Math.min(CW * 0.028, 22) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('返回菜单', CW / 2, btnY + btnH / 2);
+}
+
+// ===================== UI 元素 =====================
+function getHintButtonRect() {
+    var w = Math.min(CW * 0.08, 70);
+    var h = Math.min(CH * 0.05, 36);
+    return { x: CW - w - 20, y: CH - h - 15, w: w, h: h };
+}
+
+function getUndoButtonRect() {
+    var w = Math.min(CW * 0.08, 70);
+    var h = Math.min(CH * 0.05, 36);
+    return { x: CW - w * 2 - 30, y: CH - h - 15, w: w, h: h };
+}
+
+function getNewGameButtonRect() {
+    var w = Math.min(CW * 0.1, 80);
+    var h = Math.min(CH * 0.05, 36);
+    return { x: 20, y: CH - h - 15, w: w, h: h };
+}
+
+function formatTime(s) {
+    var m = Math.floor(s / 60);
+    var ss = s % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (ss < 10 ? '0' : '') + ss;
+}
+
+// ===================== 绘制 =====================
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function drawCard(x, y, w, h, card, faceUp) {
+    if (faceUp) {
+        // card face
+        var fg = ctx.createLinearGradient(x, y, x, y + h);
+        fg.addColorStop(0, '#ffffff');
+        fg.addColorStop(1, '#f0f0f0');
+        ctx.fillStyle = fg;
+        roundRect(ctx, x, y, w, h, 6);
+        ctx.fill();
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 1;
+        roundRect(ctx, x, y, w, h, 6);
+        ctx.stroke();
+
+        if (card) {
+            var color = SUIT_COLORS[card.suit];
+            var fontSize = Math.min(w * 0.35, 18);
+            ctx.font = 'bold ' + fontSize + 'px "Microsoft YaHei", sans-serif';
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(card.rank, x + 3, y + 2);
+            ctx.font = (fontSize * 0.9) + 'px "Microsoft YaHei", sans-serif';
+            ctx.fillText(card.suit, x + 3, y + fontSize + 2);
+            // center suit
+            ctx.font = (fontSize * 1.8) + 'px "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(card.suit, x + w / 2, y + h / 2);
+        }
+    } else {
+        // card back
+        var bg = ctx.createLinearGradient(x, y, x + w, y + h);
+        bg.addColorStop(0, '#1a5276');
+        bg.addColorStop(0.5, '#2980b9');
+        bg.addColorStop(1, '#1a5276');
+        ctx.fillStyle = bg;
+        roundRect(ctx, x, y, w, h, 6);
+        ctx.fill();
+        ctx.strokeStyle = '#154360';
+        ctx.lineWidth = 1;
+        roundRect(ctx, x, y, w, h, 6);
+        ctx.stroke();
+        // pattern
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        var step = Math.min(w, h) * 0.2;
+        for (var i = -h; i < w + h; i += step) {
+            ctx.beginPath();
+            ctx.moveTo(x + i, y);
+            ctx.lineTo(x + i + h, y + h);
+            ctx.stroke();
+        }
+    }
+}
+
+function drawGame() {
+    // background
+    var grad = ctx.createLinearGradient(0, 0, 0, CH);
+    grad.addColorStop(0, '#0a3d0a');
+    grad.addColorStop(1, '#062006');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, CW, CH);
+
+    // subtle pattern
+    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    for (var i = 0; i < CW; i += 40) {
+        for (var j = 0; j < CH; j += 40) {
+            if ((i + j) % 80 === 0) {
+                ctx.fillRect(i, j, 20, 20);
+            }
+        }
+    }
+
+    // top bar
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(0, 0, CW, TABLEAU_Y_OFFSET * scale - 10);
+
+    // score, moves, time, difficulty
+    var fontSize = Math.min(CW * 0.02, 16);
+    ctx.font = fontSize + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('分数: ' + score, 20, 25 * scale);
+    ctx.fillStyle = '#88ccff';
+    ctx.fillText('步数: ' + moves, 20, 50 * scale);
+    ctx.fillStyle = '#aaffaa';
+    ctx.fillText('时间: ' + formatTime(timer), 20, 75 * scale);
+    ctx.fillStyle = DIFFICULTY[difficulty].color;
+    ctx.fillText('难度: ' + DIFFICULTY[difficulty].name, 20, 100 * scale);
+
+    // foundation count
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('完成: ' + foundation.length + '/8', CW - 20, 25 * scale);
+    ctx.fillStyle = '#88ccff';
+    ctx.fillText('剩余牌: ' + stock.length, CW - 20, 50 * scale);
+
+    // stock pile
+    if (stock.length > 0) {
+        var sp = getStockPos();
+        var cw = getCardW(), ch = getCardH();
+        // draw stacked cards
+        var stackCount = Math.min(stock.length, 5);
+        for (var i = 0; i < stackCount; i++) {
+            drawCard(sp.x + i * 2, sp.y + i * 1, cw, ch, null, false);
+        }
+        // count badge
+        ctx.font = 'bold ' + Math.min(cw * 0.3, 16) + 'px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#FFD700';
+        ctx.fillText(stock.length, sp.x + cw / 2, sp.y + ch + 15);
+    }
+
+    // tableau piles
+    for (var i = 0; i < COLS; i++) {
+        var pile = tableau[i];
+        // pile background
+        var cp = getTableauCardPos(i, 0);
+        var cw = getCardW(), ch = getCardH();
+        ctx.fillStyle = 'rgba(255,255,255,0.05)';
+        roundRect(ctx, cp.x, cp.y, cw, ch, 6);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        roundRect(ctx, cp.x, cp.y, cw, ch, 6);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // draw cards
+        for (var j = 0; j < pile.length; j++) {
+            // skip cards being dragged
+            if (dragging && dragging.fromCol === i && j >= dragging.fromIndex) continue;
+            var pos = getTableauCardPos(i, j);
+            drawCard(pos.x, pos.y, cw, ch, pile[j], pile[j].faceUp);
+        }
+    }
+
+    // hint highlight
+    if (hintTimer > 0) {
+        hintTimer -= 16;
+        var alpha = Math.min(1, hintTimer / 500) * 0.4;
+        ctx.fillStyle = 'rgba(255,215,0,' + alpha + ')';
+        for (var h = 0; h < hintCards.length; h++) {
+            var hc = hintCards[h];
+            if (hc.col === -1) {
+                // stock
+                var sp = getStockPos();
+                roundRect(ctx, sp.x - 3, sp.y - 3, getCardW() + 6, getCardH() + 6, 8);
+                ctx.fill();
+            } else if (hc.index >= 0) {
+                var pos = getTableauCardPos(hc.col, hc.index);
+                roundRect(ctx, pos.x - 3, pos.y - 3, getCardW() + 6, getCardH() + 6, 8);
+                ctx.fill();
+            } else {
+                // target pile
+                var pile = tableau[hc.col];
+                var pos = getTableauCardPos(hc.col, Math.max(0, pile.length - 1));
+                roundRect(ctx, pos.x - 3, pos.y - 3, getCardW() + 6, getCardH() + 6, 8);
+                ctx.fill();
+            }
+        }
+    }
+
+    // drag cards
+    if (dragging && dragCards.length > 0) {
+        var cw = getCardW(), ch = getCardH();
+        for (var i = 0; i < dragCards.length; i++) {
+            var dx = dragging.x - dragging.offsetX;
+            var dy = dragging.y - dragging.offsetY + i * FACE_UP_OFFSET * scale;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 10;
+            ctx.shadowOffsetX = 3;
+            ctx.shadowOffsetY = 3;
+            drawCard(dx, dy, cw, ch, dragCards[i], true);
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+    }
+
+    // buttons at bottom
+    var btnFontSize = Math.min(CW * 0.018, 14);
+    ctx.font = btnFontSize + 'px "Microsoft YaHei", sans-serif';
+
+    // hint button
+    var hb = getHintButtonRect();
+    ctx.fillStyle = 'rgba(255,193,7,0.8)';
+    roundRect(ctx, hb.x, hb.y, hb.w, hb.h, 8);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('提示(H)', hb.x + hb.w / 2, hb.y + hb.h / 2);
+
+    // undo button
+    var ub = getUndoButtonRect();
+    ctx.fillStyle = 'rgba(100,149,237,0.8)';
+    roundRect(ctx, ub.x, ub.y, ub.w, ub.h, 8);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText('撤销(Z)', ub.x + ub.w / 2, ub.y + ub.h / 2);
+
+    // new game button
+    var nb = getNewGameButtonRect();
+    ctx.fillStyle = 'rgba(220,53,69,0.8)';
+    roundRect(ctx, nb.x, nb.y, nb.w, nb.h, 8);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText('新游戏(N)', nb.x + nb.w / 2, nb.y + nb.h / 2);
+
+    // draw particles
+    drawParticles();
+}
+
+// ===================== 自动提示 =====================
+function updateAutoHint() {
+    autoHintTimer += 16;
+    if (autoHintTimer > 15000 && hintTimer <= 0) {
+        findHint();
+        hintTimer = 3000;
+        autoHintTimer = 0;
+    }
+}
+
+// ===================== 主循环 =====================
+var lastTime = 0;
+function loop(ts) {
+    var dt = ts - lastTime;
+    lastTime = ts;
+    if (dt > 100) dt = 16;
+
+    if (gameState === 'menu') {
+        menuTime += dt;
+        updateMenuParticles();
+        drawMenu();
+    } else if (gameState === 'playing') {
+        if (animating) {
+            updateDealAnimation(dt);
+        }
+        updateParticles();
+        updateAutoHint();
+        drawGame();
+    } else if (gameState === 'win') {
+        updateParticles();
+        drawGame();
+        drawWinScreen();
+    }
+
+    requestAnimationFrame(loop);
+}
+
+// ===================== 启动 =====================
+init();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

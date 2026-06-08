@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>乒乓球</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a2e; touch-action: none; user-select: none; -webkit-user-select: none; }
+#gameCanvas { display: block; margin: 0 auto; background: #111; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ==================== 常量配置 ====================
+var CONFIG = {
+    // 游戏设置
+    PADDLE_WIDTH: 12,
+    PADDLE_HEIGHT: 80,
+    BALL_RADIUS: 8,
+    BALL_SPEED_INIT: 5,
+    BALL_SPEED_MAX: 12,
+    BALL_SPEED_INC: 0.3,
+    PADDLE_SPEED: 6,
+    PADDLE_SPEED_AI: 4.5,
+    WIN_SCORE: 11,
+    MATCH_WINS: 2,
+    // 物理
+    MAX_BOUNCE_ANGLE: Math.PI / 3,
+    PADDLE_EDGE_MULTIPLIER: 1.3,
+    // AI难度
+    AI_REACTION_DELAY: [30, 18, 8],
+    AI_ERROR_RANGE: [40, 20, 5],
+    AI_SPEED_MULT: [0.7, 0.9, 1.1],
+    // 粒子
+    PARTICLE_COUNT: 8,
+    PARTICLE_LIFE: 40,
+    // 网格
+    NET_DASH: 10,
+    NET_GAP: 8,
+    // 颜色
+    COLOR_BG: '#0f0f2a',
+    COLOR_PADDLE_P1: '#00d4ff',
+    COLOR_PADDLE_AI: '#ff4466',
+    COLOR_BALL: '#ffffff',
+    COLOR_NET: 'rgba(255,255,255,0.25)',
+    COLOR_TRAIL: 'rgba(255,255,255,0.08)',
+    // 广告
+    AD_HEIGHT: 50,
+    AD_SHOW_INTERVAL: 60000,
+    AD_DISPLAY_TIME: 5000
+};
+
+// ==================== 游戏状态 ====================
+var canvas = document.getElementById('gameCanvas');
+var ctx = canvas.getContext('2d');
+var W, H, scale;
+
+var G = {
+    state: 'menu', // menu, playing, paused, gameOver, matchOver, ad
+    difficulty: 1, // 0简单 1中等 2困难
+    p1Score: 0,
+    aiScore: 0,
+    p1MatchWins: 0,
+    aiMatchWins: 0,
+    setNumber: 1,
+    ball: { x: 0, y: 0, vx: 0, vy: 0, speed: 0, radius: CONFIG.BALL_RADIUS },
+    p1: { x: 0, y: 0, w: CONFIG.PADDLE_WIDTH, h: CONFIG.PADDLE_HEIGHT, score: 0 },
+    ai: { x: 0, y: 0, w: CONFIG.PADDLE_WIDTH, h: CONFIG.PADDLE_HEIGHT, score: 0 },
+    particles: [],
+    trail: [],
+    shakeX: 0, shakeY: 0,
+    serveTimer: 0,
+    serveDir: 1,
+    combo: 0,
+    maxCombo: 0,
+    rally: 0,
+    maxRally: 0,
+    aiReactionTimer: 0,
+    aiTargetY: 0,
+    highScore: parseInt(localStorage.getItem('pong_highScore') || '0'),
+    adTimer: 0,
+    adVisible: false,
+    adCloseTimer: 0,
+    showBanner: true,
+    showSponsorModal: false,
+    sponsorClickTime: 0,
+    screenFlash: 0,
+    lastAdTime: 0
+};
+
+// ==================== 输入系统 ====================
+var input = {
+    keys: {},
+    mouseY: -1,
+    touchY: -1,
+    touchActive: false,
+    clickX: -1,
+    clickY: -1,
+    clickHandled: false
+};
+
+// ==================== 响应式尺寸 ====================
+function resizeCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight - (G.showBanner ? CONFIG.AD_HEIGHT : 0);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    scale = Math.min(W / 800, H / 500);
+    // 重新定位球拍
+    G.p1.x = 20 * scale;
+    G.ai.x = W - 20 * scale - G.ai.w;
+    if (G.state === 'menu' || G.state === 'matchOver') {
+        resetBall();
+    }
+}
+
+// ==================== 工具函数 ====================
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function rand(a, b) { return a + Math.random() * (b - a); }
+function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+function dist(x1, y1, x2, y2) { return Math.sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2)); }
+function easeOutQuad(t) { return t * (2 - t); }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+// ==================== 粒子系统 ====================
+function spawnParticles(x, y, color, count) {
+    count = count || CONFIG.PARTICLE_COUNT;
+    for (var i = 0; i < count; i++) {
+        var angle = rand(0, Math.PI * 2);
+        var spd = rand(1, 4) * scale;
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            life: CONFIG.PARTICLE_LIFE + randInt(-5, 10),
+            maxLife: CONFIG.PARTICLE_LIFE + 10,
+            color: color,
+            size: rand(2, 5) * scale
+        });
+    }
+}
+
+function updateParticles() {
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.96;
+        p.vy *= 0.96;
+        p.life--;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        var alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ==================== 球拖尾 ====================
+function addTrail(x, y) {
+    G.trail.push({ x: x, y: y, life: 12 });
+    if (G.trail.length > 15) G.trail.shift();
+}
+
+function drawTrail() {
+    for (var i = 0; i < G.trail.length; i++) {
+        var t = G.trail[i];
+        var alpha = t.life / 12 * 0.3;
+        var r = G.ball.radius * (t.life / 12);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = CONFIG.COLOR_BALL;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+function updateTrail() {
+    for (var i = G.trail.length - 1; i >= 0; i--) {
+        G.trail[i].life--;
+        if (G.trail[i].life <= 0) G.trail.splice(i, 1);
+    }
+}
+
+// ==================== 球拍与球 ====================
+function resetPaddles() {
+    G.p1.x = 20 * scale;
+    G.p1.y = H / 2 - G.p1.h / 2;
+    G.p1.w = CONFIG.PADDLE_WIDTH * scale;
+    G.p1.h = CONFIG.PADDLE_HEIGHT * scale;
+    G.ai.x = W - 20 * scale - G.ai.w;
+    G.ai.y = H / 2 - G.ai.h / 2;
+    G.ai.w = CONFIG.PADDLE_WIDTH * scale;
+    G.ai.h = CONFIG.PADDLE_HEIGHT * scale;
+}
+
+function resetBall() {
+    G.ball.x = W / 2;
+    G.ball.y = H / 2;
+    G.ball.radius = CONFIG.BALL_RADIUS * scale;
+    var angle = rand(-Math.PI / 4, Math.PI / 4);
+    if (G.serveDir < 0) angle += Math.PI;
+    G.ball.speed = CONFIG.BALL_SPEED_INIT * scale;
+    G.ball.vx = Math.cos(angle) * G.ball.speed;
+    G.ball.vy = Math.sin(angle) * G.ball.speed;
+    G.serveTimer = 60;
+    G.combo = 0;
+    G.rally = 0;
+    G.trail = [];
+}
+
+function serveBall() {
+    G.serveTimer = 45;
+    var angle = rand(-Math.PI / 6, Math.PI / 6);
+    if (G.serveDir < 0) angle += Math.PI;
+    G.ball.speed = CONFIG.BALL_SPEED_INIT * scale;
+    G.ball.vx = Math.cos(angle) * G.ball.speed;
+    G.ball.vy = Math.sin(angle) * G.ball.speed;
+}
+
+// ==================== 物理引擎 ====================
+function updateBall() {
+    if (G.serveTimer > 0) {
+        G.serveTimer--;
+        return;
+    }
+
+    addTrail(G.ball.x, G.ball.y);
+
+    G.ball.x += G.ball.vx;
+    G.ball.y += G.ball.vy;
+
+    // 上下墙壁碰撞
+    if (G.ball.y - G.ball.radius < 0) {
+        G.ball.y = G.ball.radius;
+        G.ball.vy = -G.ball.vy;
+        spawnParticles(G.ball.x, G.ball.y, '#ffffff', 4);
+    }
+    if (G.ball.y + G.ball.radius > H) {
+        G.ball.y = H - G.ball.radius;
+        G.ball.vy = -G.ball.vy;
+        spawnParticles(G.ball.x, G.ball.y, '#ffffff', 4);
+    }
+
+    // 玩家球拍碰撞
+    if (checkPaddleCollision(G.p1, -1)) return;
+    // AI球拍碰撞
+    if (checkPaddleCollision(G.ai, 1)) return;
+
+    // 得分
+    if (G.ball.x < -G.ball.radius * 2) {
+        scorePoint('ai');
+    } else if (G.ball.x > W + G.ball.radius * 2) {
+        scorePoint('p1');
+    }
+}
+
+function checkPaddleCollision(paddle, dir) {
+    var bx = G.ball.x, by = G.ball.y, br = G.ball.radius;
+    var px = paddle.x, py = paddle.y, pw = paddle.w, ph = paddle.h;
+
+    // 球拍边界
+    var pLeft = px, pRight = px + pw;
+    var pTop = py, pBottom = py + ph;
+
+    // 检测球是否在球拍高度范围内
+    if (by + br > pTop && by - br < pBottom) {
+        // 球接近球拍
+        if (dir === -1 && bx - br <= pRight && bx + br >= pLeft && G.ball.vx < 0) {
+            bounceOffPaddle(paddle, dir);
+            return true;
+        }
+        if (dir === 1 && bx + br >= pLeft && bx - br <= pRight && G.ball.vx > 0) {
+            bounceOffPaddle(paddle, dir);
+            return true;
+        }
+    }
+    return false;
+}
+
+function bounceOffPaddle(paddle, dir) {
+    // 计算碰撞位置（-1到1）
+    var paddleCenter = paddle.y + paddle.h / 2;
+    var relativeY = (G.ball.y - paddleCenter) / (paddle.h / 2);
+    relativeY = clamp(relativeY, -1, 1);
+
+    // 角度计算
+    var bounceAngle = relativeY * CONFIG.MAX_BOUNCE_ANGLE;
+
+    // 边缘加速
+    var edgeBoost = Math.abs(relativeY) > 0.7 ? CONFIG.PADDLE_EDGE_MULTIPLIER : 1.0;
+
+    // 速度递增
+    G.ball.speed = Math.min(G.ball.speed + CONFIG.BALL_SPEED_INC * scale, CONFIG.BALL_SPEED_MAX * scale);
+
+    G.ball.vx = dir * Math.cos(bounceAngle) * G.ball.speed * edgeBoost;
+    G.ball.vy = Math.sin(bounceAngle) * G.ball.speed * edgeBoost;
+
+    // 防止嵌入球拍
+    if (dir === -1) {
+        G.ball.x = paddle.x + paddle.w + G.ball.radius;
+    } else {
+        G.ball.x = paddle.x - G.ball.radius;
+    }
+
+    G.combo++;
+    G.rally++;
+    if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+    if (G.rally > G.maxRally) G.maxRally = G.rally;
+
+    // 特效
+    spawnParticles(G.ball.x, G.ball.y, dir === -1 ? CONFIG.COLOR_PADDLE_P1 : CONFIG.COLOR_PADDLE_AI, 6);
+    G.screenFlash = 4;
+
+    // 音效（简化为视觉反馈）
+}
+
+function scorePoint(who) {
+    if (who === 'p1') {
+        G.p1Score++;
+        G.serveDir = 1; // 下一分AI发球
+    } else {
+        G.aiScore++;
+        G.serveDir = -1; // 下一分玩家发球
+    }
+
+    // 击球得分特效
+    spawnParticles(G.ball.x, G.ball.y, who === 'p1' ? '#00ff88' : '#ff4466', 15);
+    G.screenFlash = 8;
+
+    // 检查本局胜负
+    if (G.p1Score >= CONFIG.WIN_SCORE || G.aiScore >= CONFIG.WIN_SCORE) {
+        if (Math.abs(G.p1Score - G.aiScore) >= 2) {
+            endSet(who);
+            return;
+        }
+    }
+
+    // 准备发球
+    resetBall();
+}
+
+function endSet(winner) {
+    if (winner === 'p1') {
+        G.p1MatchWins++;
+    } else {
+        G.aiMatchWins++;
+    }
+
+    G.setNumber++;
+
+    // 检查比赛胜负（3局2胜）
+    if (G.p1MatchWins >= CONFIG.MATCH_WINS) {
+        endMatch('p1');
+    } else if (G.aiMatchWins >= CONFIG.MATCH_WINS) {
+        endMatch('ai');
+    } else {
+        // 新一局
+        G.p1Score = 0;
+        G.aiScore = 0;
+        G.serveDir = (G.setNumber % 2 === 1) ? 1 : -1;
+        resetBall();
+    }
+}
+
+function endMatch(winner) {
+    G.state = 'matchOver';
+    G.matchWinner = winner;
+
+    // 更新最高连胜
+    if (winner === 'p1') {
+        var totalWins = G.p1MatchWins;
+        if (totalWins > G.highScore) {
+            G.highScore = totalWins;
+            localStorage.setItem('pong_highScore', G.highScore.toString());
+        }
+    }
+}
+
+// ==================== AI ====================
+function updateAI() {
+    var difficulty = G.difficulty;
+    var reactionDelay = CONFIG.AI_REACTION_DELAY[difficulty];
+    var errorRange = CONFIG.AI_ERROR_RANGE[difficulty] * scale;
+    var speedMult = CONFIG.AI_SPEED_MULT[difficulty];
+
+    // AI反应延迟
+    G.aiReactionTimer++;
+    if (G.aiReactionTimer >= reactionDelay) {
+        G.aiReactionTimer = 0;
+        // 计算预测位置
+        var predictY = predictBallY();
+        G.aiTargetY = predictY + rand(-errorRange, errorRange);
+    }
+
+    // 移动到目标位置
+    var aiCenter = G.ai.y + G.ai.h / 2;
+    var diff = G.aiTargetY - aiCenter;
+    var moveSpeed = CONFIG.PADDLE_SPEED_AI * scale * speedMult;
+
+    if (Math.abs(diff) > 2) {
+        G.ai.y += clamp(diff, -moveSpeed, moveSpeed);
+    }
+
+    // 限制在屏幕内
+    G.ai.y = clamp(G.ai.y, 0, H - G.ai.h);
+}
+
+function predictBallY() {
+    // 简单预测：球朝AI方向运动时，预测到达球拍时的Y坐标
+    if (G.ball.vx <= 0) return H / 2; // 球朝玩家方向，回到中间
+
+    var timeToReach = (G.ai.x - G.ball.x) / G.ball.vx;
+    if (timeToReach < 0) return H / 2;
+
+    var predictY = G.ball.y + G.ball.vy * timeToReach;
+
+    // 考虑墙壁反弹
+    var bounceH = H - G.ball.radius * 2;
+    while (predictY < G.ball.radius || predictY > H - G.ball.radius) {
+        if (predictY < G.ball.radius) {
+            predictY = G.ball.radius + (G.ball.radius - predictY);
+        }
+        if (predictY > H - G.ball.radius) {
+            predictY = (H - G.ball.radius) - (predictY - (H - G.ball.radius));
+        }
+    }
+
+    return predictY;
+}
+
+// ==================== 玩家输入 ====================
+function updatePlayer() {
+    var moveSpeed = CONFIG.PADDLE_SPEED * scale;
+    var targetY = G.p1.y;
+
+    // 键盘控制
+    if (input.keys['ArrowUp'] || input.keys['w'] || input.keys['W']) {
+        targetY -= moveSpeed;
+    }
+    if (input.keys['ArrowDown'] || input.keys['s'] || input.keys['S']) {
+        targetY += moveSpeed;
+    }
+
+    // 鼠标控制
+    if (input.mouseY >= 0) {
+        var paddleCenter = G.p1.y + G.p1.h / 2;
+        var mouseDiff = input.mouseY - paddleCenter;
+        if (Math.abs(mouseDiff) > 3) {
+            targetY = G.p1.y + clamp(mouseDiff, -moveSpeed, moveSpeed);
+        }
+    }
+
+    // 触屏控制
+    if (input.touchActive && input.touchY >= 0) {
+        var paddleCenter2 = G.p1.y + G.p1.h / 2;
+        var touchDiff = input.touchY - paddleCenter2;
+        if (Math.abs(touchDiff) > 3) {
+            targetY = G.p1.y + clamp(touchDiff, -moveSpeed * 1.2, moveSpeed * 1.2);
+        }
+    }
+
+    G.p1.y = clamp(targetY, 0, H - G.p1.h);
+}
+
+// ==================== 广告系统 ====================
+var AD_BANNER_HTML = '<div id="adBanner" style="position:fixed;bottom:0;left:0;width:100%;height:50px;background:linear-gradient(135deg,#1a1a3e,#2d1b69);display:flex;align-items:center;justify-content:center;z-index:100;border-top:1px solid rgba(255,255,255,0.15);">' +
+    '<div style="color:rgba(255,255,255,0.7);font-size:13px;font-family:system-ui;">🎮 更多精彩游戏即将上线 | <span id="sponsorBtn" style="color:#ffcc00;cursor:pointer;text-decoration:underline;">赞助我们</span></div>' +
+    '</div>';
+
+var AD_SPONSOR_MODAL = '<div id="sponsorModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:none;z-index:200;align-items:center;justify-content:center;">' +
+    '<div style="background:linear-gradient(135deg,#1e1e4a,#2a1a5e);border-radius:16px;padding:30px;max-width:360px;width:90%;text-align:center;border:1px solid rgba(255,255,255,0.15);">' +
+    '<div style="font-size:24px;margin-bottom:12px;">❤️</div>' +
+    '<div style="color:#fff;font-size:18px;font-weight:bold;margin-bottom:8px;">赞助我们</div>' +
+    '<div style="color:rgba(255,255,255,0.7);font-size:14px;margin-bottom:20px;">感谢您的支持！您的赞助将帮助我们开发更多优质游戏。</div>' +
+    '<div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:15px;margin-bottom:15px;">' +
+    '<div style="color:#ffcc00;font-size:16px;margin-bottom:5px;">☕ 请我们喝杯咖啡</div>' +
+    '<div style="color:rgba(255,255,255,0.5);font-size:12px;">任何金额都是对我们的鼓励</div></div>' +
+    '<div style="display:flex;gap:10px;">' +
+    '<button id="sponsorConfirm" style="flex:1;background:linear-gradient(135deg,#ffcc00,#ff9900);border:none;padding:12px;border-radius:8px;color:#000;font-weight:bold;cursor:pointer;font-size:14px;">支持一下</button>' +
+    '<button id="sponsorClose" style="flex:1;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);padding:12px;border-radius:8px;color:#fff;cursor:pointer;font-size:14px;">稍后再说</button>' +
+    '</div></div></div>';
+
+var AD_INTERSTITIAL = '<div id="interstitialAd" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:none;z-index:300;align-items:center;justify-content:center;">' +
+    '<div style="background:linear-gradient(135deg,#1a1a4a,#3d1b69);border-radius:16px;padding:25px;max-width:320px;width:85%;text-align:center;border:1px solid rgba(255,255,255,0.15);position:relative;">' +
+    '<div style="color:#fff;font-size:16px;font-weight:bold;margin-bottom:15px;">🏓 乒乓球</div>' +
+    '<div style="background:linear-gradient(135deg,#0066ff,#9933ff);border-radius:10px;padding:20px;margin-bottom:15px;">' +
+    '<div style="color:#fff;font-size:14px;">发现更多精彩游戏</div>' +
+    '<div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:5px;">即将上线 敬请期待</div></div>' +
+    '<div id="adCloseTimer" style="color:rgba(255,255,255,0.5);font-size:13px;margin-bottom:10px;">广告将在 <span id="adCountdown">5</span> 秒后关闭</div>' +
+    '<button id="adCloseBtn" style="display:none;background:linear-gradient(135deg,#00cc66,#00aa44);border:none;padding:12px 30px;border-radius:8px;color:#fff;font-weight:bold;cursor:pointer;font-size:14px;transition:opacity 0.3s;">继续游戏</button>' +
+    '</div></div>';
+
+function initAds() {
+    // 移除旧广告
+    var oldBanner = document.getElementById('adBanner');
+    var oldModal = document.getElementById('sponsorModal');
+    var oldInterstitial = document.getElementById('interstitialAd');
+    if (oldBanner) oldBanner.remove();
+    if (oldModal) oldModal.remove();
+    if (oldInterstitial) oldInterstitial.remove();
+
+    // 添加新广告元素
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = AD_BANNER_HTML + AD_SPONSOR_MODAL + AD_INTERSTITIAL;
+    while (wrapper.firstChild) {
+        document.body.appendChild(wrapper.firstChild);
+    }
+
+    // 事件绑定
+    var sponsorBtn = document.getElementById('sponsorBtn');
+    var sponsorModal = document.getElementById('sponsorModal');
+    var sponsorConfirm = document.getElementById('sponsorConfirm');
+    var sponsorClose = document.getElementById('sponsorClose');
+
+    if (sponsorBtn) {
+        sponsorBtn.addEventListener('click', function() {
+            G.showSponsorModal = true;
+            sponsorModal.style.display = 'flex';
+        });
+    }
+    if (sponsorConfirm) {
+        sponsorConfirm.addEventListener('click', function() {
+            G.sponsorClickTime = Date.now();
+            sponsorModal.style.display = 'none';
+            G.showSponsorModal = false;
+        });
+    }
+    if (sponsorClose) {
+        sponsorClose.addEventListener('click', function() {
+            sponsorModal.style.display = 'none';
+            G.showSponsorModal = false;
+        });
+    }
+
+    updateAdVisibility();
+}
+
+function updateAdVisibility() {
+    var banner = document.getElementById('adBanner');
+    if (banner) {
+        banner.style.display = G.showBanner ? 'flex' : 'none';
+    }
+}
+
+function showInterstitialAd() {
+    G.state = 'ad';
+    G.adVisible = true;
+    G.adCloseTimer = 300; // 5秒 (60fps)
+
+    var adEl = document.getElementById('interstitialAd');
+    var closeBtn = document.getElementById('adCloseBtn');
+    var countdown = document.getElementById('adCountdown');
+    var closeTimer = document.getElementById('adCloseTimer');
+
+    if (adEl) adEl.style.display = 'flex';
+    if (closeBtn) closeBtn.style.display = 'none';
+    if (closeTimer) closeTimer.style.display = 'block';
+
+    // 倒计时
+    var adInterval = setInterval(function() {
+        G.adCloseTimer--;
+        var seconds = Math.ceil(G.adCloseTimer / 60);
+        if (countdown) countdown.textContent = seconds;
+
+        if (G.adCloseTimer <= 0) {
+            clearInterval(adInterval);
+            if (closeBtn) closeBtn.style.display = 'inline-block';
+            if (closeTimer) closeTimer.style.display = 'none';
+        }
+    }, 1000 / 60);
+
+    // 关闭按钮
+    if (closeBtn) {
+        closeBtn.onclick = function() {
+            if (G.adCloseTimer <= 0) {
+                hideInterstitialAd();
+            }
+        };
+    }
+}
+
+function hideInterstitialAd() {
+    G.state = 'playing';
+    G.adVisible = false;
+    G.lastAdTime = Date.now();
+    var adEl = document.getElementById('interstitialAd');
+    if (adEl) adEl.style.display = 'none';
+}
+
+// ==================== 渲染 ====================
+function drawBackground() {
+    // 渐变背景
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0a0a2e');
+    grad.addColorStop(0.5, '#1a1a4e');
+    grad.addColorStop(1, '#0a0a2e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // 微妙网格线
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    var gridSize = 40 * scale;
+    for (var x = 0; x < W; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+    }
+    for (var y = 0; y < H; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+    }
+}
+
+function drawNet() {
+    ctx.strokeStyle = CONFIG.COLOR_NET;
+    ctx.lineWidth = 2 * scale;
+    ctx.setLineDash([CONFIG.NET_DASH * scale, CONFIG.NET_GAP * scale]);
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 0);
+    ctx.lineTo(W / 2, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+function drawPaddle(paddle, color) {
+    // 发光效果
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12 * scale;
+    ctx.fillStyle = color;
+
+    var r = 4 * scale;
+    var x = paddle.x, y = paddle.y, w = paddle.w, h = paddle.h;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.fill();
+
+    // 高光
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(x + 2 * scale, y + 2 * scale, w - 4 * scale, h * 0.3);
+}
+
+function drawBall() {
+    if (G.serveTimer > 0 && G.serveTimer % 10 < 5) return; // 闪烁
+
+    // 发光
+    ctx.shadowColor = CONFIG.COLOR_BALL;
+    ctx.shadowBlur = 15 * scale;
+
+    ctx.fillStyle = CONFIG.COLOR_BALL;
+    ctx.beginPath();
+    ctx.arc(G.ball.x, G.ball.y, G.ball.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 内部高光
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(G.ball.x - G.ball.radius * 0.3, G.ball.y - G.ball.radius * 0.3, G.ball.radius * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawScore() {
+    ctx.shadowBlur = 0;
+    var fontSize = Math.max(36, 48 * scale);
+    ctx.font = 'bold ' + fontSize + 'px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    // 玩家分数
+    ctx.fillStyle = CONFIG.COLOR_PADDLE_P1;
+    ctx.globalAlpha = 0.9;
+    ctx.fillText(G.p1Score.toString(), W / 4, 20 * scale);
+
+    // AI分数
+    ctx.fillStyle = CONFIG.COLOR_PADDLE_AI;
+    ctx.fillText(G.aiScore.toString(), W * 3 / 4, 20 * scale);
+
+    ctx.globalAlpha = 1;
+
+    // 局分
+    var setFontSize = Math.max(14, 16 * scale);
+    ctx.font = setFontSize + 'px system-ui';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('第' + G.setNumber + '局  ' + G.p1MatchWins + ' - ' + G.aiMatchWins, W / 2, 8 * scale);
+
+    // 难度标签
+    var diffNames = ['简单', '中等', '困难'];
+    ctx.fillText(diffNames[G.difficulty], W / 2, 28 * scale + setFontSize);
+
+    // 连击显示
+    if (G.combo >= 3) {
+        var comboFontSize = Math.max(16, 20 * scale);
+        ctx.font = 'bold ' + comboFontSize + 'px system-ui';
+        ctx.fillStyle = '#ffcc00';
+        ctx.globalAlpha = 0.8;
+        ctx.fillText('连击 x' + G.combo, W / 2, 60 * scale);
+        ctx.globalAlpha = 1;
+    }
+}
+
+function drawMenu() {
+    drawBackground();
+
+    // 标题
+    var titleSize = Math.max(36, 52 * scale);
+    ctx.font = 'bold ' + titleSize + 'px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 标题发光
+    ctx.shadowColor = '#00d4ff';
+    ctx.shadowBlur = 20 * scale;
+    ctx.fillStyle = '#00d4ff';
+    ctx.fillText('🏓 乒乓球', W / 2, H * 0.22);
+    ctx.shadowBlur = 0;
+
+    // 副标题
+    var subSize = Math.max(14, 18 * scale);
+    ctx.font = subSize + 'px system-ui';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('经典对战 | 3局2胜制', W / 2, H * 0.32);
+
+    // 难度选择
+    var diffNames = ['简单', '中等', '困难'];
+    var diffColors = ['#00cc66', '#ffcc00', '#ff4466'];
+    var btnW = Math.min(140, W * 0.3);
+    var btnH = Math.max(40, 45 * scale);
+    var btnGap = Math.max(12, 15 * scale);
+    var totalW = btnW * 3 + btnGap * 2;
+    var startX = W / 2 - totalW / 2;
+    var btnY = H * 0.42;
+
+    for (var i = 0; i < 3; i++) {
+        var bx = startX + i * (btnW + btnGap);
+        var selected = G.difficulty === i;
+
+        // 按钮背景
+        ctx.fillStyle = selected ? diffColors[i] : 'rgba(255,255,255,0.08)';
+        ctx.strokeStyle = diffColors[i];
+        ctx.lineWidth = selected ? 3 : 1;
+
+        roundRect(ctx, bx, btnY, btnW, btnH, 10 * scale);
+        ctx.fill();
+        ctx.stroke();
+
+        // 按钮文字
+        ctx.fillStyle = selected ? '#000' : diffColors[i];
+        var btnFontSize = Math.max(14, 16 * scale);
+        ctx.font = (selected ? 'bold ' : '') + btnFontSize + 'px system-ui';
+        ctx.fillText(diffNames[i], bx + btnW / 2, btnY + btnH / 2);
+    }
+
+    // 存储按钮区域供点击检测
+    G.menuButtons = [
+        { x: startX, y: btnY, w: btnW, h: btnH, action: 'diff0' },
+        { x: startX + btnW + btnGap, y: btnY, w: btnW, h: btnH, action: 'diff1' },
+        { x: startX + 2 * (btnW + btnGap), y: btnY, w: btnW, h: btnH, action: 'diff2' }
+    ];
+
+    // 开始按钮
+    var startBtnW = Math.min(200, W * 0.45);
+    var startBtnH = Math.max(50, 55 * scale);
+    var startBtnX = W / 2 - startBtnW / 2;
+    var startBtnY = H * 0.58;
+
+    // 开始按钮渐变
+    var grad = ctx.createLinearGradient(startBtnX, startBtnY, startBtnX + startBtnW, startBtnY + startBtnH);
+    grad.addColorStop(0, '#00cc66');
+    grad.addColorStop(1, '#00aa44');
+    ctx.fillStyle = grad;
+    ctx.shadowColor = '#00cc66';
+    ctx.shadowBlur = 15 * scale;
+    roundRect(ctx, startBtnX, startBtnY, startBtnW, startBtnH, 12 * scale);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#fff';
+    var startFontSize = Math.max(18, 22 * scale);
+    ctx.font = 'bold ' + startFontSize + 'px system-ui';
+    ctx.fillText('开始游戏', W / 2, startBtnY + startBtnH / 2);
+
+    G.menuButtons.push({ x: startBtnX, y: startBtnY, w: startBtnW, h: startBtnH, action: 'start' });
+
+    // 操作说明
+    var helpFontSize = Math.max(11, 13 * scale);
+    ctx.font = helpFontSize + 'px system-ui';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+
+    var isMobile = 'ontouchstart' in window;
+    if (isMobile) {
+        ctx.fillText('触屏：上下滑动控制球拍', W / 2, H * 0.74);
+    } else {
+        ctx.fillText('键盘：↑↓ 或 W/S | 鼠标：上下移动', W / 2, H * 0.74);
+    }
+
+    // 最高连胜
+    if (G.highScore > 0) {
+        ctx.fillStyle = 'rgba(255,204,0,0.6)';
+        ctx.fillText('最高连胜: ' + G.highScore + ' 局', W / 2, H * 0.80);
+    }
+
+    // 版本
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillText('v1.0 | Canvas + JS', W / 2, H * 0.92);
+}
+
+function drawPaused() {
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+
+    var titleSize = Math.max(28, 36 * scale);
+    ctx.font = 'bold ' + titleSize + 'px system-ui';
+    ctx.fillText('游戏暂停', W / 2, H * 0.35);
+
+    // 按钮
+    var btnW = Math.min(180, W * 0.4);
+    var btnH = Math.max(44, 48 * scale);
+    var btnX = W / 2 - btnW / 2;
+
+    G.pauseButtons = [];
+
+    // 继续
+    var grad1 = ctx.createLinearGradient(btnX, H * 0.48, btnX, H * 0.48 + btnH);
+    grad1.addColorStop(0, '#00cc66');
+    grad1.addColorStop(1, '#00aa44');
+    ctx.fillStyle = grad1;
+    roundRect(ctx, btnX, H * 0.48, btnW, btnH, 10 * scale);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    var btnFontSize = Math.max(16, 18 * scale);
+    ctx.font = 'bold ' + btnFontSize + 'px system-ui';
+    ctx.fillText('继续游戏', W / 2, H * 0.48 + btnH / 2);
+    G.pauseButtons.push({ x: btnX, y: H * 0.48, w: btnW, h: btnH, action: 'resume' });
+
+    // 重新开始
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, btnX, H * 0.48 + btnH + 15 * scale, btnW, btnH, 10 * scale);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fillText('返回菜单', W / 2, H * 0.48 + btnH + 15 * scale + btnH / 2);
+    G.pauseButtons.push({ x: btnX, y: H * 0.48 + btnH + 15 * scale, w: btnW, h: btnH, action: 'menu' });
+}
+
+function drawMatchOver() {
+    drawBackground();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    var isWin = G.matchWinner === 'p1';
+
+    // 标题
+    var titleSize = Math.max(28, 40 * scale);
+    ctx.font = 'bold ' + titleSize + 'px system-ui';
+    ctx.shadowColor = isWin ? '#00ff88' : '#ff4466';
+    ctx.shadowBlur = 20 * scale;
+    ctx.fillStyle = isWin ? '#00ff88' : '#ff4466';
+    ctx.fillText(isWin ? '比赛胜利！' : '比赛结束', W / 2, H * 0.2);
+    ctx.shadowBlur = 0;
+
+    // 比分
+    var scoreSize = Math.max(22, 28 * scale);
+    ctx.font = scoreSize + 'px system-ui';
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fillText(G.p1MatchWins + ' - ' + G.aiMatchWins, W / 2, H * 0.32);
+
+    // 统计
+    var statSize = Math.max(13, 15 * scale);
+    ctx.font = statSize + 'px system-ui';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('最高连击: ' + G.maxCombo, W / 2, H * 0.42);
+    ctx.fillText('最长回合: ' + G.maxRally + ' 次', W / 2, H * 0.47);
+
+    // 按钮
+    var btnW = Math.min(180, W * 0.4);
+    var btnH = Math.max(48, 52 * scale);
+    var btnX = W / 2 - btnW / 2;
+
+    G.matchOverButtons = [];
+
+    // 再来一局
+    var grad = ctx.createLinearGradient(btnX, H * 0.57, btnX, H * 0.57 + btnH);
+    grad.addColorStop(0, '#00cc66');
+    grad.addColorStop(1, '#00aa44');
+    ctx.fillStyle = grad;
+    ctx.shadowColor = '#00cc66';
+    ctx.shadowBlur = 10 * scale;
+    roundRect(ctx, btnX, H * 0.57, btnW, btnH, 12 * scale);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    var btnFontSize = Math.max(16, 19 * scale);
+    ctx.font = 'bold ' + btnFontSize + 'px system-ui';
+    ctx.fillText('再来一局', W / 2, H * 0.57 + btnH / 2);
+    G.matchOverButtons.push({ x: btnX, y: H * 0.57, w: btnW, h: btnH, action: 'restart' });
+
+    // 返回菜单
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, btnX, H * 0.57 + btnH + 15 * scale, btnW, btnH, 12 * scale);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fillText('返回菜单', W / 2, H * 0.57 + btnH + 15 * scale + btnH / 2);
+    G.matchOverButtons.push({ x: btnX, y: H * 0.57 + btnH + 15 * scale, w: btnW, h: btnH, action: 'menu' });
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// ==================== 游戏循环 ====================
+function update() {
+    if (G.state === 'playing') {
+        updatePlayer();
+        updateAI();
+        updateBall();
+        updateParticles();
+        updateTrail();
+
+        // 屏幕震动衰减
+        G.shakeX *= 0.85;
+        G.shakeY *= 0.85;
+        if (G.screenFlash > 0) G.screenFlash--;
+
+        // 广告检查
+        if (Date.now() - G.lastAdTime > CONFIG.AD_SHOW_INTERVAL) {
+            showInterstitialAd();
+        }
+    }
+}
+
+function render() {
+    ctx.save();
+
+    // 屏幕震动
+    if (G.shakeX !== 0 || G.shakeY !== 0) {
+        ctx.translate(G.shakeX, G.shakeY);
+    }
+
+    if (G.state === 'menu') {
+        drawMenu();
+    } else if (G.state === 'playing' || G.state === 'paused') {
+        drawBackground();
+        drawNet();
+        drawTrail();
+        drawParticles();
+        drawPaddle(G.p1, CONFIG.COLOR_PADDLE_P1);
+        drawPaddle(G.ai, CONFIG.COLOR_PADDLE_AI);
+        drawBall();
+        drawScore();
+
+        // 屏幕闪烁
+        if (G.screenFlash > 0) {
+            ctx.fillStyle = 'rgba(255,255,255,' + (G.screenFlash / 10) + ')';
+            ctx.fillRect(0, 0, W, H);
+        }
+
+        if (G.state === 'paused') {
+            drawPaused();
+        }
+    } else if (G.state === 'matchOver') {
+        drawMatchOver();
+    } else if (G.state === 'ad') {
+        drawBackground();
+        drawNet();
+        drawPaddle(G.p1, CONFIG.COLOR_PADDLE_P1);
+        drawPaddle(G.ai, CONFIG.COLOR_PADDLE_AI);
+        drawScore();
+    }
+
+    ctx.restore();
+}
+
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ==================== 事件处理 ====================
+function handleButtonClick(x, y) {
+    var buttons = [];
+    if (G.state === 'menu') buttons = G.menuButtons || [];
+    else if (G.state === 'paused') buttons = G.pauseButtons || [];
+    else if (G.state === 'matchOver') buttons = G.matchOverButtons || [];
+
+    for (var i = 0; i < buttons.length; i++) {
+        var b = buttons[i];
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+            executeButtonAction(b.action);
+            return true;
+        }
+    }
+    return false;
+}
+
+function executeButtonAction(action) {
+    if (action === 'diff0') { G.difficulty = 0; }
+    else if (action === 'diff1') { G.difficulty = 1; }
+    else if (action === 'diff2') { G.difficulty = 2; }
+    else if (action === 'start') { startGame(); }
+    else if (action === 'resume') { G.state = 'playing'; }
+    else if (action === 'menu') { G.state = 'menu'; G.showBanner = true; resizeCanvas(); updateAdVisibility(); }
+    else if (action === 'restart') { startGame(); }
+}
+
+function startGame() {
+    G.state = 'playing';
+    G.p1Score = 0;
+    G.aiScore = 0;
+    G.p1MatchWins = 0;
+    G.aiMatchWins = 0;
+    G.setNumber = 1;
+    G.combo = 0;
+    G.maxCombo = 0;
+    G.rally = 0;
+    G.maxRally = 0;
+    G.serveDir = 1;
+    G.particles = [];
+    G.trail = [];
+    G.showBanner = true;
+    G.lastAdTime = Date.now();
+    resetPaddles();
+    resetBall();
+    resizeCanvas();
+    updateAdVisibility();
+}
+
+// 键盘事件
+document.addEventListener('keydown', function(e) {
+    input.keys[e.key] = true;
+
+    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+        if (G.state === 'playing') G.state = 'paused';
+        else if (G.state === 'paused') G.state = 'playing';
+    }
+
+    if (G.state === 'menu' && (e.key === 'Enter' || e.key === ' ')) {
+        startGame();
+    }
+});
+
+document.addEventListener('keyup', function(e) {
+    input.keys[e.key] = false;
+});
+
+// 鼠标事件
+canvas.addEventListener('mousemove', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    input.mouseY = e.clientY - rect.top;
+});
+
+canvas.addEventListener('click', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var y = e.clientY - rect.top;
+    handleButtonClick(x, y);
+});
+
+// 触屏事件
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var touch = e.touches[0];
+    var x = touch.clientX - rect.left;
+    var y = touch.clientY - rect.top;
+    input.touchActive = true;
+    input.touchY = y;
+    handleButtonClick(x, y);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var touch = e.touches[0];
+    input.touchY = touch.clientY - rect.top;
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    input.touchActive = false;
+    input.touchY = -1;
+}, { passive: false });
+
+// 窗口大小变化
+window.addEventListener('resize', resizeCanvas);
+
+// ==================== 初始化 ====================
+function init() {
+    resizeCanvas();
+    initAds();
+    G.lastAdTime = Date.now();
+    gameLoop();
+}
+
+init();
+</script>
+</body>
+</html>

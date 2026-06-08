@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>迷宫生成</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; overflow: hidden; touch-action: none; font-family: 'Microsoft YaHei', sans-serif; }
+canvas { display: block; }
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+// ============================================================
+// 迷宫生成 - 随机迷宫 + 寻路 + 多难度 + 计时计步
+// ============================================================
+
+const canvas = document.getElementById('gc');
+const ctx = canvas.getContext('2d');
+
+// ============================================================
+// 响应式Canvas
+// ============================================================
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============================================================
+// 常量配置
+// ============================================================
+const DIFFICULTIES = [
+    { name: '简单', cols: 11, rows: 11, timeLimit: 120, color: '#4CAF50', desc: '小型迷宫，适合新手' },
+    { name: '中等', cols: 15, rows: 15, timeLimit: 180, color: '#FF9800', desc: '中型迷宫，适度挑战' },
+    { name: '困难', cols: 21, rows: 21, timeLimit: 300, color: '#F44336', desc: '大型迷宫，高手专属' },
+    { name: '噩梦', cols: 31, rows: 31, timeLimit: 480, color: '#9C27B0', desc: '巨型迷宫，终极考验' }
+];
+
+const MAZE_THEMES = [
+    { name: '森林', wall: '#2d5a1e', path: '#8BC34A', accent: '#4CAF50', bg: '#1a3a0a' },
+    { name: '冰雪', wall: '#1565C0', path: '#E3F2FD', accent: '#42A5F5', bg: '#0D47A1' },
+    { name: '沙漠', wall: '#8D6E63', path: '#FFF8E1', accent: '#FF9800', bg: '#4E342E' },
+    { name: '霓虹', wall: '#6A1B9A', path: '#E1BEE7', accent: '#AB47BC', bg: '#311B92' }
+];
+
+// 方向: 上右下左
+const DX = [0, 1, 0, -1];
+const DY = [-1, 0, 1, 0];
+const DIR_NAMES = ['上', '右', '下', '左'];
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing, paused, complete, timeout
+    difficulty: 0,
+    theme: 0,
+    maze: null,
+    cols: 0,
+    rows: 0,
+    cellSize: 0,
+    offsetX: 0,
+    offsetY: 0,
+    playerX: 1,
+    playerY: 1,
+    exitX: 0,
+    exitY: 0,
+    steps: 0,
+    startTime: 0,
+    elapsed: 0,
+    timeLimit: 0,
+    trail: [],
+    animFrame: 0,
+    particles: [],
+    stars: [],
+    showSolution: false,
+    solutionPath: [],
+    hintCooldown: 0,
+    bestScores: loadBestScores(),
+    menuAnim: 0,
+    completeAnim: 0,
+    comboSteps: 0,
+    lastMoveTime: 0,
+    moveDir: -1,
+    playerBounce: 0,
+    fogOfWar: false,
+    visibleRadius: 3,
+    touchStartX: 0,
+    touchStartY: 0,
+    touchMoved: false,
+    keyState: {}
+};
+
+function loadBestScores() {
+    try {
+        var s = localStorage.getItem('maze_best');
+        return s ? JSON.parse(s) : [null, null, null, null];
+    } catch(e) { return [null, null, null, null]; }
+}
+
+function saveBestScore(diff, steps, time) {
+    var best = G.bestScores[diff];
+    if (!best || steps < best.steps || (steps === best.steps && time < best.time)) {
+        G.bestScores[diff] = { steps: steps, time: time };
+        try {
+            localStorage.setItem('maze_best', JSON.stringify(G.bestScores));
+        } catch(e) {}
+        return true;
+    }
+    return false;
+}
+
+// ============================================================
+// 粒子系统
+// ============================================================
+function spawnParticles(x, y, color, count, speed) {
+    for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var spd = (Math.random() * 0.5 + 0.5) * speed;
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            life: 1.0,
+            decay: 0.01 + Math.random() * 0.03,
+            size: 2 + Math.random() * 4,
+            color: color
+        });
+    }
+}
+
+function spawnStars() {
+    G.stars = [];
+    for (var i = 0; i < 80; i++) {
+        G.stars.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            size: Math.random() * 2 + 0.5,
+            twinkle: Math.random() * Math.PI * 2,
+            speed: 0.02 + Math.random() * 0.05
+        });
+    }
+}
+
+function updateParticles() {
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.02;
+        p.life -= p.decay;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// 迷宫生成 (Recursive Backtracker / DFS)
+// ============================================================
+function generateMaze(cols, rows) {
+    // 初始化网格: 1=墙, 0=路
+    var maze = [];
+    for (var y = 0; y < rows; y++) {
+        maze[y] = [];
+        for (var x = 0; x < cols; x++) {
+            maze[y][x] = 1;
+        }
+    }
+
+    // DFS挖路
+    var stack = [];
+    var startX = 1, startY = 1;
+    maze[startY][startX] = 0;
+    stack.push({ x: startX, y: startY });
+
+    while (stack.length > 0) {
+        var current = stack[stack.length - 1];
+        var neighbors = [];
+
+        for (var d = 0; d < 4; d++) {
+            var nx = current.x + DX[d] * 2;
+            var ny = current.y + DY[d] * 2;
+            if (nx > 0 && nx < cols - 1 && ny > 0 && ny < rows - 1 && maze[ny][nx] === 1) {
+                neighbors.push({ x: nx, y: ny, d: d });
+            }
+        }
+
+        if (neighbors.length > 0) {
+            var chosen = neighbors[Math.floor(Math.random() * neighbors.length)];
+            maze[current.y + DY[chosen.d]][current.x + DX[chosen.d]] = 0;
+            maze[chosen.y][chosen.x] = 0;
+            stack.push({ x: chosen.x, y: chosen.y });
+        } else {
+            stack.pop();
+        }
+    }
+
+    // 添加一些额外通道增加可玩性 (移除部分墙)
+    var extraPaths = Math.floor((cols * rows) * 0.03);
+    for (var i = 0; i < extraPaths; i++) {
+        var rx = 2 + Math.floor(Math.random() * (cols - 4));
+        var ry = 2 + Math.floor(Math.random() * (rows - 4));
+        if (maze[ry][rx] === 1) {
+            // 检查是否连接两个路
+            var adjCount = 0;
+            for (var d = 0; d < 4; d++) {
+                if (maze[ry + DY[d]][rx + DX[d]] === 0) adjCount++;
+            }
+            if (adjCount >= 2) {
+                maze[ry][rx] = 0;
+            }
+        }
+    }
+
+    return maze;
+}
+
+// ============================================================
+// BFS寻路
+// ============================================================
+function findPath(maze, sx, sy, ex, ey) {
+    var rows = maze.length, cols = maze[0].length;
+    var visited = [];
+    var parent = [];
+    for (var y = 0; y < rows; y++) {
+        visited[y] = [];
+        parent[y] = [];
+        for (var x = 0; x < cols; x++) {
+            visited[y][x] = false;
+            parent[y][x] = null;
+        }
+    }
+
+    var queue = [{ x: sx, y: sy }];
+    visited[sy][sx] = true;
+
+    while (queue.length > 0) {
+        var cur = queue.shift();
+        if (cur.x === ex && cur.y === ey) {
+            // 回溯路径
+            var path = [];
+            var c = cur;
+            while (c) {
+                path.unshift({ x: c.x, y: c.y });
+                c = parent[c.y][c.x];
+            }
+            return path;
+        }
+
+        for (var d = 0; d < 4; d++) {
+            var nx = cur.x + DX[d];
+            var ny = cur.y + DY[d];
+            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !visited[ny][nx] && maze[ny][nx] === 0) {
+                visited[ny][nx] = true;
+                parent[ny][nx] = cur;
+                queue.push({ x: nx, y: ny });
+            }
+        }
+    }
+
+    return []; // 无解
+}
+
+// ============================================================
+// 游戏初始化
+// ============================================================
+function initGame(difficulty) {
+    var diff = DIFFICULTIES[difficulty];
+    G.difficulty = difficulty;
+    G.cols = diff.cols;
+    G.rows = diff.rows;
+    G.timeLimit = diff.timeLimit;
+    G.maze = generateMaze(G.cols, G.rows);
+    G.playerX = 1;
+    G.playerY = 1;
+    G.exitX = G.cols - 2;
+    G.exitY = G.rows - 2;
+    G.steps = 0;
+    G.startTime = Date.now();
+    G.elapsed = 0;
+    G.trail = [{ x: 1, y: 1 }];
+    G.showSolution = false;
+    G.solutionPath = [];
+    G.hintCooldown = 0;
+    G.completeAnim = 0;
+    G.comboSteps = 0;
+    G.lastMoveTime = 0;
+    G.moveDir = -1;
+    G.playerBounce = 0;
+    G.state = 'playing';
+    G.fogOfWar = (difficulty >= 2);
+    G.particles = [];
+
+    // 确保出口可达
+    G.maze[G.exitY][G.exitX] = 0;
+
+    calculateCellSize();
+    spawnStars();
+}
+
+function calculateCellSize() {
+    var maxW = canvas.width * 0.85;
+    var maxH = canvas.height * 0.75;
+    var cellW = Math.floor(maxW / G.cols);
+    var cellH = Math.floor(maxH / G.rows);
+    G.cellSize = Math.min(cellW, cellH, 40);
+    G.cellSize = Math.max(G.cellSize, 8);
+    G.offsetX = Math.floor((canvas.width - G.cols * G.cellSize) / 2);
+    G.offsetY = Math.floor((canvas.height - G.rows * G.cellSize) / 2) + 20;
+}
+
+// ============================================================
+// 移动逻辑
+// ============================================================
+function movePlayer(dir) {
+    if (G.state !== 'playing') return;
+    if (dir < 0 || dir > 3) return;
+
+    var nx = G.playerX + DX[dir];
+    var ny = G.playerY + DY[dir];
+
+    if (nx >= 0 && nx < G.cols && ny >= 0 && ny < G.rows && G.maze[ny][nx] === 0) {
+        G.playerX = nx;
+        G.playerY = ny;
+        G.steps++;
+        G.moveDir = dir;
+        G.playerBounce = 1.0;
+        G.trail.push({ x: nx, y: ny });
+
+        var now = Date.now();
+        if (now - G.lastMoveTime < 300) {
+            G.comboSteps++;
+        } else {
+            G.comboSteps = 1;
+        }
+        G.lastMoveTime = now;
+
+        // 移动粒子
+        var px = G.offsetX + nx * G.cellSize + G.cellSize / 2;
+        var py = G.offsetY + ny * G.cellSize + G.cellSize / 2;
+        var theme = MAZE_THEMES[G.theme];
+        spawnParticles(px, py, theme.accent, 3, 2);
+
+        // 到达出口
+        if (nx === G.exitX && ny === G.exitY) {
+            G.state = 'complete';
+            G.elapsed = (Date.now() - G.startTime) / 1000;
+            G.completeAnim = 0;
+            spawnParticles(px, py, '#FFD700', 30, 5);
+            spawnParticles(px, py, '#FF6B35', 20, 4);
+        }
+    }
+}
+
+function tryMove(dir) {
+    // 尝试移动，如果撞墙则尝试滑动
+    if (G.state !== 'playing') return;
+    var nx = G.playerX + DX[dir];
+    var ny = G.playerY + DY[dir];
+    if (nx >= 0 && nx < G.cols && ny >= 0 && ny < G.rows && G.maze[ny][nx] === 0) {
+        movePlayer(dir);
+    } else {
+        // 尝试垂直方向滑动
+        var perpDirs = dir % 2 === 0 ? [1, 3] : [0, 2];
+        for (var i = 0; i < perpDirs.length; i++) {
+            var pd = perpDirs[i];
+            var sx = G.playerX + DX[pd];
+            var sy = G.playerY + DY[pd];
+            if (sx >= 0 && sx < G.cols && sy >= 0 && sy < G.rows && G.maze[sy][sx] === 0) {
+                // 检查滑动后能否继续前进
+                var fx = sx + DX[dir];
+                var fy = sy + DY[dir];
+                if (fx >= 0 && fx < G.cols && fy >= 0 && fy < G.rows && G.maze[fy][fx] === 0) {
+                    movePlayer(pd);
+                    movePlayer(dir);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// 提示系统
+// ============================================================
+function showHint() {
+    if (G.state !== 'playing') return;
+    if (G.hintCooldown > 0) return;
+
+    G.solutionPath = findPath(G.maze, G.playerX, G.playerY, G.exitX, G.exitY);
+    G.showSolution = true;
+    G.hintCooldown = 5; // 5秒冷却
+
+    setTimeout(function() {
+        G.showSolution = false;
+    }, 3000);
+}
+
+// ============================================================
+// 渲染：背景
+// ============================================================
+function drawBackground() {
+    var gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#0a0a2e');
+    gradient.addColorStop(0.5, '#1a1a3e');
+    gradient.addColorStop(1, '#0a0a1a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 星星
+    for (var i = 0; i < G.stars.length; i++) {
+        var s = G.stars[i];
+        s.twinkle += s.speed;
+        var alpha = 0.3 + Math.sin(s.twinkle) * 0.3;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// 渲染：迷宫
+// ============================================================
+function drawMaze() {
+    var theme = MAZE_THEMES[G.theme];
+    var cs = G.cellSize;
+
+    for (var y = 0; y < G.rows; y++) {
+        for (var x = 0; x < G.cols; x++) {
+            var px = G.offsetX + x * cs;
+            var py = G.offsetY + y * cs;
+
+            // 迷雾模式
+            if (G.fogOfWar) {
+                var dist = Math.abs(x - G.playerX) + Math.abs(y - G.playerY);
+                if (dist > G.visibleRadius + 1) continue;
+                var fogAlpha = dist > G.visibleRadius ? (1 - (dist - G.visibleRadius)) : 1;
+                ctx.globalAlpha = Math.max(0, Math.min(1, fogAlpha));
+            }
+
+            if (G.maze[y][x] === 1) {
+                // 墙壁
+                ctx.fillStyle = theme.wall;
+                ctx.fillRect(px, py, cs, cs);
+                // 墙壁纹理
+                if (cs > 10) {
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(px + 1, py + 1, cs - 2, cs - 2);
+                }
+            } else {
+                // 通道
+                ctx.fillStyle = theme.path;
+                ctx.fillRect(px, py, cs, cs);
+
+                // 足迹
+                var inTrail = false;
+                for (var t = 0; t < G.trail.length; t++) {
+                    if (G.trail[t].x === x && G.trail[t].y === y) {
+                        inTrail = true;
+                        break;
+                    }
+                }
+                if (inTrail && !(x === G.playerX && y === G.playerY)) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                    ctx.fillRect(px + 2, py + 2, cs - 4, cs - 4);
+                }
+            }
+
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    // 出口标记
+    var ex = G.offsetX + G.exitX * cs;
+    var ey = G.offsetY + G.exitY * cs;
+    var pulse = Math.sin(G.animFrame * 0.05) * 0.3 + 0.7;
+    ctx.fillStyle = 'rgba(76, 175, 80, ' + pulse + ')';
+    ctx.fillRect(ex + 2, ey + 2, cs - 4, cs - 4);
+
+    // 出口图标
+    if (cs > 15) {
+        ctx.fillStyle = '#fff';
+        ctx.font = (cs * 0.6) + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('出', ex + cs / 2, ey + cs / 2);
+    }
+
+    // 起点标记
+    var sx = G.offsetX + 1 * cs;
+    var sy = G.offsetY + 1 * cs;
+    ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
+    ctx.fillRect(sx + 2, sy + 2, cs - 4, cs - 4);
+    if (cs > 15) {
+        ctx.fillStyle = '#fff';
+        ctx.font = (cs * 0.6) + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('入', sx + cs / 2, sy + cs / 2);
+    }
+}
+
+// ============================================================
+// 渲染：寻路提示
+// ============================================================
+function drawSolution() {
+    if (!G.showSolution || G.solutionPath.length < 2) return;
+
+    var cs = G.cellSize;
+    ctx.strokeStyle = 'rgba(255, 235, 59, 0.6)';
+    ctx.lineWidth = cs * 0.3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.setLineDash([cs * 0.3, cs * 0.2]);
+    ctx.lineDashOffset = -G.animFrame * 2;
+
+    ctx.beginPath();
+    for (var i = 0; i < G.solutionPath.length; i++) {
+        var p = G.solutionPath[i];
+        var px = G.offsetX + p.x * cs + cs / 2;
+        var py = G.offsetY + p.y * cs + cs / 2;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+// ============================================================
+// 渲染：玩家
+// ============================================================
+function drawPlayer() {
+    var cs = G.cellSize;
+    var px = G.offsetX + G.playerX * cs + cs / 2;
+    var py = G.offsetY + G.playerY * cs + cs / 2;
+
+    // 弹跳动画
+    var bounce = 0;
+    if (G.playerBounce > 0) {
+        bounce = Math.sin(G.playerBounce * Math.PI) * cs * 0.15;
+        G.playerBounce -= 0.08;
+        if (G.playerBounce < 0) G.playerBounce = 0;
+    }
+
+    // 光晕
+    var glowSize = cs * 0.8 + Math.sin(G.animFrame * 0.08) * 3;
+    var grd = ctx.createRadialGradient(px, py - bounce, 0, px, py - bounce, glowSize);
+    grd.addColorStop(0, 'rgba(33, 150, 243, 0.3)');
+    grd.addColorStop(1, 'rgba(33, 150, 243, 0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(px, py - bounce, glowSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 玩家主体
+    var radius = cs * 0.35;
+    ctx.fillStyle = '#2196F3';
+    ctx.beginPath();
+    ctx.arc(px, py - bounce, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 高光
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    ctx.arc(px - radius * 0.25, py - bounce - radius * 0.25, radius * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 方向指示
+    if (G.moveDir >= 0) {
+        var dx = DX[G.moveDir];
+        var dy = DY[G.moveDir];
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.beginPath();
+        ctx.arc(px + dx * radius * 0.5, py - bounce + dy * radius * 0.5, radius * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ============================================================
+// 渲染：HUD
+// ============================================================
+function drawHUD() {
+    var diff = DIFFICULTIES[G.difficulty];
+    var remaining = Math.max(0, G.timeLimit - G.elapsed);
+    var minutes = Math.floor(remaining / 60);
+    var seconds = Math.floor(remaining % 60);
+    var timeStr = minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+
+    // 顶部信息栏
+    var barH = 50;
+    var grd = ctx.createLinearGradient(0, 0, 0, barH);
+    grd.addColorStop(0, 'rgba(0,0,0,0.8)');
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, canvas.width, barH);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+
+    // 难度
+    ctx.fillStyle = diff.color;
+    ctx.fillText(diff.name, 15, 25);
+
+    // 步数
+    ctx.fillStyle = '#fff';
+    ctx.fillText('步数: ' + G.steps, 100, 25);
+
+    // 时间
+    var timeColor = remaining < 30 ? '#F44336' : (remaining < 60 ? '#FF9800' : '#4CAF50');
+    ctx.fillStyle = timeColor;
+    ctx.fillText('时间: ' + timeStr, 220, 25);
+
+    // 连击
+    if (G.comboSteps > 2) {
+        ctx.fillStyle = '#FFD770';
+        ctx.fillText('连击 x' + G.comboSteps, 370, 25);
+    }
+
+    // 提示按钮
+    ctx.textAlign = 'right';
+    if (G.hintCooldown > 0) {
+        ctx.fillStyle = '#666';
+        ctx.fillText('提示冷却 ' + Math.ceil(G.hintCooldown) + 's', canvas.width - 15, 25);
+    } else {
+        ctx.fillStyle = '#FFD700';
+        ctx.fillText('[提示 H]', canvas.width - 15, 25);
+    }
+
+    // 底部控制提示
+    var bottomY = canvas.height - 30;
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '13px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('方向键/WASD移动 | 滑动屏幕 | H键提示 | P键暂停', canvas.width / 2, bottomY);
+}
+
+// ============================================================
+// 渲染：暂停界面
+// ============================================================
+function drawPauseScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('暂停', canvas.width / 2, canvas.height / 2 - 40);
+
+    ctx.font = '20px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('按 P 或点击屏幕继续', canvas.width / 2, canvas.height / 2 + 20);
+}
+
+// ============================================================
+// 渲染：开始菜单
+// ============================================================
+function drawMenu() {
+    G.menuAnim += 0.02;
+
+    // 背景
+    var grd = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    grd.addColorStop(0, '#0a0a2e');
+    grd.addColorStop(0.5, '#1a0a3e');
+    grd.addColorStop(1, '#0a1a2e');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 动态网格背景
+    ctx.strokeStyle = 'rgba(100,100,255,0.08)';
+    ctx.lineWidth = 1;
+    var gridSize = 40;
+    var offset = (G.menuAnim * 20) % gridSize;
+    for (var x = -gridSize + offset; x < canvas.width + gridSize; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+    }
+    for (var y = -gridSize + offset; y < canvas.height + gridSize; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+
+    // 星星
+    for (var i = 0; i < G.stars.length; i++) {
+        var s = G.stars[i];
+        s.twinkle += s.speed;
+        ctx.globalAlpha = 0.3 + Math.sin(s.twinkle) * 0.3;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 标题
+    var titleY = canvas.height * 0.15;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 52px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 标题阴影
+    ctx.fillStyle = 'rgba(33, 150, 243, 0.3)';
+    ctx.fillText('迷宫生成', canvas.width / 2 + 3, titleY + 3);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('迷宫生成', canvas.width / 2, titleY);
+
+    // 副标题
+    ctx.font = '18px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#888';
+    ctx.fillText('随机迷宫 · 智慧寻路 · 多难度挑战', canvas.width / 2, titleY + 45);
+
+    // 难度选择
+    var btnW = Math.min(280, canvas.width * 0.7);
+    var btnH = 55;
+    var startY = canvas.height * 0.35;
+    var gap = 12;
+
+    for (var i = 0; i < DIFFICULTIES.length; i++) {
+        var diff = DIFFICULTIES[i];
+        var bx = canvas.width / 2 - btnW / 2;
+        var by = startY + i * (btnH + gap);
+
+        // 按钮背景
+        var btnGrd = ctx.createLinearGradient(bx, by, bx + btnW, by);
+        btnGrd.addColorStop(0, 'rgba(255,255,255,0.05)');
+        btnGrd.addColorStop(1, 'rgba(255,255,255,0.1)');
+        ctx.fillStyle = btnGrd;
+        roundRect(ctx, bx, by, btnW, btnH, 12);
+        ctx.fill();
+
+        // 边框
+        ctx.strokeStyle = diff.color;
+        ctx.lineWidth = 2;
+        roundRect(ctx, bx, by, btnW, btnH, 12);
+        ctx.stroke();
+
+        // 难度名称
+        ctx.fillStyle = diff.color;
+        ctx.font = 'bold 20px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(diff.name, bx + 20, by + btnH / 2 - 8);
+
+        // 描述
+        ctx.fillStyle = '#999';
+        ctx.font = '12px "Microsoft YaHei", sans-serif';
+        ctx.fillText(diff.desc, bx + 20, by + btnH / 2 + 12);
+
+        // 最佳成绩
+        var best = G.bestScores[i];
+        if (best) {
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#FFD700';
+            ctx.font = '12px "Microsoft YaHei", sans-serif';
+            ctx.fillText(best.steps + '步 ' + formatTime(best.time), bx + btnW - 15, by + btnH / 2);
+        }
+
+        // 存储按钮区域
+        diff._bx = bx;
+        diff._by = by;
+        diff._bw = btnW;
+        diff._bh = btnH;
+    }
+
+    // 主题选择
+    var themeY = startY + DIFFICULTIES.length * (btnH + gap) + 20;
+    ctx.fillStyle = '#888';
+    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('迷宫主题', canvas.width / 2, themeY);
+
+    var themeBtnW = 70;
+    var themeGap = 10;
+    var themeStartX = canvas.width / 2 - (MAZE_THEMES.length * (themeBtnW + themeGap) - themeGap) / 2;
+
+    for (var i = 0; i < MAZE_THEMES.length; i++) {
+        var theme = MAZE_THEMES[i];
+        var tx = themeStartX + i * (themeBtnW + themeGap);
+        var ty = themeY + 20;
+
+        ctx.fillStyle = G.theme === i ? theme.accent : 'rgba(255,255,255,0.1)';
+        roundRect(ctx, tx, ty, themeBtnW, 35, 8);
+        ctx.fill();
+
+        ctx.strokeStyle = theme.accent;
+        ctx.lineWidth = G.theme === i ? 2 : 1;
+        roundRect(ctx, tx, ty, themeBtnW, 35, 8);
+        ctx.stroke();
+
+        ctx.fillStyle = G.theme === i ? '#fff' : '#aaa';
+        ctx.font = '14px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(theme.name, tx + themeBtnW / 2, ty + 18);
+
+        theme._bx = tx;
+        theme._by = ty;
+        theme._bw = themeBtnW;
+        theme._bh = 35;
+    }
+
+    // 底部信息
+    ctx.fillStyle = '#555';
+    ctx.font = '13px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('方向键/WASD移动 | 点击/触屏滑动 | H提示 | P暂停', canvas.width / 2, canvas.height - 40);
+}
+
+function formatTime(seconds) {
+    var m = Math.floor(seconds / 60);
+    var s = Math.floor(seconds % 60);
+    return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+}
+
+// ============================================================
+// 渲染：完成界面
+// ============================================================
+function drawCompleteScreen() {
+    G.completeAnim += 0.02;
+    var alpha = Math.min(1, G.completeAnim * 2);
+
+    ctx.fillStyle = 'rgba(0,0,0,' + (alpha * 0.7) + ')';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 粒子
+    drawParticles();
+
+    var centerY = canvas.height * 0.35;
+
+    // 标题
+    ctx.fillStyle = 'rgba(255, 215, 0, ' + alpha + ')';
+    ctx.font = 'bold 44px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('迷宫通关!', canvas.width / 2, centerY);
+
+    // 统计信息
+    var isNewBest = saveBestScore(G.difficulty, G.steps, G.elapsed);
+
+    ctx.font = '22px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
+    ctx.fillText('难度: ' + DIFFICULTIES[G.difficulty].name, canvas.width / 2, centerY + 55);
+    ctx.fillText('步数: ' + G.steps + ' 步', canvas.width / 2, centerY + 90);
+    ctx.fillText('用时: ' + formatTime(G.elapsed), canvas.width / 2, centerY + 125);
+
+    // 评级
+    var rating = getRating(G.difficulty, G.steps, G.elapsed);
+    ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = rating.color;
+    ctx.fillText(rating.stars + ' ' + rating.text, canvas.width / 2, centerY + 175);
+
+    // 新纪录
+    if (isNewBest) {
+        ctx.fillStyle = '#FFD700';
+        ctx.font = '20px "Microsoft YaHei", sans-serif';
+        ctx.fillText('新纪录!', canvas.width / 2, centerY + 215);
+    }
+
+    // 按钮
+    var btnW = 180;
+    var btnH = 48;
+    var btnY = centerY + 260;
+
+    // 再来一次
+    var btn1X = canvas.width / 2 - btnW - 15;
+    ctx.fillStyle = 'rgba(76, 175, 80, 0.8)';
+    roundRect(ctx, btn1X, btnY, btnW, btnH, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px "Microsoft YaHei", sans-serif';
+    ctx.fillText('再来一次', btn1X + btnW / 2, btnY + btnH / 2);
+
+    // 返回菜单
+    var btn2X = canvas.width / 2 + 15;
+    ctx.fillStyle = 'rgba(100, 100, 100, 0.8)';
+    roundRect(ctx, btn2X, btnY, btnW, btnH, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText('返回菜单', btn2X + btnW / 2, btnY + btnH / 2);
+
+    // 存储按钮区域
+    G._btn1 = { x: btn1X, y: btnY, w: btnW, h: btnH };
+    G._btn2 = { x: btn2X, y: btnY, w: btnW, h: btnH };
+}
+
+function getRating(diff, steps, time) {
+    var optimalSteps = DIFFICULTIES[diff].cols * DIFFICULTIES[diff].rows * 0.4;
+    var ratio = steps / optimalSteps;
+
+    if (ratio < 1.2) return { stars: '★★★', text: '完美通关', color: '#FFD700' };
+    if (ratio < 1.8) return { stars: '★★☆', text: '优秀表现', color: '#4CAF50' };
+    if (ratio < 2.5) return { stars: '★☆☆', text: '顺利通关', color: '#2196F3' };
+    return { stars: '☆☆☆', text: '勉强过关', color: '#FF9800' };
+}
+
+// ============================================================
+// 渲染：超时界面
+// ============================================================
+function drawTimeoutScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var centerY = canvas.height * 0.4;
+
+    ctx.fillStyle = '#F44336';
+    ctx.font = 'bold 40px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('时间到!', canvas.width / 2, centerY);
+
+    ctx.fillStyle = '#ccc';
+    ctx.font = '20px "Microsoft YaHei", sans-serif';
+    ctx.fillText('已走 ' + G.steps + ' 步', canvas.width / 2, centerY + 50);
+    ctx.fillText('继续加油!', canvas.width / 2, centerY + 85);
+
+    // 按钮
+    var btnW = 180;
+    var btnH = 48;
+    var btnY = centerY + 140;
+
+    var btn1X = canvas.width / 2 - btnW - 15;
+    ctx.fillStyle = 'rgba(76, 175, 80, 0.8)';
+    roundRect(ctx, btn1X, btnY, btnW, btnH, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px "Microsoft YaHei", sans-serif';
+    ctx.fillText('重新挑战', btn1X + btnW / 2, btnY + btnH / 2);
+
+    var btn2X = canvas.width / 2 + 15;
+    ctx.fillStyle = 'rgba(100, 100, 100, 0.8)';
+    roundRect(ctx, btn2X, btnY, btnW, btnH, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText('返回菜单', btn2X + btnW / 2, btnY + btnH / 2);
+
+    G._btn1 = { x: btn1X, y: btnY, w: btnW, h: btnH };
+    G._btn2 = { x: btn2X, y: btnY, w: btnW, h: btnH };
+}
+
+// ============================================================
+// 主循环
+// ============================================================
+function gameLoop() {
+    G.animFrame++;
+
+    // 更新时间
+    if (G.state === 'playing') {
+        G.elapsed = (Date.now() - G.startTime) / 1000;
+        if (G.elapsed >= G.timeLimit) {
+            G.state = 'timeout';
+        }
+
+        // 提示冷却
+        if (G.hintCooldown > 0) {
+            G.hintCooldown -= 1 / 60;
+            if (G.hintCooldown < 0) G.hintCooldown = 0;
+        }
+    }
+
+    updateParticles();
+
+    // 渲染
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    switch (G.state) {
+        case 'menu':
+            drawMenu();
+            break;
+        case 'playing':
+            drawBackground();
+            drawMaze();
+            drawSolution();
+            drawPlayer();
+            drawParticles();
+            drawHUD();
+            break;
+        case 'paused':
+            drawBackground();
+            drawMaze();
+            drawPlayer();
+            drawHUD();
+            drawPauseScreen();
+            break;
+        case 'complete':
+            drawBackground();
+            drawMaze();
+            drawPlayer();
+            drawCompleteScreen();
+            break;
+        case 'timeout':
+            drawBackground();
+            drawMaze();
+            drawPlayer();
+            drawTimeoutScreen();
+            break;
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// 输入处理：键盘
+// ============================================================
+document.addEventListener('keydown', function(e) {
+    if (G.state === 'menu') return;
+
+    switch (e.key) {
+        case 'ArrowUp': case 'w': case 'W':
+            if (G.state === 'playing') tryMove(0);
+            e.preventDefault();
+            break;
+        case 'ArrowRight': case 'd': case 'D':
+            if (G.state === 'playing') tryMove(1);
+            e.preventDefault();
+            break;
+        case 'ArrowDown': case 's': case 'S':
+            if (G.state === 'playing') tryMove(2);
+            e.preventDefault();
+            break;
+        case 'ArrowLeft': case 'a': case 'A':
+            if (G.state === 'playing') tryMove(3);
+            e.preventDefault();
+            break;
+        case 'h': case 'H':
+            if (G.state === 'playing') showHint();
+            e.preventDefault();
+            break;
+        case 'p': case 'P':
+        case 'Escape':
+            if (G.state === 'playing') {
+                G.state = 'paused';
+            } else if (G.state === 'paused') {
+                G.state = 'playing';
+                G.startTime = Date.now() - G.elapsed * 1000;
+            }
+            e.preventDefault();
+            break;
+        case 'r': case 'R':
+            if (G.state === 'complete' || G.state === 'timeout') {
+                initGame(G.difficulty);
+            }
+            e.preventDefault();
+            break;
+    }
+});
+
+// ============================================================
+// 输入处理：鼠标
+// ============================================================
+canvas.addEventListener('click', function(e) {
+    var x = e.clientX;
+    var y = e.clientY;
+
+    if (G.state === 'menu') {
+        // 难度按钮
+        for (var i = 0; i < DIFFICULTIES.length; i++) {
+            var d = DIFFICULTIES[i];
+            if (d._bx !== undefined && x >= d._bx && x <= d._bx + d._bw && y >= d._by && y <= d._by + d._bh) {
+                initGame(i);
+                return;
+            }
+        }
+        // 主题按钮
+        for (var i = 0; i < MAZE_THEMES.length; i++) {
+            var t = MAZE_THEMES[i];
+            if (t._bx !== undefined && x >= t._bx && x <= t._bx + t._bw && y >= t._by && y <= t._by + t._bh) {
+                G.theme = i;
+                return;
+            }
+        }
+        return;
+    }
+
+    if (G.state === 'paused') {
+        G.state = 'playing';
+        G.startTime = Date.now() - G.elapsed * 1000;
+        return;
+    }
+
+    if (G.state === 'complete' || G.state === 'timeout') {
+        if (G._btn1 && x >= G._btn1.x && x <= G._btn1.x + G._btn1.w && y >= G._btn1.y && y <= G._btn1.y + G._btn1.h) {
+            initGame(G.difficulty);
+            return;
+        }
+        if (G._btn2 && x >= G._btn2.x && x <= G._btn2.x + G._btn2.w && y >= G._btn2.y && y <= G._btn2.y + G._btn2.h) {
+            G.state = 'menu';
+            return;
+        }
+    }
+
+    // 游戏中点击移动
+    if (G.state === 'playing') {
+        var cs = G.cellSize;
+        var mx = x - G.offsetX;
+        var my = y - G.offsetY;
+        var cx = Math.floor(mx / cs);
+        var cy = Math.floor(my / cs);
+
+        // 点击相邻格子移动
+        var ddx = cx - G.playerX;
+        var ddy = cy - G.playerY;
+        if (Math.abs(ddx) + Math.abs(ddy) === 1) {
+            if (ddx === 1) movePlayer(1);
+            else if (ddx === -1) movePlayer(3);
+            else if (ddy === 1) movePlayer(2);
+            else if (ddy === -1) movePlayer(0);
+        }
+    }
+});
+
+// ============================================================
+// 输入处理：触屏
+// ============================================================
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var touch = e.touches[0];
+    G.touchStartX = touch.clientX;
+    G.touchStartY = touch.clientY;
+    G.touchMoved = false;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var touch = e.touches[0];
+    var dx = touch.clientX - G.touchStartX;
+    var dy = touch.clientY - G.touchStartY;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 30 && G.state === 'playing') {
+        G.touchMoved = true;
+        // 判断方向
+        if (Math.abs(dx) > Math.abs(dy)) {
+            movePlayer(dx > 0 ? 1 : 3);
+        } else {
+            movePlayer(dy > 0 ? 2 : 0);
+        }
+        G.touchStartX = touch.clientX;
+        G.touchStartY = touch.clientY;
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    if (!G.touchMoved) {
+        // 触摸结束当作点击
+        var touch = e.changedTouches[0];
+        var clickEvent = new MouseEvent('click', {
+            clientX: touch.clientX,
+            clientY: touch.clientY
+        });
+        canvas.dispatchEvent(clickEvent);
+    }
+}, { passive: false });
+
+// ============================================================
+// 持续按键支持
+// ============================================================
+var moveInterval = null;
+var lastMoveKey = -1;
+
+document.addEventListener('keydown', function(e) {
+    var dir = -1;
+    switch (e.key) {
+        case 'ArrowUp': case 'w': case 'W': dir = 0; break;
+        case 'ArrowRight': case 'd': case 'D': dir = 1; break;
+        case 'ArrowDown': case 's': case 'S': dir = 2; break;
+        case 'ArrowLeft': case 'a': case 'A': dir = 3; break;
+    }
+    if (dir >= 0 && G.state === 'playing') {
+        G.keyState[dir] = true;
+        if (moveInterval === null) {
+            lastMoveKey = dir;
+            tryMove(dir);
+            moveInterval = setInterval(function() {
+                for (var d = 0; d < 4; d++) {
+                    if (G.keyState[d]) {
+                        tryMove(d);
+                        break;
+                    }
+                }
+            }, 120);
+        }
+    }
+});
+
+document.addEventListener('keyup', function(e) {
+    var dir = -1;
+    switch (e.key) {
+        case 'ArrowUp': case 'w': case 'W': dir = 0; break;
+        case 'ArrowRight': case 'd': case 'D': dir = 1; break;
+        case 'ArrowDown': case 's': case 'S': dir = 2; break;
+        case 'ArrowLeft': case 'a': case 'A': dir = 3; break;
+    }
+    if (dir >= 0) {
+        G.keyState[dir] = false;
+        var anyDown = false;
+        for (var d = 0; d < 4; d++) {
+            if (G.keyState[d]) { anyDown = true; break; }
+        }
+        if (!anyDown && moveInterval !== null) {
+            clearInterval(moveInterval);
+            moveInterval = null;
+        }
+    }
+});
+
+// ============================================================
+// 窗口大小变化
+// ============================================================
+window.addEventListener('resize', function() {
+    resizeCanvas();
+    if (G.state === 'menu') spawnStars();
+    if (G.state === 'playing' || G.state === 'paused') calculateCellSize();
+});
+
+// ============================================================
+// 启动
+// ============================================================
+spawnStars();
+gameLoop();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>宝石迷阵</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0a0a2e;overflow:hidden;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block}
+#ui{position:absolute;top:0;left:0;width:100%;pointer-events:none}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"></div>
+<script>
+'use strict';
+// ==================== 常量配置 ====================
+const GEM_COLORS = ['#ff4444','#44ff44','#4488ff','#ffaa00','#ff44ff','#44ffff'];
+const GEM_NAMES = ['红宝石','绿宝石','蓝宝石','黄宝石','紫宝石','青宝石'];
+const GEM_SYMBOLS = ['◆','◇','●','○','■','□'];
+const BOARD_COLS = 8;
+const BOARD_ROWS = 8;
+const GEM_SIZE_RATIO = 0.1;
+const SPECIAL_TYPES = {NORMAL:0,BOMB:1,LIGHTNING:2,RAINBOW:3};
+const SPECIAL_NAMES = ['','炸弹','闪电','彩虹'];
+const LEVELS = [
+    {name:'翡翠森林',target:1000,moves:25,colors:5,bg1:'#0a3d0a',bg2:'#1a6b1a'},
+    {name:'水晶洞穴',target:2500,moves:30,colors:5,bg1:'#0a2d4a',bg2:'#1a5b8a'},
+    {name:'烈焰火山',target:5000,moves:30,colors:5,bg1:'#4a1a0a',bg2:'#8b3a1a'},
+    {name:'极寒冰原',target:8000,moves:35,colors:6,bg1:'#0a2a4a',bg2:'#2a5a7a'},
+    {name:'雷鸣峡谷',target:12000,moves:35,colors:6,bg1:'#2a1a4a',bg2:'#5a3a7a'},
+    {name:'暗影深渊',target:18000,moves:40,colors:6,bg1:'#1a1a2a',bg2:'#3a3a5a'},
+    {name:'星辰神殿',target:25000,moves:40,colors:6,bg1:'#1a2a3a',bg2:'#3a5a7a'},
+    {name:'混沌虚空',target:35000,moves:45,colors:6,bg1:'#0a0a1a',bg2:'#2a2a4a'},
+    {name:'创世之巅',target:50000,moves:50,colors:6,bg1:'#1a0a2a',bg2:'#4a2a5a'},
+    {name:'永恒轮回',target:70000,moves:55,colors:6,bg1:'#2a0a0a',bg2:'#5a2a2a'}
+];
+const POWER_COSTS = {bomb:100,lightning:150,rainbow:200};
+const PARTICLE_COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#ff6bff','#6bfff'];
+
+// ==================== 游戏状态 ====================
+let canvas,ctx,W,H,cellSize,boardX,boardY;
+let state = 'menu'; // menu,playing,paused,gameover,levelselect
+let board = [];
+let selected = null;
+let animating = false;
+let score = 0;
+let highScore = 0;
+let level = 0;
+let movesLeft = 0;
+let targetScore = 0;
+let combo = 0;
+let particles = [];
+let floatingTexts = [];
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let flashTimer = 0;
+let menuParticles = [];
+let powers = {bomb:0,lightning:0,rainbow:0};
+let activePower = null;
+let hintTimer = 0;
+let hintCells = null;
+let lastTime = 0;
+let cascading = false;
+let swapAnim = null;
+let fallAnims = [];
+let removeAnims = [];
+let bgStars = [];
+
+// ==================== 初始化 ====================
+function init(){
+    canvas = document.getElementById('c');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize',resize);
+    canvas.addEventListener('click',onClick);
+    canvas.addEventListener('touchstart',onTouchStart,{passive:false});
+    canvas.addEventListener('touchend',onTouchEnd,{passive:false});
+    document.addEventListener('keydown',onKey);
+    loadHighScore();
+    initMenuParticles();
+    initBgStars();
+    requestAnimationFrame(gameLoop);
+}
+
+function resize(){
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    let boardSize = Math.min(W*0.9,H*0.7);
+    cellSize = Math.floor(boardSize/BOARD_COLS);
+    boardSize = cellSize*BOARD_COLS;
+    boardX = (W-boardSize)/2;
+    boardY = (H-boardSize)/2+20;
+}
+
+// ==================== 存档 ====================
+function loadHighScore(){
+    try{
+        let d = localStorage.getItem('gem_high');
+        highScore = d ? parseInt(d) : 0;
+    }catch(e){highScore=0}
+}
+function saveHighScore(){
+    try{localStorage.setItem('gem_high',highScore)}catch(e){}
+}
+
+// ==================== 粒子系统 ====================
+function initMenuParticles(){
+    menuParticles = [];
+    for(let i=0;i<50;i++){
+        menuParticles.push({
+            x:Math.random()*2000-500,
+            y:Math.random()*2000-500,
+            vx:(Math.random()-0.5)*0.5,
+            vy:(Math.random()-0.5)*0.5,
+            size:Math.random()*3+1,
+            color:GEM_COLORS[Math.floor(Math.random()*6)],
+            alpha:Math.random()*0.5+0.2
+        });
+    }
+}
+
+function initBgStars(){
+    bgStars = [];
+    for(let i=0;i<30;i++){
+        bgStars.push({
+            x:Math.random()*2000,
+            y:Math.random()*2000,
+            size:Math.random()*2+0.5,
+            twinkle:Math.random()*Math.PI*2,
+            speed:Math.random()*0.02+0.01
+        });
+    }
+}
+
+function addParticles(x,y,color,count,speed){
+    for(let i=0;i<count;i++){
+        let angle = Math.random()*Math.PI*2;
+        let spd = Math.random()*speed+1;
+        particles.push({
+            x:x,y:y,
+            vx:Math.cos(angle)*spd,
+            vy:Math.sin(angle)*spd,
+            life:1,
+            decay:Math.random()*0.02+0.01,
+            size:Math.random()*4+2,
+            color:color
+        });
+    }
+}
+
+function addFloatingText(x,y,text,color,size){
+    floatingTexts.push({
+        x:x,y:y,text:text,color:color,size:size||20,
+        life:1,vy:-2
+    });
+}
+
+function updateParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+        let p=particles[i];
+        p.x+=p.vx;
+        p.y+=p.vy;
+        p.vy+=0.05;
+        p.life-=p.decay;
+        if(p.life<=0) particles.splice(i,1);
+    }
+    for(let i=floatingTexts.length-1;i>=0;i--){
+        let f=floatingTexts[i];
+        f.y+=f.vy;
+        f.life-=0.015;
+        if(f.life<=0) floatingTexts.splice(i,1);
+    }
+    for(let i=0;i<menuParticles.length;i++){
+        let p=menuParticles[i];
+        p.x+=p.vx;
+        p.y+=p.vy;
+        if(p.x<-100)p.x=W+100;
+        if(p.x>W+100)p.x=-100;
+        if(p.y<-100)p.y=H+100;
+        if(p.y>H+100)p.y=-100;
+    }
+}
+
+// ==================== 游戏板初始化 ====================
+function initBoard(){
+    let lvl = LEVELS[level];
+    board = [];
+    for(let r=0;r<BOARD_ROWS;r++){
+        board[r]=[];
+        for(let c=0;c<BOARD_COLS;c++){
+            board[r][c] = createGem(r,c,lvl.colors);
+        }
+    }
+    // 确保没有初始匹配
+    let safety=0;
+    while(findMatches().length>0 && safety<100){
+        for(let r=0;r<BOARD_ROWS;r++){
+            for(let c=0;c<BOARD_COLS;c++){
+                if(findMatchAt(r,c).length>0){
+                    board[r][c].color = Math.floor(Math.random()*lvl.colors);
+                }
+            }
+        }
+        safety++;
+    }
+}
+
+function createGem(r,c,colorCount){
+    return {
+        color:Math.floor(Math.random()*colorCount),
+        special:SPECIAL_TYPES.NORMAL,
+        x:c,y:r,
+        scale:1,
+        alpha:1
+    };
+}
+
+// ==================== 匹配检测 ====================
+function findMatches(){
+    let matches = [];
+    // 横向
+    for(let r=0;r<BOARD_ROWS;r++){
+        let streak=1;
+        for(let c=1;c<BOARD_COLS;c++){
+            if(board[r][c].color===board[r][c-1].color && board[r][c].color>=0){
+                streak++;
+            } else {
+                if(streak>=3){
+                    let match=[];
+                    for(let k=c-streak;k<c;k++) match.push({r:r,c:k});
+                    matches.push(match);
+                }
+                streak=1;
+            }
+        }
+        if(streak>=3){
+            let match=[];
+            for(let k=BOARD_COLS-streak;k<BOARD_COLS;k++) match.push({r:r,c:k});
+            matches.push(match);
+        }
+    }
+    // 纵向
+    for(let c=0;c<BOARD_COLS;c++){
+        let streak=1;
+        for(let r=1;r<BOARD_ROWS;r++){
+            if(board[r][c].color===board[r-1][c].color && board[r][c].color>=0){
+                streak++;
+            } else {
+                if(streak>=3){
+                    let match=[];
+                    for(let k=r-streak;k<r;k++) match.push({r:k,c:c});
+                    matches.push(match);
+                }
+                streak=1;
+            }
+        }
+        if(streak>=3){
+            let match=[];
+            for(let k=BOARD_ROWS-streak;k<BOARD_ROWS;k++) match.push({r:k,c:c});
+            matches.push(match);
+        }
+    }
+    return matches;
+}
+
+function findMatchAt(r,c){
+    let color = board[r][c].color;
+    if(color<0) return [];
+    let cells = [{r:r,c:c}];
+    // 横向
+    let left=c-1,right=c+1;
+    while(left>=0 && board[r][left].color===color){cells.push({r:r,c:left});left--}
+    while(right<BOARD_COLS && board[r][right].color===color){cells.push({r:r,c:right});right++}
+    // 纵向
+    let up=r-1,down=r+1;
+    while(up>=0 && board[up][c].color===color){cells.push({r:up,c:c});up--}
+    while(down<BOARD_ROWS && board[down][c].color===color){cells.push({r:down,c:c});down++}
+    // 去重
+    let unique=[];
+    let seen=new Set();
+    for(let cell of cells){
+        let key=cell.r+','+cell.c;
+        if(!seen.has(key)){seen.add(key);unique.push(cell)}
+    }
+    return unique;
+}
+
+// ==================== 消除与下落 ====================
+function processMatches(){
+    let matches = findMatches();
+    if(matches.length===0){
+        animating=false;
+        cascading=false;
+        combo=0;
+        hintTimer=0;
+        hintCells=findHint();
+        return;
+    }
+    combo++;
+    let totalRemoved=0;
+    let specialCreated=[];
+    for(let match of matches){
+        let len=match.length;
+        // 创建特殊宝石
+        let specialType=SPECIAL_TYPES.NORMAL;
+        if(len>=5) specialType=SPECIAL_TYPES.RAINBOW;
+        else if(len===4) specialType=SPECIAL_TYPES.LIGHTNING;
+        // 检测L/T形
+        if(matches.length>1){
+            for(let other of matches){
+                if(other===match) continue;
+                let intersection=match.filter(m=>other.some(o=>o.r===m.r&&o.c===m.c));
+                if(intersection.length>0){
+                    specialType=SPECIAL_TYPES.BOMB;
+                    break;
+                }
+            }
+        }
+        // 处理特殊宝石触发
+        for(let cell of match){
+            let gem=board[cell.r][cell.c];
+            if(gem.special!==SPECIAL_TYPES.NORMAL){
+                triggerSpecial(cell.r,cell.c,gem.special,gem.color);
+            }
+            totalRemoved++;
+        }
+        // 放置特殊宝石
+        if(specialType!==SPECIAL_TYPES.NORMAL){
+            let placeAt=match[Math.floor(len/2)];
+            specialCreated.push({r:placeAt.r,c:placeAt.c,type:specialType,color:board[placeAt.r][placeAt.c].color});
+        }
+    }
+    // 计分
+    let baseScore=totalRemoved*10;
+    let comboBonus=combo>1?(combo*5):0;
+    let totalScore=baseScore+comboBonus;
+    score+=totalScore;
+    // 消除动画
+    for(let match of matches){
+        for(let cell of match){
+            let px=boardX+cell.c*cellSize+cellSize/2;
+            let py=boardY+cell.r*cellSize+cellSize/2;
+            let color=GEM_COLORS[board[cell.r][cell.c].color]||'#fff';
+            addParticles(px,py,color,8,3);
+            removeAnims.push({r:cell.r,c:cell.c,progress:0});
+        }
+    }
+    // 浮动文字
+    if(combo>1){
+        let cx=boardX+BOARD_COLS*cellSize/2;
+        let cy=boardY-10;
+        addFloatingText(cx,cy,combo+'连击!',' #ffd700',24+combo*2);
+    }
+    addFloatingText(W/2,H-60,'+'+totalScore,'#ffffff',20);
+    // 闪烁
+    flashTimer=10;
+    if(combo>=3) shakeTimer=10;
+    // 创建特殊宝石
+    for(let sp of specialCreated){
+        board[sp.r][sp.c]={
+            color:sp.color,
+            special:sp.type,
+            x:sp.c,y:sp.r,
+            scale:1,alpha:1
+        };
+        addFloatingText(
+            boardX+sp.c*cellSize+cellSize/2,
+            boardY+sp.r*cellSize+cellSize/2,
+            SPECIAL_NAMES[sp.type]+'!','#ffaa00',18
+        );
+    }
+    // 延迟后清除并下落
+    setTimeout(()=>{
+        for(let match of matches){
+            for(let cell of match){
+                board[cell.r][cell.c]={color:-1,special:SPECIAL_TYPES.NORMAL,x:cell.c,y:cell.r,scale:1,alpha:1};
+            }
+        }
+        removeAnims=[];
+        applyGravity();
+    },300);
+}
+
+function triggerSpecial(r,c,type,color){
+    let lvl=LEVELS[level];
+    if(type===SPECIAL_TYPES.BOMB){
+        // 3x3爆炸
+        for(let dr=-1;dr<=1;dr++){
+            for(let dc=-1;dc<=1;dc++){
+                let nr=r+dr,nc=c+dc;
+                if(nr>=0&&nr<BOARD_ROWS&&nc>=0&&nc<BOARD_COLS){
+                    if(board[nr][nc].color>=0){
+                        let px=boardX+nc*cellSize+cellSize/2;
+                        let py=boardY+nr*cellSize+cellSize/2;
+                        addParticles(px,py,'#ffaa00',12,4);
+                        score+=15;
+                    }
+                }
+            }
+        }
+        shakeTimer=15;
+    } else if(type===SPECIAL_TYPES.LIGHTNING){
+        // 整行或整列
+        let isRow=Math.random()>0.5;
+        if(isRow){
+            for(let cc=0;cc<BOARD_COLS;cc++){
+                if(board[r][cc].color>=0){
+                    let px=boardX+cc*cellSize+cellSize/2;
+                    let py=boardY+r*cellSize+cellSize/2;
+                    addParticles(px,py,'#44ffff',8,3);
+                    score+=10;
+                }
+            }
+        } else {
+            for(let rr=0;rr<BOARD_ROWS;rr++){
+                if(board[rr][c].color>=0){
+                    let px=boardX+c*cellSize+cellSize/2;
+                    let py=boardY+rr*cellSize+cellSize/2;
+                    addParticles(px,py,'#44ffff',8,3);
+                    score+=10;
+                }
+            }
+        }
+    } else if(type===SPECIAL_TYPES.RAINBOW){
+        // 消除所有同色
+        let targetColor=color;
+        for(let rr=0;rr<BOARD_ROWS;rr++){
+            for(let cc=0;cc<BOARD_COLS;cc++){
+                if(board[rr][cc].color===targetColor){
+                    let px=boardX+cc*cellSize+cellSize/2;
+                    let py=boardY+rr*cellSize+cellSize/2;
+                    addParticles(px,py,'#ffffff',10,4);
+                    score+=20;
+                }
+            }
+        }
+    }
+}
+
+function applyGravity(){
+    let moved=false;
+    let lvl=LEVELS[level];
+    for(let c=0;c<BOARD_COLS;c++){
+        let empty=BOARD_ROWS-1;
+        for(let r=BOARD_ROWS-1;r>=0;r--){
+            if(board[r][c].color>=0){
+                if(r!==empty){
+                    board[empty][c]=board[r][c];
+                    board[r][c]={color:-1,special:SPECIAL_TYPES.NORMAL,x:c,y:r,scale:1,alpha:1};
+                    fallAnims.push({fromR:r,toR:r,c:c,progress:0});
+                    moved=true;
+                }
+                empty--;
+            }
+        }
+        // 填充新宝石
+        for(let r=empty;r>=0;r--){
+            board[r][c]={
+                color:Math.floor(Math.random()*lvl.colors),
+                special:SPECIAL_TYPES.NORMAL,
+                x:c,y:r,
+                scale:1,alpha:1
+            };
+            fallAnims.push({fromR:r-3,toR:r,c:c,progress:0});
+            moved=true;
+        }
+    }
+    if(moved){
+        setTimeout(()=>{fallAnims=[];processMatches()},300);
+    } else {
+        processMatches();
+    }
+}
+
+// ==================== 交换逻辑 ====================
+function trySwap(r1,c1,r2,c2){
+    if(animating) return;
+    // 检查相邻
+    if(Math.abs(r1-r2)+Math.abs(c1-c2)!==1) return;
+    animating=true;
+    hintCells=null;
+    // 交换
+    let temp=board[r1][c1];
+    board[r1][c1]=board[r2][c2];
+    board[r2][c2]=temp;
+    board[r1][c1].x=c1;board[r1][c1].y=r1;
+    board[r2][c2].x=c2;board[r2][c2].y=r2;
+    // 检查匹配
+    if(findMatches().length>0){
+        movesLeft--;
+        combo=0;
+        processMatches();
+    } else {
+        // 换回
+        setTimeout(()=>{
+            temp=board[r1][c1];
+            board[r1][c1]=board[r2][c2];
+            board[r2][c2]=temp;
+            board[r1][c1].x=c1;board[r1][c1].y=r1;
+            board[r2][c2].x=c2;board[r2][c2].y=r2;
+            animating=false;
+        },300);
+    }
+}
+
+// ==================== 提示系统 ====================
+function findHint(){
+    for(let r=0;r<BOARD_ROWS;r++){
+        for(let c=0;c<BOARD_COLS;c++){
+            // 右交换
+            if(c<BOARD_COLS-1){
+                swap(r,c,r,c+1);
+                if(findMatches().length>0){swap(r,c,r,c+1);return[{r:r,c:c},{r:r,c:c+1}]}
+                swap(r,c,r,c+1);
+            }
+            // 下交换
+            if(r<BOARD_ROWS-1){
+                swap(r,c,r+1,c);
+                if(findMatches().length>0){swap(r,c,r+1,c);return[{r:r,c:c},{r:r+1,c:c}]}
+                swap(r,c,r+1,c);
+            }
+        }
+    }
+    return null;
+}
+
+function swap(r1,c1,r2,c2){
+    let t=board[r1][c1];
+    board[r1][c1]=board[r2][c2];
+    board[r2][c2]=t;
+    board[r1][c1].x=c1;board[r1][c1].y=r1;
+    board[r2][c2].x=c2;board[r2][c2].y=r2;
+}
+
+// ==================== 道具系统 ====================
+function usePower(type){
+    if(state!=='playing'||animating) return;
+    if(powers[type]<=0) return;
+    activePower=type;
+}
+
+function applyPowerAt(r,c){
+    if(!activePower) return;
+    powers[activePower]--;
+    let type=activePower;
+    activePower=null;
+    animating=true;
+    if(type==='bomb'){
+        // 炸弹：消除3x3
+        for(let dr=-1;dr<=1;dr++){
+            for(let dc=-1;dc<=1;dc++){
+                let nr=r+dr,nc=c+dc;
+                if(nr>=0&&nr<BOARD_ROWS&&nc>=0&&nc<BOARD_COLS){
+                    let px=boardX+nc*cellSize+cellSize/2;
+                    let py=boardY+nr*cellSize+cellSize/2;
+                    addParticles(px,py,'#ffaa00',10,4);
+                    board[nr][nc]={color:-1,special:SPECIAL_TYPES.NORMAL,x:nc,y:nr,scale:1,alpha:1};
+                    score+=15;
+                }
+            }
+        }
+        shakeTimer=15;
+    } else if(type==='lightning'){
+        // 闪电：消除整行
+        for(let cc=0;cc<BOARD_COLS;cc++){
+            let px=boardX+cc*cellSize+cellSize/2;
+            let py=boardY+r*cellSize+cellSize/2;
+            addParticles(px,py,'#44ffff',8,3);
+            board[r][cc]={color:-1,special:SPECIAL_TYPES.NORMAL,x:cc,y:r,scale:1,alpha:1};
+            score+=10;
+        }
+    } else if(type==='rainbow'){
+        // 彩虹：消除所有同色
+        let color=board[r][c].color;
+        if(color>=0){
+            for(let rr=0;rr<BOARD_ROWS;rr++){
+                for(let cc=0;cc<BOARD_COLS;cc++){
+                    if(board[rr][cc].color===color){
+                        let px=boardX+cc*cellSize+cellSize/2;
+                        let py=boardY+rr*cellSize+cellSize/2;
+                        addParticles(px,py,'#ffffff',10,4);
+                        board[rr][cc]={color:-1,special:SPECIAL_TYPES.NORMAL,x:cc,y:rr,scale:1,alpha:1};
+                        score+=20;
+                    }
+                }
+            }
+        }
+    }
+    flashTimer=10;
+    setTimeout(()=>{applyGravity()},300);
+}
+
+// ==================== 输入处理 ====================
+function onClick(e){
+    let x=e.clientX,y=e.clientY;
+    handleClick(x,y);
+}
+
+function onTouchStart(e){
+    e.preventDefault();
+}
+
+function onTouchEnd(e){
+    e.preventDefault();
+    if(e.changedTouches.length>0){
+        let t=e.changedTouches[0];
+        handleClick(t.clientX,t.clientY);
+    }
+}
+
+function handleClick(x,y){
+    if(state==='menu'){
+        // 开始按钮
+        let bx=W/2-100,by=H/2+50,bw=200,bh=50;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh){
+            state='levelselect';
+            return;
+        }
+    } else if(state==='levelselect'){
+        // 关卡选择
+        let startY=100;
+        for(let i=0;i<LEVELS.length;i++){
+            let bx=W/2-120,by=startY+i*55,bw=240,bh=45;
+            if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh){
+                if(i<=getUnlockedLevel()){
+                    startLevel(i);
+                    return;
+                }
+            }
+        }
+        // 返回按钮
+        let bx=W/2-60,by=H-60,bw=120,bh=40;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh){
+            state='menu';
+            return;
+        }
+    } else if(state==='playing'){
+        // 道具栏
+        let powerY=boardY-60;
+        let powerTypes=['bomb','lightning','rainbow'];
+        let powerIcons=['💣','⚡','🌈'];
+        for(let i=0;i<3;i++){
+            let px=W/2-100+i*80,pw=70,ph=40;
+            if(x>=px&&x<=px+pw&&y>=powerY&&y<=powerY+ph){
+                usePower(powerTypes[i]);
+                return;
+            }
+        }
+        // 返回按钮
+        if(x>=10&&x<=60&&y>=10&&y<=40){
+            state='levelselect';
+            return;
+        }
+        // 棋盘点击
+        let bx=Math.floor((x-boardX)/cellSize);
+        let by=Math.floor((y-boardY)/cellSize);
+        if(bx>=0&&bx<BOARD_COLS&&by>=0&&by<BOARD_ROWS){
+            if(activePower){
+                applyPowerAt(by,bx);
+            } else {
+                if(selected){
+                    trySwap(selected.r,selected.c,by,bx);
+                    selected=null;
+                } else {
+                    selected={r:by,c:bx};
+                    hintTimer=0;
+                }
+            }
+        } else {
+            selected=null;
+        }
+    } else if(state==='gameover'){
+        // 重试
+        let bx=W/2-80,by=H/2+50,bw=160,bh=45;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh){
+            startLevel(level);
+            return;
+        }
+        // 返回
+        bx=W/2-60;by=H/2+110;bw=120;bh=40;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh){
+            state='levelselect';
+            return;
+        }
+    }
+}
+
+function onKey(e){
+    if(state==='playing' && selected && !animating){
+        let dr=0,dc=0;
+        if(e.key==='ArrowUp') dr=-1;
+        else if(e.key==='ArrowDown') dr=1;
+        else if(e.key==='ArrowLeft') dc=-1;
+        else if(e.key==='ArrowRight') dc=1;
+        else if(e.key==='Escape'){state='levelselect';return}
+        if(dr!==0||dc!==0){
+            let nr=selected.r+dr,nc=selected.c+dc;
+            if(nr>=0&&nr<BOARD_ROWS&&nc>=0&&nc<BOARD_COLS){
+                trySwap(selected.r,selected.c,nr,nc);
+                selected=null;
+            }
+        }
+    } else if(e.key==='Escape'){
+        if(state==='playing') state='levelselect';
+        else if(state==='levelselect') state='menu';
+    }
+}
+
+function getUnlockedLevel(){
+    return Math.min(level+1,LEVELS.length-1);
+}
+
+function startLevel(lvl){
+    level=lvl;
+    state='playing';
+    score=0;
+    combo=0;
+    movesLeft=LEVELS[lvl].moves;
+    targetScore=LEVELS[lvl].target;
+    selected=null;
+    animating=false;
+    activePower=null;
+    hintCells=null;
+    hintTimer=0;
+    particles=[];
+    floatingTexts=[];
+    removeAnims=[];
+    fallAnims=[];
+    powers={bomb:1,lightning:1,rainbow:1};
+    initBoard();
+}
+
+// ==================== 游戏主循环 ====================
+function gameLoop(ts){
+    let dt=ts-lastTime;
+    lastTime=ts;
+    update(dt);
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function update(dt){
+    updateParticles();
+    if(shakeTimer>0) shakeTimer--;
+    if(flashTimer>0) flashTimer--;
+    if(hintTimer<200) hintTimer++;
+    // 移除动画
+    for(let i=removeAnims.length-1;i>=0;i--){
+        removeAnims[i].progress+=0.05;
+        if(removeAnims[i].progress>=1) removeAnims.splice(i,1);
+    }
+    // 下落动画
+    for(let i=fallAnims.length-1;i>=0;i--){
+        fallAnims[i].progress+=0.08;
+        if(fallAnims[i].progress>=1) fallAnims.splice(i,1);
+    }
+    // 检查游戏结束
+    if(state==='playing' && !animating){
+        if(score>=targetScore){
+            state='gameover';
+            if(score>highScore){highScore=score;saveHighScore()}
+            // 奖励道具
+            let bonus=Math.floor(score/targetScore);
+            powers.bomb+=bonus;
+            powers.lightning+=bonus;
+            powers.rainbow+=bonus;
+        } else if(movesLeft<=0){
+            state='gameover';
+            if(score>highScore){highScore=score;saveHighScore()}
+        }
+    }
+}
+
+// ==================== 渲染 ====================
+function render(){
+    let lvl=LEVELS[state==='playing'||state==='gameover'?level:0];
+    let bg1=lvl?lvl.bg1:'#0a0a2e';
+    let bg2=lvl?lvl.bg2:'#1a1a4e';
+    // 背景渐变
+    let grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,bg1);
+    grad.addColorStop(1,bg2);
+    ctx.fillStyle=grad;
+    ctx.fillRect(0,0,W,H);
+    // 背景星星
+    renderStars();
+    // 菜单粒子
+    for(let p of menuParticles){
+        ctx.globalAlpha=p.alpha;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    // 场景渲染
+    if(state==='menu') renderMenu();
+    else if(state==='levelselect') renderLevelSelect();
+    else if(state==='playing') renderGame();
+    else if(state==='gameover') renderGameOver();
+    // 粒子
+    renderParticles();
+}
+
+function renderStars(){
+    for(let s of bgStars){
+        s.twinkle+=s.speed;
+        let a=Math.sin(s.twinkle)*0.3+0.4;
+        ctx.globalAlpha=a;
+        ctx.fillStyle='#ffffff';
+        ctx.beginPath();
+        ctx.arc(s.x%s.W,s.y%s.H,s.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+function renderParticles(){
+    for(let p of particles){
+        ctx.globalAlpha=p.life;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    for(let f of floatingTexts){
+        ctx.globalAlpha=f.life;
+        ctx.fillStyle=f.color;
+        ctx.font='bold '+f.size+'px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(f.text,f.x,f.y);
+    }
+    ctx.globalAlpha=1;
+}
+
+function renderMenu(){
+    // 标题
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 48px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('宝石迷阵',W/2,H/2-40);
+    ctx.fillStyle='#ffffff';
+    ctx.font='18px "Microsoft YaHei"';
+    ctx.fillText('经典三消 · 连锁加分 · 道具系统',W/2,H/2);
+    // 开始按钮
+    let bx=W/2-100,by=H/2+50;
+    drawButton(bx,by,200,50,'开始游戏','#4CAF50','#66BB6A');
+    // 最高分
+    if(highScore>0){
+        ctx.fillStyle='#ffd700';
+        ctx.font='16px "Microsoft YaHei"';
+        ctx.fillText('最高分: '+highScore,W/2,H/2+130);
+    }
+    // 操作说明
+    ctx.fillStyle='rgba(255,255,255,0.6)';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('点击/触摸选择宝石，交换相邻宝石消除',W/2,H-60);
+    ctx.fillText('键盘方向键移动选择，ESC返回',W/2,H-35);
+}
+
+function renderLevelSelect(){
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 36px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('选择关卡',W/2,60);
+    let startY=100;
+    let unlocked=getUnlockedLevel();
+    for(let i=0;i<LEVELS.length;i++){
+        let lvl=LEVELS[i];
+        let bx=W/2-120,by=startY+i*55;
+        let locked=i>unlocked;
+        // 按钮背景
+        let g=ctx.createLinearGradient(bx,by,bx,by+45);
+        if(locked){
+            g.addColorStop(0,'#333');
+            g.addColorStop(1,'#222');
+        } else {
+            g.addColorStop(0,'#2a5a2a');
+            g.addColorStop(1,'#1a3a1a');
+        }
+        ctx.fillStyle=g;
+        roundRect(ctx,bx,by,240,45,8);
+        ctx.fill();
+        ctx.strokeStyle=locked?'#555':'#4CAF50';
+        ctx.lineWidth=2;
+        roundRect(ctx,bx,by,240,45,8);
+        ctx.stroke();
+        // 文字
+        ctx.fillStyle=locked?'#666':'#fff';
+        ctx.font='16px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        let text=(i+1)+'. '+lvl.name+' (目标:'+lvl.target+')';
+        ctx.fillText(text,W/2,by+28);
+    }
+    // 返回按钮
+    drawButton(W/2-60,H-60,120,40,'返回','#666','#888');
+}
+
+function renderGame(){
+    let lvl=LEVELS[level];
+    // 震动偏移
+    let sx=0,sy=0;
+    if(shakeTimer>0){
+        sx=(Math.random()-0.5)*shakeIntensity*2;
+        sy=(Math.random()-0.5)*shakeIntensity*2;
+        shakeIntensity=shakeTimer*0.5;
+    }
+    ctx.save();
+    ctx.translate(sx,sy);
+    // 顶部信息栏
+    ctx.fillStyle='#ffffff';
+    ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('关卡: '+lvl.name,15,30);
+    ctx.textAlign='center';
+    ctx.fillText('分数: '+score,W/2,30);
+    ctx.textAlign='right';
+    ctx.fillText('步数: '+movesLeft,W-15,30);
+    // 目标
+    ctx.fillStyle='#ffd700';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('目标: '+targetScore,W/2,50);
+    // 连击
+    if(combo>1){
+        ctx.fillStyle='#ff6b6b';
+        ctx.font='bold '+Math.min(20+combo*2,36)+'px "Microsoft YaHei"';
+        ctx.fillText(combo+'连击!',W/2,70);
+    }
+    // 道具栏
+    renderPowerBar();
+    // 返回按钮
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    roundRect(ctx,10,10,50,30,5);
+    ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('返回',35,30);
+    // 棋盘背景
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    roundRect(ctx,boardX-5,boardY-5,BOARD_COLS*cellSize+10,BOARD_ROWS*cellSize+10,10);
+    ctx.fill();
+    // 棋盘格子
+    for(let r=0;r<BOARD_ROWS;r++){
+        for(let c=0;c<BOARD_COLS;c++){
+            let x=boardX+c*cellSize,y=boardY+r*cellSize;
+            // 格子背景
+            ctx.fillStyle=(r+c)%2===0?'rgba(255,255,255,0.08)':'rgba(255,255,255,0.04)';
+            ctx.fillRect(x,y,cellSize,cellSize);
+            // 宝石
+            let gem=board[r][c];
+            if(gem.color>=0){
+                renderGem(x,y,gem,r,c);
+            }
+        }
+    }
+    // 选中高亮
+    if(selected){
+        let x=boardX+selected.c*cellSize,y=boardY+selected.r*cellSize;
+        ctx.strokeStyle='#ffd700';
+        ctx.lineWidth=3;
+        ctx.strokeRect(x+2,y+2,cellSize-4,cellSize-4);
+    }
+    // 提示
+    if(hintCells && hintTimer>=200){
+        let pulse=Math.sin(Date.now()*0.005)*0.3+0.7;
+        ctx.globalAlpha=pulse;
+        ctx.strokeStyle='#ffd700';
+        ctx.lineWidth=2;
+        for(let cell of hintCells){
+            let x=boardX+cell.c*cellSize,y=boardY+cell.r*cellSize;
+            ctx.strokeRect(x+3,y+3,cellSize-6,cellSize-6);
+        }
+        ctx.globalAlpha=1;
+    }
+    // 进度条
+    let barY=boardY+BOARD_ROWS*cellSize+15;
+    let barW=BOARD_COLS*cellSize;
+    let progress=Math.min(score/targetScore,1);
+    ctx.fillStyle='rgba(255,255,255,0.2)';
+    roundRect(ctx,boardX,barY,barW,12,6);
+    ctx.fill();
+    let pg=ctx.createLinearGradient(boardX,barY,boardX+barW*progress,barY);
+    pg.addColorStop(0,'#4CAF50');
+    pg.addColorStop(1,'#8BC34A');
+    ctx.fillStyle=pg;
+    roundRect(ctx,boardX,barY,barW*progress,12,6);
+    ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.font='10px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(score+'/'+targetScore,boardX+barW/2,barY+10);
+    // 闪烁效果
+    if(flashTimer>0){
+        ctx.fillStyle='rgba(255,255,255,'+(flashTimer*0.02)+')';
+        ctx.fillRect(boardX,boardY,BOARD_COLS*cellSize,BOARD_ROWS*cellSize);
+    }
+    ctx.restore();
+}
+
+function renderGem(x,y,gem,r,c){
+    let cx=x+cellSize/2,cy=y+cellSize/2;
+    let size=cellSize*0.4*gem.scale;
+    let color=GEM_COLORS[gem.color];
+    // 宝石阴影
+    ctx.fillStyle='rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.arc(cx+2,cy+2,size,0,Math.PI*2);
+    ctx.fill();
+    // 宝石主体
+    let g=ctx.createRadialGradient(cx-size*0.3,cy-size*0.3,0,cx,cy,size);
+    g.addColorStop(0,lightenColor(color,40));
+    g.addColorStop(0.7,color);
+    g.addColorStop(1,darkenColor(color,30));
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.arc(cx,cy,size,0,Math.PI*2);
+    ctx.fill();
+    // 宝石高光
+    ctx.fillStyle='rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    ctx.arc(cx-size*0.2,cy-size*0.2,size*0.3,0,Math.PI*2);
+    ctx.fill();
+    // 特殊宝石标记
+    if(gem.special!==SPECIAL_TYPES.NORMAL){
+        ctx.fillStyle='#fff';
+        ctx.font='bold '+(cellSize*0.35)+'px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        if(gem.special===SPECIAL_TYPES.BOMB) ctx.fillText('💣',cx,cy);
+        else if(gem.special===SPECIAL_TYPES.LIGHTNING) ctx.fillText('⚡',cx,cy);
+        else if(gem.special===SPECIAL_TYPES.RAINBOW) ctx.fillText('🌈',cx,cy);
+        ctx.textBaseline='alphabetic';
+    }
+    // 消除动画
+    let ra=removeAnims.find(a=>a.r===r&&a.c===c);
+    if(ra){
+        ctx.globalAlpha=1-ra.progress;
+        ctx.fillStyle='rgba(255,255,255,'+ra.progress+')';
+        ctx.beginPath();
+        ctx.arc(cx,cy,size*(1+ra.progress),0,Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha=1;
+    }
+}
+
+function renderPowerBar(){
+    let powerY=boardY-60;
+    let types=['bomb','lightning','rainbow'];
+    let icons=['💣','⚡','🌈'];
+    let names=['炸弹','闪电','彩虹'];
+    for(let i=0;i<3;i++){
+        let px=W/2-100+i*80;
+        let active=activePower===types[i];
+        ctx.fillStyle=active?'rgba(255,215,0,0.3)':'rgba(0,0,0,0.4)';
+        roundRect(ctx,px,powerY,70,40,8);
+        ctx.fill();
+        ctx.strokeStyle=powers[types[i]]>0?'#ffd700':'#555';
+        ctx.lineWidth=active?2:1;
+        roundRect(ctx,px,powerY,70,40,8);
+        ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.font='16px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(icons[i]+powers[types[i]],px+35,powerY+26);
+    }
+}
+
+function renderGameOver(){
+    // 半透明遮罩
+    ctx.fillStyle='rgba(0,0,0,0.7)';
+    ctx.fillRect(0,0,W,H);
+    // 结果框
+    let bw=300,bh=250;
+    let bx=W/2-bw/2,by=H/2-bh/2;
+    let g=ctx.createLinearGradient(bx,by,bx,by+bh);
+    g.addColorStop(0,'#1a2a3a');
+    g.addColorStop(1,'#0a1a2a');
+    ctx.fillStyle=g;
+    roundRect(ctx,bx,by,bw,bh,15);
+    ctx.fill();
+    ctx.strokeStyle='#ffd700';
+    ctx.lineWidth=2;
+    roundRect(ctx,bx,by,bw,bh,15);
+    ctx.stroke();
+    // 标题
+    let won=score>=targetScore;
+    ctx.fillStyle=won?'#ffd700':'#ff6b6b';
+    ctx.font='bold 32px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(won?'过关!':'失败',W/2,by+50);
+    // 分数
+    ctx.fillStyle='#fff';
+    ctx.font='20px "Microsoft YaHei"';
+    ctx.fillText('得分: '+score,W/2,by+90);
+    ctx.fillText('目标: '+targetScore,W/2,by+120);
+    // 最高分
+    if(score>=highScore){
+        ctx.fillStyle='#ffd700';
+        ctx.font='16px "Microsoft YaHei"';
+        ctx.fillText('新纪录!',W/2,by+150);
+    }
+    // 按钮
+    drawButton(W/2-80,by+170,160,45,won?'下一关':'重试','#4CAF50','#66BB6A');
+    drawButton(W/2-60,by+225,120,35,'返回','#666','#888');
+}
+
+// ==================== 工具函数 ====================
+function drawButton(x,y,w,h,text,color1,color2){
+    let g=ctx.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0,color1);
+    g.addColorStop(1,color2);
+    ctx.fillStyle=g;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.lineWidth=1;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function lightenColor(hex,percent){
+    let num=parseInt(hex.slice(1),16);
+    let r=Math.min(255,(num>>16)+percent);
+    let g=Math.min(255,((num>>8)&0xff)+percent);
+    let b=Math.min(255,(num&0xff)+percent);
+    return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+
+function darkenColor(hex,percent){
+    let num=parseInt(hex.slice(1),16);
+    let r=Math.max(0,(num>>16)-percent);
+    let g=Math.max(0,((num>>8)&0xff)-percent);
+    let b=Math.max(0,(num&0xff)-percent);
+    return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+
+// ==================== 启动 ====================
+window.addEventListener('load',init);
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

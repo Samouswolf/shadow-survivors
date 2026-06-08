@@ -150,7 +150,7 @@ const WEATHER_TYPES=[
 ];
 
 // === Game State ===
-let G={};
+let G={resources:[],buildings:[],particles:[],floatTexts:[],inv:{wood:0,stone:0,iron:0,gold:0,gem:0},keys:{},unlockedAchievements:[],notifications:[]};
 function resetGame(){
     G={
         state:'menu', // menu,play,pause,over
@@ -308,7 +308,7 @@ function handleClick(cx,cy){
     // Click on world = move player there / interact
     const wx=cx+G.camX,wy=cy+G.camY;
     // Check if near resource -> collect
-    for(let r of G.resources){
+    for(let r of (G.resources||[])){
         if(!r.alive)continue;
         const dx=r.x-wx,dy=r.y-wy;
         if(Math.abs(dx)<TILE&&Math.abs(dy)<TILE){
@@ -320,7 +320,7 @@ function handleClick(cx,cy){
         }
     }
     // Check if clicking on existing building (upgrade)
-    for(let bl of G.buildings){
+    for(let bl of (G.buildings||[])){
         if(Math.abs(bl.x-wx)<TILE/2&&Math.abs(bl.y-wy)<TILE/2){
             upgradeBuilding(bl);return;
         }
@@ -348,7 +348,7 @@ function doAction(){
     if(G.state!=='play')return;
     // Try collect nearest resource
     let nearest=null,nd=Infinity;
-    for(let r of G.resources){
+    for(let r of (G.resources||[])){
         if(!r.alive)continue;
         const d=Math.sqrt((r.x-G.px)**2+(r.y-G.py)**2);
         if(d<nd){nd=d;nearest=r}
@@ -367,6 +367,7 @@ function doAction(){
 function collectResource(r){
     if(!r.alive)return;
     const res=RESOURCE_TYPES[r.type];
+    if(!res)return;
     const key=['wood','stone','iron','gold','gem'][r.type];
     // Combo system
     G.comboCount++;
@@ -386,16 +387,17 @@ function collectResource(r){
 
 function placeBuilding(bx,by){
     const b=BUILDINGS[G.selectedBuild];
+    if(!b)return;
     // Check cost
     for(let k in b.cost){
         if((G.inv[k]||0)<b.cost[k]){sfxError();addFloatText(G.px,G.px-30,'资源不足!','#f44');return}
     }
     // Check overlap
-    for(let bl of G.buildings){
+    for(let bl of (G.buildings||[])){
         if(bl.x===bx&&bl.y===by){sfxError();return}
     }
     // Check on resource
-    for(let r of G.resources){
+    for(let r of (G.resources||[])){
         if(r.alive&&Math.abs(r.x-bx)<TILE&&Math.abs(r.y-by)<TILE){sfxError();return}
     }
     // Pay cost
@@ -410,7 +412,7 @@ function placeBuilding(bx,by){
 
 function upgradeBuilding(bl){
     const b=BUILDINGS[bl.type];
-    if(bl.level>=3)return;
+    if(!b||bl.level>=3)return;
     const mult=bl.level*2;
     const cost={};
     for(let k in b.cost)cost[k]=b.cost[k]*mult;
@@ -446,11 +448,13 @@ function doTrade(idx){
 }
 
 function addNotification(text,color='#fff'){
+    if(!G.notifications)G.notifications=[];
     G.notifications.push({text,color,life:180,maxLife:180});
     if(G.notifications.length>5)G.notifications.shift();
 }
 
 function checkAchievements(){
+    if(!G.unlockedAchievements)G.unlockedAchievements=[];
     for(let a of ACHIEVEMENTS){
         if(G.unlockedAchievements.includes(a.id))continue;
         if(a.check()){
@@ -466,6 +470,7 @@ function checkAchievements(){
 
 // === Particles ===
 function addParticle(x,y,color,count){
+    if(!G.particles)G.particles=[];
     for(let i=0;i<count;i++){
         const angle=Math.random()*Math.PI*2;
         const spd=1+Math.random()*3;
@@ -474,6 +479,7 @@ function addParticle(x,y,color,count){
     }
 }
 function addFloatText(x,y,text,color){
+    if(!G.floatTexts)G.floatTexts=[];
     G.floatTexts.push({x,y,text,color,life:60,maxLife:60});
 }
 
@@ -510,7 +516,8 @@ function update(dt){
         G.weatherTimer=0;
         G.weather=Math.floor(Math.random()*WEATHER_TYPES.length);
         G.weatherDuration=600+Math.random()*600;
-        addNotification('天气变化: '+WEATHER_TYPES[G.weather].name,WEATHER_TYPES[G.weather].color);
+        const wt=WEATHER_TYPES[G.weather];
+        if(wt)addNotification('天气变化: '+wt.name,wt.color);
     }
 
     // Combo timer
@@ -523,27 +530,35 @@ function update(dt){
     if(G.tradeCooldown>0)G.tradeCooldown--;
 
     // Resource respawn (affected by weather)
-    const weatherBonus=WEATHER_TYPES[G.weather].resBonus;
-    for(let r of G.resources){
-        if(!r.alive){
-            const speedMod=weatherBonus>=0?1+weatherBonus:1/(1+Math.abs(weatherBonus));
-            r.respawn-=speedMod;
-            if(r.respawn<=0)r.alive=true;
+    const weatherBonus=(WEATHER_TYPES[G.weather]||WEATHER_TYPES[0]).resBonus;
+    if(G.resources){
+        for(let r of G.resources){
+            if(!r.alive){
+                const speedMod=weatherBonus>=0?1+weatherBonus:1/(1+Math.abs(weatherBonus));
+                r.respawn-=speedMod;
+                if(r.respawn<=0)r.alive=true;
+            }
         }
     }
 
     // Building production
-    for(let bl of G.buildings){
-        bl.prodTimer++;
-        const rate=Math.max(30,120-bl.level*30);
-        if(bl.prodTimer>=rate){
-            bl.prodTimer=0;
-            const key=BUILDINGS[bl.type].effect;
-            const prodAmount=bl.level;
-            G.inv[key]=(G.inv[key]||0)+prodAmount;
-            G.score+=prodAmount*5;
-            const resIdx=['wood','stone','iron','gold','gem'].indexOf(key);
-            addFloatText(bl.x,bl.y-15,'+'+prodAmount+' '+RESOURCE_TYPES[resIdx].name,RESOURCE_TYPES[resIdx].color);
+    if(G.buildings){
+        for(let bl of G.buildings){
+            bl.prodTimer++;
+            const rate=Math.max(30,120-bl.level*30);
+            if(bl.prodTimer>=rate){
+                bl.prodTimer=0;
+                const bld=BUILDINGS[bl.type];
+                if(!bld)continue;
+                const key=bld.effect;
+                const prodAmount=bl.level;
+                G.inv[key]=(G.inv[key]||0)+prodAmount;
+                G.score+=prodAmount*5;
+                const resIdx=['wood','stone','iron','gold','gem'].indexOf(key);
+                if(resIdx>=0&&RESOURCE_TYPES[resIdx]){
+                    addFloatText(bl.x,bl.y-15,'+'+prodAmount+' '+RESOURCE_TYPES[resIdx].name,RESOURCE_TYPES[resIdx].color);
+                }
+            }
         }
     }
 
@@ -557,16 +572,20 @@ function update(dt){
     if(G.tick%30===0)checkAchievements();
 
     // Particles
-    for(let i=G.particles.length-1;i>=0;i--){
-        const p=G.particles[i];
-        p.x+=p.vx;p.y+=p.vy;p.vy+=0.05;p.life--;
-        if(p.life<=0)G.particles.splice(i,1);
+    if(G.particles){
+        for(let i=G.particles.length-1;i>=0;i--){
+            const p=G.particles[i];
+            p.x+=p.vx;p.y+=p.vy;p.vy+=0.05;p.life--;
+            if(p.life<=0)G.particles.splice(i,1);
+        }
     }
 
     // Float texts
-    for(let i=G.floatTexts.length-1;i>=0;i--){
-        G.floatTexts[i].y-=0.5;G.floatTexts[i].life--;
-        if(G.floatTexts[i].life<=0)G.floatTexts.splice(i,1);
+    if(G.floatTexts){
+        for(let i=G.floatTexts.length-1;i>=0;i--){
+            G.floatTexts[i].y-=0.5;G.floatTexts[i].life--;
+            if(G.floatTexts[i].life<=0)G.floatTexts.splice(i,1);
+        }
     }
 
     // Score goal check
@@ -592,9 +611,11 @@ function update(dt){
     }
 
     // Notifications update
-    for(let i=G.notifications.length-1;i>=0;i--){
-        G.notifications[i].life--;
-        if(G.notifications[i].life<=0)G.notifications.splice(i,1);
+    if(G.notifications){
+        for(let i=G.notifications.length-1;i>=0;i--){
+            G.notifications[i].life--;
+            if(G.notifications[i].life<=0)G.notifications.splice(i,1);
+        }
     }
 
     // Achievement popup timer
@@ -638,9 +659,10 @@ function render(){
     for(let r=0;r<=ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*TILE);ctx.lineTo(WORLD_W,r*TILE);ctx.stroke()}
 
     // Resources
-    for(let r of G.resources){
+    for(let r of (G.resources||[])){
         if(!r.alive)continue;
         const res=RESOURCE_TYPES[r.type];
+        if(!res)continue;
         const pulse=1+Math.sin(G.tick*0.05+r.x)*0.1;
         // Glow
         ctx.globalAlpha=0.2;
@@ -656,8 +678,9 @@ function render(){
     }
 
     // Buildings
-    for(let bl of G.buildings){
+    for(let bl of (G.buildings||[])){
         const b=BUILDINGS[bl.type];
+        if(!b)continue;
         ctx.fillStyle=b.color;
         ctx.fillRect(bl.x-TILE/2+2,bl.y-TILE/2+2,TILE-4,TILE-4);
         // Level indicator
@@ -697,14 +720,14 @@ function render(){
     }
 
     // Particles
-    for(let p of G.particles){
+    for(let p of (G.particles||[])){
         ctx.globalAlpha=p.life/p.maxLife;ctx.fillStyle=p.color;
         ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
     }
     ctx.globalAlpha=1;
 
     // Float texts
-    for(let ft of G.floatTexts){
+    for(let ft of (G.floatTexts||[])){
         ctx.globalAlpha=ft.life/ft.maxLife;
         ctx.fillStyle=ft.color;ctx.font='bold 12px monospace';ctx.textAlign='center';
         ctx.fillText(ft.text,ft.x,ft.y);
@@ -720,8 +743,11 @@ function render(){
     }
 
     // Weather overlay
-    ctx.fillStyle=WEATHER_TYPES[G.weather].color;
-    ctx.fillRect(G.camX,G.camY,W,H);
+    const wOverlay=WEATHER_TYPES[G.weather];
+    if(wOverlay){
+        ctx.fillStyle=wOverlay.color;
+        ctx.fillRect(G.camX,G.camY,W,H);
+    }
 
     ctx.restore();
 
@@ -769,10 +795,12 @@ function render(){
 
     // Weather indicator
     const wf=WEATHER_TYPES[G.weather];
-    ctx.fillStyle='rgba(0,0,0,0.6)';
-    ctx.beginPath();ctx.roundRect(W/2-60,46,120,24,6);ctx.fill();
-    ctx.fillStyle='#aaa';ctx.font='12px monospace';ctx.textAlign='center';
-    ctx.fillText(wf.name+' '+(wf.resBonus>0?'+':'')+Math.round(wf.resBonus*100)+'%资源',W/2,63);
+    if(wf){
+        ctx.fillStyle='rgba(0,0,0,0.6)';
+        ctx.beginPath();ctx.roundRect(W/2-60,46,120,24,6);ctx.fill();
+        ctx.fillStyle='#aaa';ctx.font='12px monospace';ctx.textAlign='center';
+        ctx.fillText(wf.name+' '+(wf.resBonus>0?'+':'')+Math.round(wf.resBonus*100)+'%资源',W/2,63);
+    }
 
     // Day/Night indicator
     const dayPhase=G.dayTime/DAY_LENGTH;
@@ -786,7 +814,7 @@ function render(){
     if(G.showMiniMap)renderMiniMap();
 
     // Notifications
-    for(let i=0;i<G.notifications.length;i++){
+    for(let i=0;i<(G.notifications?G.notifications.length:0);i++){
         const n=G.notifications[i];
         const alpha=Math.min(1,n.life/30);
         ctx.globalAlpha=alpha;
@@ -840,14 +868,18 @@ function renderMiniMap(){
     // Scale
     const sx=mmW/WORLD_W,sy=mmH/WORLD_H;
     // Resources on minimap
-    for(let r of G.resources){
+    for(let r of (G.resources||[])){
         if(!r.alive)continue;
-        ctx.fillStyle=RESOURCE_TYPES[r.type].color;
+        const rt=RESOURCE_TYPES[r.type];
+        if(!rt)continue;
+        ctx.fillStyle=rt.color;
         ctx.fillRect(mmX+r.x*sx-1,mmY+r.y*sy-1,2,2);
     }
     // Buildings on minimap
-    for(let bl of G.buildings){
-        ctx.fillStyle=BUILDINGS[bl.type].color;
+    for(let bl of (G.buildings||[])){
+        const bt=BUILDINGS[bl.type];
+        if(!bt)continue;
+        ctx.fillStyle=bt.color;
         ctx.fillRect(mmX+bl.x*sx-2,mmY+bl.y*sy-2,4,4);
     }
     // Player on minimap
@@ -992,7 +1024,7 @@ function renderOver(){
         ['建造设施',G.totalBuilt+'个','#4f4'],
         ['完成交易',G.totalTrades+'次','#fc0'],
         ['最高连击','x'+Math.max(1,G.comboCount),'#f0f'],
-        ['成就解锁',G.unlockedAchievements.length+'/'+ACHIEVEMENTS.length,'#ff0']
+        ['成就解锁',(G.unlockedAchievements?G.unlockedAchievements.length:0)+'/'+ACHIEVEMENTS.length,'#ff0']
     ];
     for(let i=0;i<stats.length;i++){
         ctx.fillStyle='#888';ctx.font='14px monospace';

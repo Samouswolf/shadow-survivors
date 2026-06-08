@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>对联闯关</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a12;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:'Microsoft YaHei','SimSun',sans-serif;touch-action:none;user-select:none}
+canvas{display:block;max-width:100vw;max-height:100vh;cursor:pointer;position:relative;z-index:1}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+(function(){
+'use strict';
+
+// ==================== Canvas Setup ====================
+const c = document.getElementById('gc'), ctx = c.getContext('2d');
+let W, H, scale = 1;
+
+// ==================== Game State ====================
+const SCREEN = { MENU:0, PLAYING:1, RESULT:2, GAMEOVER:3 };
+let screen = SCREEN.MENU;
+let paused = false;
+
+// ==================== Couplet Data (60 couples, 5 difficulty levels) ====================
+const COUPLETS = [
+    // ===== 难度1: 入门 (12对) =====
+    { up:"春回大地", down:"福满人间", options:["福满人间","财源广进","万象更新","龙腾虎跃"], diff:1, tip:"春天回来了，福气充满人间" },
+    { up:"风和日丽", down:"鸟语花香", options:["鸟语花香","春暖花开","万象更新","山清水秀"], diff:1, tip:"微风和煦，鸟儿歌唱花儿飘香" },
+    { up:"山清水秀", down:"鸟语花香", options:["鸟语花香","春暖花开","风和日丽","柳暗花明"], diff:1, tip:"山水秀丽，鸟鸣花香" },
+    { up:"国泰民安", down:"风调雨顺", options:["风调雨顺","五谷丰登","天下太平","安居乐业"], diff:1, tip:"国家太平，百姓安定" },
+    { up:"龙腾虎跃", down:"凤舞九天", options:["凤舞九天","鹏程万里","鹰击长空","鱼跃龙门"], diff:1, tip:"龙虎之后，凤飞高天" },
+    { up:"花好月圆", down:"人寿年丰", options:["人寿年丰","合家欢乐","幸福美满","吉祥如意"], diff:1, tip:"花月美好，人长寿年丰收" },
+    { up:"万象更新", down:"百业兴旺", options:["百业兴旺","五谷丰登","国泰民安","蒸蒸日上"], diff:1, tip:"万物更新，百业兴旺" },
+    { up:"心想事成", down:"万事如意", options:["万事如意","吉祥如意","一帆风顺","马到成功"], diff:1, tip:"心中所想都能实现" },
+    { up:"开门见喜", down:"出门逢春", options:["出门逢春","好事连连","吉祥如意","大吉大利"], diff:1, tip:"开门就看到喜事" },
+    { up:"年年有余", down:"岁岁平安", options:["岁岁平安","日日吉祥","事事如意","天天开心"], diff:1, tip:"每年都有余，岁岁都平安" },
+    { up:"五福临门", down:"三星高照", options:["三星高照","四季平安","六六大顺","八方来财"], diff:1, tip:"五种福气来到门前" },
+    { up:"一帆风顺", down:"四季平安", options:["四季平安","万事如意","马到成功","心想事成"], diff:1, tip:"一路顺风，四季平安" },
+
+    // ===== 难度2: 初学 (12对) =====
+    { up:"春风化雨", down:"秋月映湖", options:["秋月映湖","夏日炎炎","冬雪皑皑","雷电交加"], diff:2, tip:"春风如化雨般滋润" },
+    { up:"书山有路", down:"学海无涯", options:["学海无涯","勤为径舟","苦作舟行","志在千里"], diff:2, tip:"读书如登山，学习如航海" },
+    { up:"天增岁月", down:"春满乾坤", options:["春满乾坤","人增寿命","福满门庭","寿比南山"], diff:2, tip:"天增岁月人增寿" },
+    { up:"红梅傲雪", down:"翠竹凌霜", options:["翠竹凌霜","青松挺立","碧水长流","白云悠悠"], diff:2, tip:"红梅在雪中傲然挺立" },
+    { up:"厚德载物", down:"自强不息", options:["自强不息","上善若水","天道酬勤","宁静致远"], diff:2, tip:"以厚德承载万物" },
+    { up:"海纳百川", down:"有容乃大", options:["有容乃大","壁立千仞","无欲则刚","厚德载物"], diff:2, tip:"大海容纳百川" },
+    { up:"桃李满天", down:"英才遍地", options:["英才遍地","春色满园","硕果累累","芬芳四溢"], diff:2, tip:"桃李满天下，英才遍大地" },
+    { up:"明月松间", down:"清泉石上", options:["清泉石上","白云天边","流水桥下","翠竹林中"], diff:2, tip:"明月照松间，清泉流石上" },
+    { up:"宝剑锋从", down:"梅花苦寒", options:["梅花苦寒","磨砺出鞘","霜刃出鞘","千锤百炼"], diff:2, tip:"宝剑锋从磨砺出" },
+    { up:"千里之行", down:"始于足下", options:["始于足下","成于坚持","源于积累","贵在恒心"], diff:2, tip:"千里之行，始于足下" },
+    { up:"长风破浪", down:"直挂云帆", options:["直挂云帆","济沧海远","乘风而行","壮志凌云"], diff:2, tip:"长风破浪会有时" },
+    { up:"落霞孤鹜", down:"秋水长天", options:["秋水长天","夕阳西下","碧波万顷","晚风残照"], diff:2, tip:"落霞与孤鹜齐飞" },
+
+    // ===== 难度3: 进阶 (12对) =====
+    { up:"青山不老", down:"绿水长流", options:["绿水长流","白云悠悠","明月常圆","松柏常青"], diff:3, tip:"青山永不老去" },
+    { up:"室雅何须大", down:"花香不在多", options:["花香不在多","书多自然雅","人美不在妆","心宽自然安"], diff:3, tip:"房间雅致不在于大" },
+    { up:"海阔凭鱼跃", down:"天高任鸟飞", options:["天高任鸟飞","路远任马驰","山高任云飘","风大任帆扬"], diff:3, tip:"海阔鱼儿可以跳跃" },
+    { up:"两个黄鹂鸣翠柳", down:"一行白鹭上青天", options:["一行白鹭上青天","百只燕子舞春风","几只蝴蝶绕花飞","数点飞鸿入碧空"], diff:3, tip:"杜甫名句" },
+    { up:"大漠孤烟直", down:"长河落日圆", options:["长河落日圆","边塞马蹄疾","古道西风瘦","孤城遥望远"], diff:3, tip:"王维名句，沙漠中的风景" },
+    { up:"月落乌啼霜满天", down:"江枫渔火对愁眠", options:["江枫渔火对愁眠","姑苏城外寒山寺","夜半钟声到客船","秋风吹散一池烟"], diff:3, tip:"张继《枫桥夜泊》" },
+    { up:"白日依山尽", down:"黄河入海流", options:["黄河入海流","长江奔东海","碧水绕青山","白云飘远方"], diff:3, tip:"王之涣《登鹳雀楼》" },
+    { up:"春眠不觉晓", down:"处处闻啼鸟", options:["处处闻啼鸟","夜来风雨声","花落知多少","鸟鸣春意浓"], diff:3, tip:"孟浩然《春晓》" },
+    { up:"床前明月光", down:"疑是地上霜", options:["疑是地上霜","举头望明月","低头思故乡","明月照我床"], diff:3, tip:"李白《静夜思》" },
+    { up:"独在异乡为异客", down:"每逢佳节倍思亲", options:["每逢佳节倍思亲","遥知兄弟登高处","遍插茱萸少一人","举杯邀月共婵娟"], diff:3, tip:"王维《九月九日忆山东兄弟》" },
+    { up:"飞流直下三千尺", down:"疑是银河落九天", options:["疑是银河落九天","奔流到海不复回","碧水青山入画来","银练倒挂翠峰间"], diff:3, tip:"李白写庐山瀑布" },
+    { up:"两岸猿声啼不住", down:"轻舟已过万重山", options:["轻舟已过万重山","孤帆远影碧空尽","唯见长江天际流","一叶扁舟入画来"], diff:3, tip:"李白《早发白帝城》" },
+
+    // ===== 难度4: 挑战 (12对) =====
+    { up:"风声雨声读书声", down:"声声入耳", options:["声声入耳","句句动心","字字珠玑","朗朗上口"], diff:4, tip:"东林书院对联" },
+    { up:"家事国事天下事", down:"事事关心", options:["事事关心","样样精通","件件留意","时时在心"], diff:4, tip:"东林书院对联下联" },
+    { up:"水底月为天上月", down:"眼中人是面前人", options:["眼中人是面前人","镜中花乃梦中花","心中事是眼前事","梦里人非眼前人"], diff:4, tip:"司马光对联" },
+    { up:"此木为柴山山出", down:"因火成烟夕夕多", options:["因火成烟夕夕多","白水成泉日日昌","女子为好人人从","日月明明天天大"], diff:4, tip:"拆字联：此+木=柴" },
+    { up:"日月明朝昏", down:"山风岚自起", options:["山风岚自起","水石磊何清","金鑫鑫火熔","木林森火烧"], diff:4, tip:"日+月=明，山+风=岚" },
+    { up:"天为棋盘星为子", down:"谁人敢下", options:["谁人敢下","何人能对","无人能解","有志者行"], diff:4, tip:"气势磅礴的上联" },
+    { up:"地作琵琶路为弦", down:"哪个能弹", options:["哪个能弹","何人敢奏","无人能拨","有心者听"], diff:4, tip:"与上联配对" },
+    { up:"冻雨洒窗东二点西三点", down:"切瓜分客上七刀下八刀", options:["切瓜分客上七刀下八刀","劈柴生火南一堆北两堆","磨墨写字左三撇右四捺","裁衣量体前五寸后六寸"], diff:4, tip:"拆字联：冻=东+两点水" },
+    { up:"烟锁池塘柳", down:"炮镇海城楼", options:["炮镇海城楼","灯辉锦绣城","桃燃锦江堤","铁浇锈海钩"], diff:4, tip:"五行偏旁联：火金水土木" },
+    { up:"饥鸡盗稻童筒打", down:"暑鼠凉梁客咳惊", options:["暑鼠凉梁客咳惊","寒蝉抱木雁声哀","春蚕吐丝丝不断","秋虫鸣草夜深沉"], diff:4, tip:"谐音联" },
+    { up:"天若有情天亦老", down:"月如无恨月长圆", options:["月如无恨月长圆","水若有心水亦清","风若无心风自停","山若有灵山亦青"], diff:4, tip:"李贺名句" },
+    { up:"春蚕到死丝方尽", down:"蜡炬成灰泪始干", options:["蜡炬成灰泪始干","秋菊残时香更浓","寒梅落时骨犹存","老树枯时根更深"], diff:4, tip:"李商隐名句" },
+
+    // ===== 难度5: 大师 (12对) =====
+    { up:"一担重泥遇子路", down:"两堤夫子笑颜回", options:["两堤夫子笑颜回","三声大笑震山林","四方才子会京城","五湖四海聚英豪"], diff:5, tip:"重泥谐音仲尼（孔子）" },
+    { up:"二三四五", down:"六七八九", options:["六七八九","八九十一","一二三四","四五六十"], diff:5, tip:"缺一（衣）少十（食）" },
+    { up:"上文章下文章", down:"文章桥上晒文章", options:["文章桥上晒文章","书卷堆中翻书卷","笔墨纸砚写春秋","诗词歌赋咏古今"], diff:5, tip:"地名联" },
+    { up:"闲看门中木", down:"思耕心上田", options:["思耕心上田","闷坐门边人","想望心间月","愁看水边花"], diff:5, tip:"拆字联：门+中=闲" },
+    { up:"人曾是僧人弗能成佛", down:"女卑为婢女又可称奴", options:["女卑为婢女又可称奴","山石为岩山风便是岚","日月为明日青便是晴","木目为相心亡便是忙"], diff:5, tip:"拆字联：人+曾=僧" },
+    { up:"寸土为寺寺旁言诗", down:"诗曰明月送僧归古寺", options:["诗曰明月送僧归古寺","双木成林林下示禁","禁云斧斤以时入山林","一口为天天边见夫"], diff:5, tip:"拆字连锁联" },
+    { up:"双木为林林下示禁", down:"禁云斧斤以时入山林", options:["禁云斧斤以时入山林","三水为淼淼边见渺","渺哉烟波浩渺无边际","独木成桥梁上见凉"], diff:5, tip:"拆字连锁联续" },
+    { up:"月照纱窗个个孔明诸葛亮", down:"风送幽香郁郁畹华梅兰芳", options:["风送幽香郁郁畹华梅兰芳","雪飘大地处处白银关云长","雨打芭蕉叶叶翠竹张飞翼","霜落枫林片片赤壁周瑜谋"], diff:5, tip:"孔明=诸葛亮，畹华=梅兰芳" },
+    { up:"贾岛醉来非假倒", down:"刘伶饮尽不留零", options:["刘伶饮尽不留零","李白诗成真礼白","杜甫吟来真肚甫","苏轼书罢真宿轼"], diff:5, tip:"谐音联：贾岛-假倒，刘伶-留零" },
+    { up:"坐南朝北吃西瓜皮往东放", down:"思前想后读左传页向右翻", options:["思前想后读左传页向右翻","说古论今谈上下文从中看","春夏秋冬看左右人朝前走","走东闯西逛南北货往中堆"], diff:5, tip:"方位联：东南西北+上下左右" },
+    { up:"天上月圆人间月半月月月圆逢月半", down:"今宵年尾明日年头年年年尾接年头", options:["今宵年尾明日年头年年年尾接年头","昨日花开今日花落日日花开随花落","春来花开秋去花谢春春花开逢花谢","朝起日升夕落日沉朝朝日升遇日沉"], diff:5, tip:"时间联" },
+    { up:"弓长张张弓张弓手张弓射箭箭箭皆中", down:"木子李李木李木匠李木雕龙龙龙如生", options:["木子李李木李木匠李木雕龙龙龙如生","女子好好女好女子好女织锦锦锦成章","人可何何人何人氏何人吟诗诗诗入妙","日月明明日明日月明日月同辉辉辉耀世"], diff:5, tip:"拆字复字联" }
+];
+
+// ==================== Game State ====================
+let G = {
+    screen: SCREEN.MENU,
+    currentLevel: 0,
+    score: 0,
+    combo: 0,
+    maxCombo: 0,
+    correct: 0,
+    wrong: 0,
+    lives: 5,
+    maxLives: 5,
+    selectedOption: -1,
+    showingResult: false,
+    resultTimer: 0,
+    resultCorrect: false,
+    questionPool: [],
+    currentQ: null,
+    totalQuestions: 0,
+    difficulty: 1,
+    highScore: 0,
+    particles: [],
+    bgStars: [],
+    scrollY: 0,
+    titleAnim: 0,
+    fadeIn: 1,
+    shakeTimer: 0,
+    shakeX: 0,
+    shakeY: 0,
+    levelComplete: false,
+    levelTimer: 0,
+    optionRects: [],
+    hintUsed: false,
+    hintAlpha: 0,
+    timePerQ: 30,
+    timeLeft: 30,
+    timerActive: false,
+    totalTime: 0,
+    animationId: null
+};
+
+// ==================== Colors & Theme ====================
+const COLORS = {
+    bg1: '#0a0a12', bg2: '#1a0a2e', bg3: '#0d1b2a',
+    gold: '#ffd700', red: '#ff4444', green: '#44ff88',
+    white: '#ffffff', gray: '#888888', dark: '#222233',
+    accent: '#ff6b9d', blue: '#4ecdc4', purple: '#a855f7',
+    cardBg: 'rgba(255,255,255,0.08)', cardBorder: 'rgba(255,255,255,0.15)'
+};
+
+// ==================== Resize ====================
+function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    c.width = W * dpr;
+    c.height = H * dpr;
+    c.style.width = W + 'px';
+    c.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    scale = Math.min(W / 400, H / 700, 1.5);
+    initBgStars();
+}
+
+function initBgStars() {
+    G.bgStars = [];
+    for (let i = 0; i < 60; i++) {
+        G.bgStars.push({
+            x: Math.random() * W,
+            y: Math.random() * H,
+            r: Math.random() * 2 + 0.5,
+            speed: Math.random() * 0.3 + 0.1,
+            alpha: Math.random() * 0.6 + 0.2,
+            pulse: Math.random() * Math.PI * 2
+        });
+    }
+}
+
+// ==================== Particles ====================
+function spawnParticles(x, y, count, color, spread) {
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * (spread || 3) + 1;
+        G.particles.push({
+            x: x, y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay: Math.random() * 0.02 + 0.015,
+            r: Math.random() * 4 + 2,
+            color: color || COLORS.gold
+        });
+    }
+}
+
+function spawnCelebration() {
+    const colors = [COLORS.gold, COLORS.red, COLORS.green, COLORS.blue, COLORS.purple, COLORS.accent];
+    for (let i = 0; i < 80; i++) {
+        const x = Math.random() * W;
+        const y = Math.random() * H * 0.3;
+        spawnParticles(x, y, 1, colors[Math.floor(Math.random() * colors.length)], 5);
+    }
+}
+
+function updateParticles() {
+    for (let i = G.particles.length - 1; i >= 0; i--) {
+        const p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= p.decay;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (const p of G.particles) {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ==================== Background ====================
+function drawBg(time) {
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, COLORS.bg2);
+    grad.addColorStop(0.5, COLORS.bg3);
+    grad.addColorStop(1, COLORS.bg1);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars
+    for (const s of G.bgStars) {
+        s.pulse += 0.02;
+        const a = s.alpha * (0.6 + 0.4 * Math.sin(s.pulse));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Subtle pattern overlay
+    ctx.globalAlpha = 0.03;
+    for (let y = 0; y < H; y += 40) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ==================== Utility ====================
+function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function drawText(text, x, y, size, color, align, maxWidth) {
+    ctx.fillStyle = color || COLORS.white;
+    ctx.font = 'bold ' + size + 'px "Microsoft YaHei","SimSun",sans-serif';
+    ctx.textAlign = align || 'center';
+    ctx.textBaseline = 'middle';
+    if (maxWidth) {
+        ctx.fillText(text, x, y, maxWidth);
+    } else {
+        ctx.fillText(text, x, y);
+    }
+}
+
+function drawShadowText(text, x, y, size, color, shadowColor) {
+    ctx.fillStyle = shadowColor || 'rgba(0,0,0,0.5)';
+    ctx.font = 'bold ' + size + 'px "Microsoft YaHei","SimSun",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + 2, y + 2);
+    ctx.fillStyle = color || COLORS.white;
+    ctx.fillText(text, x, y);
+}
+
+function loadHighScore() {
+    try {
+        const s = localStorage.getItem('duilian_high');
+        G.highScore = s ? parseInt(s) : 0;
+    } catch(e) { G.highScore = 0; }
+}
+
+function saveHighScore() {
+    try {
+        if (G.score > G.highScore) {
+            G.highScore = G.score;
+            localStorage.setItem('duilian_high', G.highScore.toString());
+        }
+    } catch(e) {}
+}
+
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function getPool() {
+    let pool = COUPLETS.filter(q => q.diff <= G.difficulty);
+    shuffle(pool);
+    return pool.slice(0, 10);
+}
+
+// ==================== Game Logic ====================
+function startGame() {
+    G.score = 0;
+    G.combo = 0;
+    G.maxCombo = 0;
+    G.correct = 0;
+    G.wrong = 0;
+    G.lives = G.maxLives;
+    G.selectedOption = -1;
+    G.showingResult = false;
+    G.difficulty = 1;
+    G.levelComplete = false;
+    G.hintUsed = false;
+    G.hintAlpha = 0;
+    G.totalTime = 0;
+    G.questionPool = getPool();
+    G.totalQuestions = G.questionPool.length;
+    G.currentQ = null;
+    nextQuestion();
+    G.screen = SCREEN.PLAYING;
+    G.fadeIn = 1;
+}
+
+function nextQuestion() {
+    if (G.questionPool.length === 0) {
+        // Level complete
+        if (G.difficulty < 5) {
+            G.difficulty++;
+            G.questionPool = getPool();
+            G.totalQuestions += G.questionPool.length;
+            G.levelComplete = true;
+            G.levelTimer = 180;
+            spawnCelebration();
+            return;
+        } else {
+            // Game complete
+            saveHighScore();
+            G.screen = SCREEN.GAMEOVER;
+            spawnCelebration();
+            return;
+        }
+    }
+    G.currentQ = G.questionPool.shift();
+    G.selectedOption = -1;
+    G.showingResult = false;
+    G.hintUsed = false;
+    G.hintAlpha = 0;
+    G.timeLeft = G.timePerQ;
+    G.timerActive = true;
+    G.optionRects = [];
+}
+
+function selectOption(idx) {
+    if (G.showingResult || G.levelComplete) return;
+    G.selectedOption = idx;
+    G.timerActive = false;
+    const correct = G.currentQ.options[idx] === G.currentQ.down;
+    G.showingResult = true;
+    G.resultCorrect = correct;
+    G.resultTimer = 90;
+
+    if (correct) {
+        const baseScore = G.difficulty * 10;
+        const comboBonus = Math.min(G.combo, 10) * 5;
+        const timeBonus = Math.floor(G.timeLeft);
+        G.score += baseScore + comboBonus + timeBonus;
+        G.combo++;
+        if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+        G.correct++;
+        spawnParticles(W / 2, H / 2, 30, COLORS.gold, 5);
+    } else {
+        G.combo = 0;
+        G.wrong++;
+        G.lives--;
+        G.shakeTimer = 15;
+        if (G.lives <= 0) {
+            saveHighScore();
+            G.screen = SCREEN.GAMEOVER;
+        }
+    }
+}
+
+function useHint() {
+    if (G.hintUsed || G.showingResult || !G.currentQ) return;
+    G.hintUsed = true;
+    G.hintAlpha = 1;
+    G.score = Math.max(0, G.score - 5);
+}
+
+// ==================== Input ====================
+function getPos(e) {
+    const rect = c.getBoundingClientRect();
+    if (e.touches) {
+        return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+    }
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+function handleClick(e) {
+    e.preventDefault();
+    const pos = getPos(e);
+    handleTap(pos.x, pos.y);
+}
+
+function handleTouch(e) {
+    e.preventDefault();
+    const pos = getPos(e);
+    handleTap(pos.x, pos.y);
+}
+
+function handleTap(x, y) {
+    if (G.screen === SCREEN.MENU) {
+        const bw = 200 * scale, bh = 50 * scale;
+        const bx = W / 2 - bw / 2, by = H * 0.65;
+        if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+            startGame();
+        }
+        return;
+    }
+
+    if (G.screen === SCREEN.PLAYING) {
+        // Check hint button
+        const hintW = 60 * scale, hintH = 30 * scale;
+        const hintX = W / 2 - hintW / 2, hintY = H * 0.85;
+        if (!G.hintUsed && !G.showingResult && x >= hintX && x <= hintX + hintW && y >= hintY && y <= hintY + hintH) {
+            useHint();
+            return;
+        }
+
+        // Check options
+        if (!G.showingResult && !G.levelComplete) {
+            for (let i = 0; i < G.optionRects.length; i++) {
+                const r = G.optionRects[i];
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    selectOption(i);
+                    return;
+                }
+            }
+        }
+
+        // Level complete continue
+        if (G.levelComplete) {
+            G.levelComplete = false;
+            nextQuestion();
+        }
+        return;
+    }
+
+    if (G.screen === SCREEN.GAMEOVER) {
+        const bw = 180 * scale, bh = 45 * scale;
+        const bx = W / 2 - bw / 2;
+        // Restart button
+        if (x >= bx && x <= bx + bw && y >= H * 0.65 && y <= H * 0.65 + bh) {
+            startGame();
+        }
+        // Back to menu
+        if (x >= bx && x <= bx + bw && y >= H * 0.65 + bh + 15 * scale && y <= H * 0.65 + bh + 15 * scale + bh) {
+            G.screen = SCREEN.MENU;
+        }
+        return;
+    }
+}
+
+function handleKey(e) {
+    if (G.screen === SCREEN.PLAYING && !G.showingResult && !G.levelComplete) {
+        if (e.key >= '1' && e.key <= '4') {
+            selectOption(parseInt(e.key) - 1);
+        }
+        if (e.key === 'h' || e.key === 'H') {
+            useHint();
+        }
+    }
+    if (G.screen === SCREEN.MENU && (e.key === 'Enter' || e.key === ' ')) {
+        startGame();
+    }
+    if (G.screen === SCREEN.GAMEOVER && (e.key === 'Enter' || e.key === ' ')) {
+        startGame();
+    }
+    if (G.screen === SCREEN.PLAYING && G.levelComplete && (e.key === 'Enter' || e.key === ' ')) {
+        G.levelComplete = false;
+        nextQuestion();
+    }
+}
+
+// ==================== Render Functions ====================
+function drawMenu(time) {
+    const cx = W / 2;
+    const s = scale;
+
+    // Title with animation
+    G.titleAnim += 0.02;
+    const titleY = H * 0.25 + Math.sin(G.titleAnim) * 8;
+
+    // Decorative lines
+    ctx.strokeStyle = 'rgba(255,215,0,0.2)';
+    ctx.lineWidth = 1;
+    const lineW = 120 * s;
+    ctx.beginPath();
+    ctx.moveTo(cx - lineW, titleY - 40 * s);
+    ctx.lineTo(cx + lineW, titleY - 40 * s);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - lineW, titleY + 40 * s);
+    ctx.lineTo(cx + lineW, titleY + 40 * s);
+    ctx.stroke();
+
+    // Title glow
+    ctx.shadowColor = COLORS.gold;
+    ctx.shadowBlur = 20 * s;
+    drawShadowText('对联闯关', cx, titleY, 48 * s, COLORS.gold);
+    ctx.shadowBlur = 0;
+
+    // Subtitle
+    drawText('经典对联 · 智慧挑战', cx, titleY + 50 * s, 16 * s, COLORS.gray);
+
+    // Couplet decoration
+    const decorY = H * 0.42;
+    ctx.fillStyle = COLORS.cardBg;
+    roundRect(cx - 130 * s, decorY - 30 * s, 260 * s, 60 * s, 10 * s);
+    ctx.fill();
+    ctx.strokeStyle = COLORS.cardBorder;
+    ctx.lineWidth = 1;
+    roundRect(cx - 130 * s, decorY - 30 * s, 260 * s, 60 * s, 10 * s);
+    ctx.stroke();
+    drawText('风  调  雨  顺', cx, decorY - 8 * s, 18 * s, COLORS.gold);
+    drawText('国  泰  民  安', cx, decorY + 18 * s, 18 * s, COLORS.accent);
+
+    // Features
+    const featY = H * 0.52;
+    drawText('50+ 经典对联 · 5级难度递进', cx, featY, 13 * s, COLORS.gray);
+    drawText('键盘(1-4) / 鼠标 / 触屏 操作', cx, featY + 22 * s, 13 * s, COLORS.gray);
+
+    // Start button
+    const bw = 200 * s, bh = 50 * s;
+    const bx = cx - bw / 2, by = H * 0.65;
+    const hover = false; // Could track hover state
+    const btnGrad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+    btnGrad.addColorStop(0, '#ffd700');
+    btnGrad.addColorStop(1, '#ff8c00');
+    roundRect(bx, by, bw, bh, 12 * s);
+    ctx.fillStyle = btnGrad;
+    ctx.fill();
+    ctx.shadowColor = 'rgba(255,215,0,0.4)';
+    ctx.shadowBlur = 15 * s;
+    roundRect(bx, by, bw, bh, 12 * s);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    drawText('开 始 游 戏', cx, by + bh / 2, 20 * s, '#1a0a00');
+
+    // High score
+    if (G.highScore > 0) {
+        drawText('最高分: ' + G.highScore, cx, H * 0.8, 14 * s, COLORS.gold);
+    }
+
+    // Version
+    drawText('v1.0', cx, H * 0.92, 11 * s, 'rgba(255,255,255,0.2)');
+}
+
+function drawPlaying(time) {
+    const cx = W / 2;
+    const s = scale;
+
+    // Shake effect
+    if (G.shakeTimer > 0) {
+        G.shakeTimer--;
+        G.shakeX = (Math.random() - 0.5) * 8;
+        G.shakeY = (Math.random() - 0.5) * 8;
+        ctx.save();
+        ctx.translate(G.shakeX, G.shakeY);
+    }
+
+    // Top bar
+    const barH = 50 * s;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, 0, W, barH);
+
+    // Score
+    drawText('得分: ' + G.score, 15 * s, barH / 2, 14 * s, COLORS.gold, 'left');
+
+    // Difficulty label
+    const diffNames = ['','入门','初学','进阶','挑战','大师'];
+    const diffColors = ['','#4ecdc4','#44ff88','#ffd700','#ff6b9d','#ff4444'];
+    drawText('难度: ' + diffNames[G.difficulty], cx, barH / 2, 14 * s, diffColors[G.difficulty]);
+
+    // Lives
+    const livesX = W - 15 * s;
+    ctx.textAlign = 'right';
+    for (let i = 0; i < G.maxLives; i++) {
+        ctx.fillStyle = i < G.lives ? COLORS.red : 'rgba(255,255,255,0.15)';
+        ctx.font = (16 * s) + 'px "Microsoft YaHei"';
+        ctx.fillText('♥', livesX - i * 22 * s, barH / 2);
+    }
+    ctx.textAlign = 'center';
+
+    // Combo
+    if (G.combo > 1) {
+        drawText('连击 x' + G.combo, cx, barH + 18 * s, 13 * s, COLORS.accent);
+    }
+
+    // Level complete overlay
+    if (G.levelComplete) {
+        G.levelTimer--;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, W, H);
+
+        const panelW = 280 * s, panelH = 180 * s;
+        const px = cx - panelW / 2, py = H / 2 - panelH / 2;
+        ctx.fillStyle = 'rgba(20,15,40,0.95)';
+        roundRect(px, py, panelW, panelH, 16 * s);
+        ctx.fill();
+        ctx.strokeStyle = COLORS.gold;
+        ctx.lineWidth = 2;
+        roundRect(px, py, panelW, panelH, 16 * s);
+        ctx.stroke();
+
+        drawShadowText('关卡通过!', cx, py + 45 * s, 24 * s, COLORS.gold);
+        drawText('难度 ' + diffNames[G.difficulty - 1] + ' → ' + diffNames[G.difficulty], cx, py + 85 * s, 14 * s, COLORS.blue);
+        drawText('当前得分: ' + G.score, cx, py + 115 * s, 16 * s, COLORS.white);
+        drawText('点击或按回车继续', cx, py + 150 * s, 12 * s, COLORS.gray);
+
+        if (G.shakeTimer > 0) ctx.restore();
+        updateParticles();
+        drawParticles();
+        return;
+    }
+
+    if (!G.currentQ) {
+        if (G.shakeTimer > 0) ctx.restore();
+        return;
+    }
+
+    // Question area
+    const qY = barH + 50 * s;
+    const cardW = Math.min(W - 40 * s, 400 * s);
+    const cardX = cx - cardW / 2;
+
+    // Up couplet card
+    ctx.fillStyle = 'rgba(180,50,50,0.15)';
+    roundRect(cardX, qY, cardW, 80 * s, 12 * s);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,100,100,0.3)';
+    ctx.lineWidth = 1.5;
+    roundRect(cardX, qY, cardW, 80 * s, 12 * s);
+    ctx.stroke();
+
+    // Label
+    drawText('【上联】', cx, qY + 18 * s, 12 * s, 'rgba(255,150,150,0.7)');
+    drawShadowText(G.currentQ.up, cx, qY + 50 * s, 26 * s, COLORS.white);
+
+    // Down label
+    drawText('请选出下联 ↓', cx, qY + 100 * s, 14 * s, COLORS.gray);
+
+    // Options
+    G.optionRects = [];
+    const optStartY = qY + 120 * s;
+    const optH = 52 * s;
+    const optGap = 10 * s;
+    const optW = cardW;
+    const optX = cardX;
+
+    for (let i = 0; i < G.currentQ.options.length; i++) {
+        const oy = optStartY + i * (optH + optGap);
+        G.optionRects.push({ x: optX, y: oy, w: optW, h: optH });
+
+        let bgColor = 'rgba(255,255,255,0.06)';
+        let borderColor = 'rgba(255,255,255,0.12)';
+        let textColor = COLORS.white;
+
+        if (G.showingResult) {
+            if (G.currentQ.options[i] === G.currentQ.down) {
+                bgColor = 'rgba(68,255,136,0.2)';
+                borderColor = COLORS.green;
+                textColor = COLORS.green;
+            } else if (i === G.selectedOption && !G.resultCorrect) {
+                bgColor = 'rgba(255,68,68,0.2)';
+                borderColor = COLORS.red;
+                textColor = COLORS.red;
+            }
+        }
+
+        ctx.fillStyle = bgColor;
+        roundRect(optX, oy, optW, optH, 10 * s);
+        ctx.fill();
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 1.5;
+        roundRect(optX, oy, optW, optH, 10 * s);
+        ctx.stroke();
+
+        // Option number
+        drawText((i + 1) + '.', optX + 22 * s, oy + optH / 2, 14 * s, COLORS.gold, 'left');
+        // Option text
+        drawText(G.currentQ.options[i], cx + 10 * s, oy + optH / 2, 18 * s, textColor);
+    }
+
+    // Timer bar
+    if (G.timerActive) {
+        G.timeLeft -= 1 / 60;
+        G.totalTime += 1 / 60;
+        if (G.timeLeft <= 0) {
+            G.timeLeft = 0;
+            // Time up - wrong answer
+            G.showingResult = true;
+            G.resultCorrect = false;
+            G.resultTimer = 90;
+            G.timerActive = false;
+            G.combo = 0;
+            G.wrong++;
+            G.lives--;
+            G.shakeTimer = 15;
+            if (G.lives <= 0) {
+                saveHighScore();
+                G.screen = SCREEN.GAMEOVER;
+            }
+        }
+    }
+
+    const timerY = optStartY + G.currentQ.options.length * (optH + optGap) + 10 * s;
+    const timerW = cardW;
+    const timerH = 8 * s;
+    const pct = Math.max(0, G.timeLeft / G.timePerQ);
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    roundRect(optX, timerY, timerW, timerH, 4 * s);
+    ctx.fill();
+    const tColor = pct > 0.5 ? COLORS.green : pct > 0.2 ? COLORS.gold : COLORS.red;
+    if (pct > 0) {
+        ctx.fillStyle = tColor;
+        roundRect(optX, timerY, timerW * pct, timerH, 4 * s);
+        ctx.fill();
+    }
+    drawText(Math.ceil(G.timeLeft) + 's', cx, timerY + timerH + 14 * s, 12 * s, COLORS.gray);
+
+    // Hint button
+    if (!G.hintUsed && !G.showingResult) {
+        const hintW = 60 * s, hintH = 30 * s;
+        const hintX = cx - hintW / 2, hintY = H * 0.85;
+        ctx.fillStyle = 'rgba(255,215,0,0.15)';
+        roundRect(hintX, hintY, hintW, hintH, 8 * s);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+        ctx.lineWidth = 1;
+        roundRect(hintX, hintY, hintW, hintH, 8 * s);
+        ctx.stroke();
+        drawText('提示(H)', cx, hintY + hintH / 2, 11 * s, COLORS.gold);
+    }
+
+    // Hint text
+    if (G.hintAlpha > 0) {
+        G.hintAlpha -= 0.005;
+        ctx.globalAlpha = Math.max(0, G.hintAlpha);
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        roundRect(cardX, H * 0.78, cardW, 35 * s, 8 * s);
+        ctx.fill();
+        drawText('提示: ' + G.currentQ.tip, cx, H * 0.78 + 18 * s, 13 * s, COLORS.gold);
+        ctx.globalAlpha = 1;
+    }
+
+    // Result feedback
+    if (G.showingResult) {
+        G.resultTimer--;
+        if (G.resultTimer <= 0) {
+            G.showingResult = false;
+            nextQuestion();
+        }
+
+        // Feedback text
+        const fbY = qY - 10 * s;
+        if (G.resultCorrect) {
+            ctx.globalAlpha = Math.min(1, G.resultTimer / 30);
+            drawShadowText('正确! +' + (G.difficulty * 10 + Math.min(G.combo - 1, 10) * 5), cx, fbY, 20 * s, COLORS.green);
+            ctx.globalAlpha = 1;
+        } else {
+            ctx.globalAlpha = Math.min(1, G.resultTimer / 30);
+            drawShadowText('错误! 正确答案: ' + G.currentQ.down, cx, fbY, 18 * s, COLORS.red);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    // Progress
+    const totalDone = (G.difficulty - 1) * 10 + (10 - G.questionPool.length - (G.showingResult ? 0 : 1));
+    const totalAll = 50;
+    drawText('进度: ' + Math.min(totalDone, totalAll) + '/' + totalAll, cx, H - 15 * s, 11 * s, 'rgba(255,255,255,0.3)');
+
+    if (G.shakeTimer > 0) ctx.restore();
+}
+
+function drawGameOver(time) {
+    const cx = W / 2;
+    const s = scale;
+
+    // Panel
+    const panelW = Math.min(W - 40 * s, 360 * s);
+    const panelH = 380 * s;
+    const px = cx - panelW / 2;
+    const py = H / 2 - panelH / 2;
+
+    ctx.fillStyle = 'rgba(15,10,30,0.95)';
+    roundRect(px, py, panelW, panelH, 20 * s);
+    ctx.fill();
+    ctx.strokeStyle = COLORS.gold;
+    ctx.lineWidth = 2;
+    roundRect(px, py, panelW, panelH, 20 * s);
+    ctx.stroke();
+
+    // Title
+    const isWin = G.difficulty > 5 || G.lives > 0;
+    if (isWin) {
+        drawShadowText('恭喜通关!', cx, py + 40 * s, 28 * s, COLORS.gold);
+    } else {
+        drawShadowText('游戏结束', cx, py + 40 * s, 28 * s, COLORS.red);
+    }
+
+    // Stats
+    const statsY = py + 90 * s;
+    const lineH = 32 * s;
+    drawText('最终得分: ' + G.score, cx, statsY, 20 * s, COLORS.gold);
+    drawText('最高记录: ' + G.highScore, cx, statsY + lineH, 14 * s, G.score >= G.highScore ? COLORS.green : COLORS.gray);
+
+    if (G.score >= G.highScore && G.score > 0) {
+        drawText('新纪录!', cx, statsY + lineH * 2, 16 * s, COLORS.accent);
+    }
+
+    const infoY = statsY + lineH * 3;
+    drawText('正确: ' + G.correct + '  错误: ' + G.wrong, cx, infoY, 13 * s, COLORS.white);
+    drawText('最高连击: ' + G.maxCombo, cx, infoY + lineH * 0.7, 13 * s, COLORS.blue);
+    drawText('通关难度: ' + ['','入门','初学','进阶','挑战','大师'][Math.min(G.difficulty, 5)], cx, infoY + lineH * 1.4, 13 * s, COLORS.purple);
+
+    // Buttons
+    const bw = 180 * s, bh = 45 * s;
+    const bx = cx - bw / 2;
+
+    // Restart
+    const grad1 = ctx.createLinearGradient(bx, H * 0.65, bx + bw, H * 0.65 + bh);
+    grad1.addColorStop(0, '#ffd700');
+    grad1.addColorStop(1, '#ff8c00');
+    roundRect(bx, H * 0.65, bw, bh, 10 * s);
+    ctx.fillStyle = grad1;
+    ctx.fill();
+    drawText('再来一局', cx, H * 0.65 + bh / 2, 16 * s, '#1a0a00');
+
+    // Back
+    roundRect(bx, H * 0.65 + bh + 15 * s, bw, bh, 10 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    roundRect(bx, H * 0.65 + bh + 15 * s, bw, bh, 10 * s);
+    ctx.stroke();
+    drawText('返回菜单', cx, H * 0.65 + bh + 15 * s + bh / 2, 16 * s, COLORS.white);
+}
+
+// ==================== Game Loop ====================
+function gameLoop(time) {
+    // Fade in
+    if (G.fadeIn > 0) {
+        G.fadeIn -= 0.03;
+    }
+
+    // Clear
+    ctx.clearRect(0, 0, W, H);
+    drawBg(time);
+
+    // Draw screen
+    if (G.screen === SCREEN.MENU) {
+        drawMenu(time);
+    } else if (G.screen === SCREEN.PLAYING) {
+        drawPlaying(time);
+    } else if (G.screen === SCREEN.GAMEOVER) {
+        drawGameOver(time);
+    }
+
+    // Particles (always on top)
+    updateParticles();
+    drawParticles();
+
+    // Fade overlay
+    if (G.fadeIn > 0) {
+        ctx.globalAlpha = G.fadeIn;
+        ctx.fillStyle = COLORS.bg1;
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = 1;
+    }
+
+    G.animationId = requestAnimationFrame(gameLoop);
+}
+
+// ==================== Init ====================
+function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    c.addEventListener('click', handleClick);
+    c.addEventListener('touchstart', handleTouch, { passive: false });
+    window.addEventListener('keydown', handleKey);
+    loadHighScore();
+    initBgStars();
+    gameLoop();
+}
+
+init();
+})();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

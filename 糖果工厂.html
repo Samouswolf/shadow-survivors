@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>糖果工厂</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a0a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+// ==================== 糖果工厂 ====================
+var canvas=document.getElementById('cv'),ctx=canvas.getContext('2d');
+var W,H,SF=1;
+function resizeCanvas(){
+    var dpr=window.devicePixelRatio||1;
+    W=window.innerWidth;H=window.innerHeight;
+    canvas.width=W*dpr;canvas.height=H*dpr;
+    canvas.style.width=W+'px';canvas.style.height=H+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    SF=Math.min(W/800,H/600);
+}
+resizeCanvas();
+window.addEventListener('resize',resizeCanvas);
+
+// ==================== 常量 ====================
+var CANDY_TYPES=[
+    {name:'草莓糖',color:'#ff4757',secondary:'#ff6b81',price:10,prodTime:3000,icon:'🍓'},
+    {name:'柠檬糖',color:'#ffd32a',secondary:'#fffa65',price:15,prodTime:4000,icon:'🍋'},
+    {name:'蓝莓糖',color:'#5352ed',secondary:'#7c7cf8',price:20,prodTime:5000,icon:'🫐'},
+    {name:'薄荷糖',color:'#2ed573',secondary:'#7bed9f',price:25,prodTime:6000,icon:'🍃'},
+    {name:'彩虹糖',color:'#ff6348',secondary:'#ff7979',price:40,prodTime:8000,icon:'🌈'}
+];
+var MACHINE_COST=[50,80,120,180,300];
+var UPGRADE_COST=[0,40,100];
+var MAX_MACHINES=8;
+var MAX_LEVEL=3;
+
+// ==================== 游戏状态 ====================
+var G={
+    state:'menu',
+    money:60,
+    score:0,
+    highScore:parseInt(localStorage.getItem('candyFactory_hs'))||0,
+    day:1,
+    dayTimer:0,
+    dayDuration:90000,
+    machines:[],
+    conveyor:[],
+    orders:[],
+    particles:[],
+    floats:[],
+    selectedMachine:-1,
+    orderTimer:8000,
+    orderInterval:18000,
+    maxOrders:3,
+    completedOrders:0,
+    totalProduced:0,
+    combo:0,
+    comboTimer:0,
+    shake:0,
+    tutorialDone:false,
+    stars:[]
+};
+
+// ==================== 初始化 ====================
+function initStars(){
+    G.stars=[];
+    for(var i=0;i<40;i++){
+        G.stars.push({x:Math.random()*800,y:Math.random()*600,s:Math.random()*2+0.5,sp:Math.random()*0.3+0.1,a:Math.random()*0.5+0.2});
+    }
+}
+
+function initGame(){
+    G.state='playing';
+    G.money=60;G.score=0;G.day=1;G.dayTimer=0;
+    G.machines=[];G.conveyor=[];G.orders=[];
+    G.particles=[];G.floats=[];
+    G.selectedMachine=-1;G.orderTimer=5000;
+    G.completedOrders=0;G.totalProduced=0;
+    G.combo=0;G.comboTimer=0;G.shake=0;
+    G.tutorialDone=false;
+    initStars();
+
+    G.machines.push({type:0,level:1,progress:0,producing:false,x:120,y:240,w:110,h:90,anim:0});
+    addOrder();
+}
+
+// ==================== 订单系统 ====================
+function addOrder(){
+    if(G.orders.length>=G.maxOrders) return;
+    var n=Math.min(2+Math.floor(G.day*0.8),6);
+    var available=Math.min(1+Math.floor(G.day*0.6),CANDY_TYPES.length);
+    var candies=[],totalReward=0;
+    for(var i=0;i<n;i++){
+        var t=Math.floor(Math.random()*available);
+        var cnt=Math.floor(Math.random()*3)+1;
+        candies.push({type:t,count:cnt});
+        totalReward+=CANDY_TYPES[t].price*cnt;
+    }
+    var reward=Math.floor(totalReward*1.8);
+    var timeLimit=35000+n*6000;
+    G.orders.push({candies:candies,reward:reward,timeLimit:timeLimit,timeLeft:timeLimit});
+}
+
+// ==================== 机器管理 ====================
+function addMachine(t){
+    if(G.machines.length>=MAX_MACHINES){addFloat(400,300,'机器已满!','#ff4757');return false;}
+    var cost=MACHINE_COST[t]||50;
+    if(G.money<cost){addFloat(400,300,'金币不足!','#ff4757');return false;}
+    G.money-=cost;
+    var bx=80+G.machines.length*90;
+    G.machines.push({type:t,level:1,progress:0,producing:false,x:bx,y:240,w:110,h:90,anim:0});
+    emitParticles(bx+55,280,'#ffd32a',15);
+    addFloat(bx+55,220,'+'+CANDY_TYPES[t].name+'机','#2ed573');
+    return true;
+}
+
+function upgradeMachine(i){
+    var m=G.machines[i];
+    if(!m||m.level>=MAX_LEVEL){addFloat(400,300,'已达最高级!','#ffd32a');return false;}
+    var cost=UPGRADE_COST[m.level];
+    if(G.money<cost){addFloat(400,300,'金币不足!','#ff4757');return false;}
+    G.money-=cost;m.level++;
+    emitParticles(m.x+55,m.y+45,'#5352ed',18);
+    addFloat(m.x+55,m.y-10,'Lv.'+m.level+'!','#5352ed');
+    return true;
+}
+
+// ==================== 粒子 & 浮字 ====================
+function emitParticles(x,y,color,n){
+    for(var i=0;i<n;i++){
+        var a=Math.random()*Math.PI*2,sp=Math.random()*3+1;
+        G.particles.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,decay:Math.random()*0.02+0.008,sz:Math.random()*4+2,color:color});
+    }
+}
+function addFloat(x,y,text,color){
+    G.floats.push({x:x,y:y,text:text,color:color,life:1,vy:-0.8});
+}
+
+// ==================== 游戏主循环 ====================
+var lastT=0;
+function loop(ts){
+    if(!lastT)lastT=ts;
+    var dt=Math.min(ts-lastT,50);
+    lastT=ts;
+    if(G.state==='playing') update(dt);
+    render();
+    requestAnimationFrame(loop);
+}
+
+function update(dt){
+    // 昼夜
+    G.dayTimer+=dt;
+    if(G.dayTimer>=G.dayDuration){
+        G.dayTimer=0;G.day++;
+        addFloat(400,80,'第 '+G.day+' 天','#ffd32a');
+    }
+    // 订单计时
+    G.orderTimer-=dt;
+    if(G.orderTimer<=0){addOrder();G.orderTimer=G.orderInterval;}
+    for(var i=G.orders.length-1;i>=0;i--){
+        G.orders[i].timeLeft-=dt;
+        if(G.orders[i].timeLeft<=0){
+            G.orders.splice(i,1);
+            G.combo=0;
+            addFloat(400,300,'订单超时!','#ff4757');
+            G.shake=6;
+        }
+    }
+    // 机器生产
+    for(var i=0;i<G.machines.length;i++){
+        var m=G.machines[i];
+        if(!G.tutorialDone) continue;
+        if(!m.producing){m.producing=true;m.progress=0;}
+        if(m.producing){
+            var pt=CANDY_TYPES[m.type].prodTime/Math.pow(1.3,m.level-1);
+            m.progress+=dt/pt;m.anim+=dt;
+            if(m.progress>=1){
+                m.progress=0;m.producing=true;
+                G.totalProduced++;
+                G.conveyor.push({type:m.type,x:m.x+55,y:m.y+m.h+15,tx:550+Math.random()*150,ty:470,speed:1.8});
+                emitParticles(m.x+55,m.y+45,CANDY_TYPES[m.type].color,8);
+            }
+        }
+    }
+    // 传送带
+    for(var i=0;i<G.conveyor.length;i++){
+        var c=G.conveyor[i];
+        var dx=c.tx-c.x,dy=c.ty-c.y,d=Math.sqrt(dx*dx+dy*dy);
+        if(d>1){c.x+=dx/d*c.speed;c.y+=dy/d*c.speed;}
+    }
+    // 粒子
+    for(var i=G.particles.length-1;i>=0;i--){
+        var p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.05;p.life-=p.decay;
+        if(p.life<=0) G.particles.splice(i,1);
+    }
+    // 浮字
+    for(var i=G.floats.length-1;i>=0;i--){
+        var f=G.floats[i];f.y+=f.vy;f.life-=0.012;
+        if(f.life<=0) G.floats.splice(i,1);
+    }
+    // 连击
+    if(G.comboTimer>0){G.comboTimer-=dt;if(G.comboTimer<=0)G.combo=0;}
+    // 震动
+    if(G.shake>0){G.shake*=0.9;if(G.shake<0.1)G.shake=0;}
+    // 星星
+    for(var i=0;i<G.stars.length;i++){
+        G.stars[i].x-=G.stars[i].sp;
+        if(G.stars[i].x<-5){G.stars[i].x=805;G.stars[i].y=Math.random()*600;}
+    }
+    // 自动完成订单检查
+    checkOrders();
+}
+
+function checkOrders(){
+    for(var i=0;i<G.orders.length;i++){
+        var o=G.orders[i],done=true;
+        for(var j=0;j<o.candies.length;j++){
+            var need=o.candies[j],have=0;
+            for(var k=0;k<G.conveyor.length;k++){
+                if(G.conveyor[k].collected&&G.conveyor[k].type===need.type) have++;
+            }
+            if(have<need.count){done=false;break;}
+        }
+        if(done&&o.candies.length>0){
+            G.money+=o.reward;G.score+=o.reward;G.completedOrders++;
+            G.combo++;G.comboTimer=4000;
+            var bonus=G.combo>1?G.combo*5:0;
+            G.score+=bonus;
+            addFloat(400,200,'+'+o.reward+'金币','#ffd32a');
+            if(G.combo>1) addFloat(400,170,'连击 x'+G.combo,'#ff6348');
+            emitParticles(400,250,'#ffd32a',25);
+            // 移除已收集的糖果
+            var removed=0;
+            for(var j=0;j<o.candies.length;j++){
+                var need=o.candies[j],cnt=0;
+                for(var k=G.conveyor.length-1;k>=0;k--){
+                    if(G.conveyor[k].collected&&G.conveyor[k].type===need.type&&cnt<need.count){
+                        G.conveyor.splice(k,1);cnt++;
+                    }
+                }
+            }
+            G.orders.splice(i,1);i--;
+        }
+    }
+}
+
+// ==================== 收集糖果 ====================
+function collectCandy(x,y){
+    for(var i=0;i<G.conveyor.length;i++){
+        var c=G.conveyor[i];
+        if(!c.collected){
+            var d=Math.sqrt((x-c.x)*(x-c.x)+(y-c.y)*(y-c.y));
+            if(d<25){
+                c.collected=true;
+                emitParticles(c.x,c.y,CANDY_TYPES[c.type].color,10);
+                addFloat(c.x,c.y-20,'收集!','#fff');
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// ==================== 渲染 ====================
+function render(){
+    ctx.save();
+    if(G.shake>0) ctx.translate((Math.random()-0.5)*G.shake*2,(Math.random()-0.5)*G.shake*2);
+
+    if(G.state==='menu') renderMenu();
+    else if(G.state==='playing'){renderGame();renderUI();if(!G.tutorialDone)renderTutorial();}
+    else if(G.state==='gameover') renderGameOver();
+
+    ctx.restore();
+}
+
+function renderMenu(){
+    // 背景
+    var g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#1a0a2e');g.addColorStop(0.5,'#16213e');g.addColorStop(1,'#0f3460');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    // 装饰
+    for(var i=0;i<25;i++){
+        var px=(Date.now()*0.015+i*120)%W;
+        var py=(Math.sin(Date.now()*0.001+i*0.8)*60+H*0.3+i*25)%H;
+        ctx.globalAlpha=0.25;
+        ctx.fillStyle=['#ff4757','#ffd32a','#5352ed','#2ed573','#ff6348'][i%5];
+        ctx.beginPath();ctx.arc(px,py,3+Math.sin(Date.now()*0.003+i)*2,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    // 阴影
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    ctx.font='bold '+58*SF+'px "Microsoft YaHei"';
+    ctx.fillText('糖果工厂',W/2+3,H*0.28+3);
+    // 标题渐变
+    var tg=ctx.createLinearGradient(W/2-160*SF,H*0.28-30*SF,W/2+160*SF,H*0.28+30*SF);
+    tg.addColorStop(0,'#ff4757');tg.addColorStop(0.3,'#ffd32a');tg.addColorStop(0.6,'#5352ed');tg.addColorStop(1,'#2ed573');
+    ctx.fillStyle=tg;
+    ctx.font='bold '+58*SF+'px "Microsoft YaHei"';
+    ctx.fillText('糖果工厂',W/2,H*0.28);
+    // 副标题
+    ctx.fillStyle='#7bed9f';ctx.font=20*SF+'px "Microsoft YaHei"';
+    ctx.fillText('管理生产线，满足甜蜜订单!',W/2,H*0.40);
+    // 按钮
+    var bw=220*SF,bh=55*SF,bx=W/2-bw/2,by=H*0.52;
+    var bg=ctx.createLinearGradient(bx,by,bx,by+bh);
+    bg.addColorStop(0,'#2ed573');bg.addColorStop(1,'#17c964');
+    ctx.fillStyle=bg;ctx.beginPath();drawRoundRect(bx,by,bw,bh,12*SF);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold '+26*SF+'px "Microsoft YaHei"';
+    ctx.fillText('开始游戏',W/2,by+bh/2);
+    // 糖果装饰
+    var candyIcons=['🍓','🍋','🫐','🍃','🌈'];
+    for(var i=0;i<5;i++){
+        var angle=Date.now()*0.001+i*Math.PI*2/5;
+        var radius=120*SF;
+        var cx=W/2+Math.cos(angle)*radius;
+        var cy=H*0.28+Math.sin(angle)*radius;
+        ctx.font=28*SF+'px "Segoe UI Emoji"';
+        ctx.fillText(candyIcons[i],cx,cy);
+    }
+    // 最高分
+    if(G.highScore>0){
+        ctx.fillStyle='#ffd32a';ctx.font=16*SF+'px "Microsoft YaHei"';
+        ctx.fillText('最高分: '+G.highScore,W/2,H*0.70);
+    }
+    // 操作说明
+    ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font=14*SF+'px "Microsoft YaHei"';
+    ctx.fillText('点击/空格键开始 | 键盘A添加机器 U升级',W/2,H*0.82);
+}
+
+function renderGame(){
+    // 背景
+    var g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#1a0a2e');g.addColorStop(0.5,'#16213e');g.addColorStop(1,'#0f3460');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    // 星星
+    for(var i=0;i<G.stars.length;i++){
+        var s=G.stars[i];ctx.globalAlpha=s.a;
+        ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s.x*SF,s.y*SF,s.s*SF,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    // 地面
+    var gy=360*SF;
+    var gg=ctx.createLinearGradient(0,gy,0,H);
+    gg.addColorStop(0,'#2d1b4e');gg.addColorStop(1,'#1a0a2e');
+    ctx.fillStyle=gg;ctx.fillRect(0,gy,W,H-gy);
+    // 传送带背景
+    ctx.fillStyle='#3d2b5e';ctx.fillRect(40*SF,440*SF,720*SF,45*SF);
+    // 传送带条纹
+    ctx.fillStyle='#4a3470';
+    for(var i=0;i<16;i++){
+        var sx=((40+i*48+Date.now()*0.03)%760)*SF;
+        ctx.fillRect(sx,442*SF,22*SF,41*SF);
+    }
+    // 传送带标签
+    ctx.fillStyle='rgba(255,255,255,0.3)';ctx.font=11*SF+'px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('▲ 点击糖果收集 ▲',400*SF,462*SF);
+    // 机器
+    for(var i=0;i<G.machines.length;i++) renderMachine(G.machines[i],i);
+    // 传送带糖果
+    for(var i=0;i<G.conveyor.length;i++){
+        var c=G.conveyor[i];
+        if(!c.collected){
+            var ct=CANDY_TYPES[c.type];
+            var pulse=1+Math.sin(Date.now()*0.005+i)*0.06;
+            ctx.fillStyle='rgba(0,0,0,0.3)';ctx.beginPath();ctx.ellipse(c.x*SF,(c.y+6)*SF,14*SF*pulse,8*SF*pulse,0,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle=ct.color;ctx.beginPath();ctx.arc(c.x*SF,c.y*SF,14*SF*pulse,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle=ct.secondary;ctx.beginPath();ctx.arc((c.x-4)*SF,(c.y-4)*SF,6*SF*pulse,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle='rgba(255,255,255,0.6)';ctx.beginPath();ctx.arc((c.x-4)*SF,(c.y-4)*SF,3*SF*pulse,0,Math.PI*2);ctx.fill();
+        }
+    }
+    // 已收集的糖果小图标（订单区用）
+    renderCollectedIcons();
+    // 粒子
+    for(var i=0;i<G.particles.length;i++){
+        var p=G.particles[i];ctx.globalAlpha=p.life;ctx.fillStyle=p.color;
+        ctx.beginPath();ctx.arc(p.x*SF,p.y*SF,p.sz*SF,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    // 浮字
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    for(var i=0;i<G.floats.length;i++){
+        var f=G.floats[i];ctx.globalAlpha=f.life;ctx.fillStyle=f.color;
+        ctx.font='bold '+18*SF+'px "Microsoft YaHei"';ctx.fillText(f.text,f.x*SF,f.y*SF);
+    }
+    ctx.globalAlpha=1;
+}
+
+function renderMachine(m,idx){
+    var x=m.x*SF,y=m.y*SF,w=m.w*SF,h=m.h*SF;
+    var ct=CANDY_TYPES[m.type];
+    // 底座
+    var mg=ctx.createLinearGradient(x,y,x,y+h);
+    mg.addColorStop(0,'#4a3470');mg.addColorStop(1,'#2d1b4e');
+    ctx.fillStyle=mg;ctx.beginPath();drawRoundRect(x,y,w,h,10*SF);ctx.fill();
+    // 边框
+    ctx.strokeStyle=G.selectedMachine===idx?'#ffd32a':'#5a4080';
+    ctx.lineWidth=G.selectedMachine===idx?3*SF:1*SF;
+    ctx.beginPath();drawRoundRect(x,y,w,h,10*SF);ctx.stroke();
+    // 选中高光
+    if(G.selectedMachine===idx){
+        ctx.strokeStyle='rgba(255,211,42,0.3)';ctx.lineWidth=6*SF;
+        ctx.beginPath();drawRoundRect(x-2*SF,y-2*SF,w+4*SF,h+4*SF,12*SF);ctx.stroke();
+    }
+    // 图标
+    ctx.font=32*SF+'px "Segoe UI Emoji"';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(ct.icon,x+w/2,y+h*0.38);
+    // 等级
+    ctx.font='bold '+11*SF+'px "Microsoft YaHei"';ctx.fillStyle='#ffd32a';
+    ctx.fillText('Lv.'+m.level,x+w/2,y+h*0.72);
+    // 类型名
+    ctx.font=10*SF+'px "Microsoft YaHei"';ctx.fillStyle='#aaa';
+    ctx.fillText(ct.name,x+w/2,y+h*0.88);
+    // 进度条
+    if(m.producing){
+        var bw=w*0.8,bh=7*SF,bx=x+(w-bw)/2,by=y+h+8*SF;
+        ctx.fillStyle='#1a0a2e';ctx.beginPath();drawRoundRect(bx,by,bw,bh,3*SF);ctx.fill();
+        var pg=ctx.createLinearGradient(bx,by,bx+bw*m.progress,by);
+        pg.addColorStop(0,ct.color);pg.addColorStop(1,ct.secondary);
+        ctx.fillStyle=pg;ctx.beginPath();drawRoundRect(bx,by,bw*m.progress,bh,3*SF);ctx.fill();
+        // 闪烁
+        if(m.progress>0.8){
+            ctx.fillStyle='rgba(255,255,255,'+((Math.sin(Date.now()*0.01)+1)*0.15)+')';
+            ctx.beginPath();drawRoundRect(bx,by,bw,bh,3*SF);ctx.fill();
+        }
+    }
+    // 生产动画
+    if(m.producing){
+        var bounce=Math.sin(m.anim*0.008)*3*SF;
+        ctx.globalAlpha=0.15;ctx.fillStyle=ct.color;
+        ctx.beginPath();ctx.arc(x+w/2,y+h/2+bounce,25*SF,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+    }
+}
+
+function renderCollectedIcons(){
+    // 在订单区域下方显示已收集的糖果概览
+    var counts=[0,0,0,0,0];
+    for(var i=0;i<G.conveyor.length;i++){
+        if(G.conveyor[i].collected) counts[G.conveyor[i].type]++;
+    }
+    var startX=50*SF,startY=415*SF;
+    ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font=11*SF+'px "Microsoft YaHei"';
+    ctx.fillText('库存:',startX,startY);
+    for(var i=0;i<5;i++){
+        if(counts[i]>0){
+            ctx.font=14*SF+'px "Segoe UI Emoji"';
+            ctx.fillText(CANDY_TYPES[i].icon+counts[i],startX+45*SF+i*65*SF,startY);
+        }
+    }
+}
+
+function renderOrders(){
+    var ox=50*SF,oy=15*SF;
+    ctx.fillStyle='#ffd32a';ctx.font='bold '+15*SF+'px "Microsoft YaHei"';ctx.textAlign='left';ctx.textBaseline='top';
+    ctx.fillText('📦 订单',ox,oy);
+    for(var i=0;i<G.orders.length;i++){
+        var o=G.orders[i];
+        var cx=ox+i*225*SF,cy=oy+22*SF;
+        // 卡片
+        var cg=ctx.createLinearGradient(cx,cy,cx,cy+95*SF);
+        cg.addColorStop(0,'rgba(45,27,78,0.92)');cg.addColorStop(1,'rgba(26,10,46,0.92)');
+        ctx.fillStyle=cg;ctx.beginPath();drawRoundRect(cx,cy,210*SF,95*SF,8*SF);ctx.fill();
+        ctx.strokeStyle='#5a4080';ctx.lineWidth=1;ctx.beginPath();drawRoundRect(cx,cy,210*SF,95*SF,8*SF);ctx.stroke();
+        // 需求
+        ctx.font=15*SF+'px "Segoe UI Emoji"';ctx.fillStyle='#fff';ctx.textAlign='left';
+        var txt='';
+        for(var j=0;j<o.candies.length;j++){
+            var c=o.candies[j];
+            txt+=CANDY_TYPES[c.type].icon+'x'+c.count+'  ';
+        }
+        ctx.fillText(txt,cx+10*SF,cy+12*SF);
+        // 奖励
+        ctx.fillStyle='#ffd32a';ctx.font=13*SF+'px "Microsoft YaHei"';
+        ctx.fillText('奖励: '+o.reward+' 金币',cx+10*SF,cy+38*SF);
+        // 时间条
+        var tp=o.timeLeft/o.timeLimit;
+        var tc=tp>0.5?'#2ed573':tp>0.25?'#ffd32a':'#ff4757';
+        ctx.fillStyle='#1a0a2e';ctx.beginPath();drawRoundRect(cx+10*SF,cy+60*SF,190*SF,10*SF,5*SF);ctx.fill();
+        ctx.fillStyle=tc;ctx.beginPath();drawRoundRect(cx+10*SF,cy+60*SF,190*SF*tp,10*SF,5*SF);ctx.fill();
+        // 时间文字
+        ctx.fillStyle='#aaa';ctx.font=10*SF+'px "Microsoft YaHei"';
+        ctx.fillText(Math.ceil(o.timeLeft/1000)+'s',cx+10*SF,cy+78*SF);
+    }
+}
+
+function renderUI(){
+    renderOrders();
+    var uy=130*SF;
+    // 金币
+    ctx.fillStyle='#ffd32a';ctx.font='bold '+17*SF+'px "Microsoft YaHei"';ctx.textAlign='left';ctx.textBaseline='top';
+    ctx.fillText('💰 '+G.money,50*SF,uy);
+    // 分数
+    ctx.fillStyle='#fff';ctx.fillText('⭐ '+G.score,180*SF,uy);
+    // 天数
+    ctx.fillStyle='#7bed9f';ctx.fillText('📅 第'+G.day+'天',320*SF,uy);
+    // 连击
+    if(G.combo>1){ctx.fillStyle='#ff6348';ctx.font='bold '+18*SF+'px "Microsoft YaHei"';ctx.textAlign='right';ctx.fillText('🔥x'+G.combo,750*SF,uy);}
+    // 按钮区
+    var by=500*SF;
+    // 添加机器
+    var bg1=ctx.createLinearGradient(50*SF,by,50*SF,by+42*SF);
+    bg1.addColorStop(0,'#5352ed');bg1.addColorStop(1,'#3742fa');
+    ctx.fillStyle=bg1;ctx.beginPath();drawRoundRect(50*SF,by,110*SF,42*SF,8*SF);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold '+14*SF+'px "Microsoft YaHei"';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('添加机器(A)',105*SF,by+21*SF);
+    // 升级
+    if(G.selectedMachine>=0){
+        var bg2=ctx.createLinearGradient(180*SF,by,180*SF,by+42*SF);
+        bg2.addColorStop(0,'#ffd32a');bg2.addColorStop(1,'#ffa502');
+        ctx.fillStyle=bg2;ctx.beginPath();drawRoundRect(180*SF,by,110*SF,42*SF,8*SF);ctx.fill();
+        ctx.fillStyle='#fff';ctx.fillText('升级(U)',235*SF,by+21*SF);
+    }
+    // 类型选择提示
+    ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font=11*SF+'px "Microsoft YaHei"';ctx.textAlign='left';
+    ctx.fillText('点击机器选择 | 数字键1-5选类型 | 空格暂停',50*SF,by+52*SF);
+}
+
+function renderTutorial(){
+    ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,W,H);
+    var ow=420*SF,oh=320*SF,ox=(W-ow)/2,oy=(H-oh)/2;
+    var cg=ctx.createLinearGradient(ox,oy,ox,oy+oh);
+    cg.addColorStop(0,'#2d1b4e');cg.addColorStop(1,'#1a0a2e');
+    ctx.fillStyle=cg;ctx.beginPath();drawRoundRect(ox,oy,ow,oh,14*SF);ctx.fill();
+    ctx.strokeStyle='#5a4080';ctx.lineWidth=2;ctx.beginPath();drawRoundRect(ox,oy,ow,oh,14*SF);ctx.stroke();
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle='#ffd32a';ctx.font='bold '+24*SF+'px "Microsoft YaHei"';
+    ctx.fillText('🍬 欢迎来到糖果工厂!',W/2,oy+35*SF);
+    ctx.fillStyle='#fff';ctx.font=15*SF+'px "Microsoft YaHei"';
+    var tips=[
+        '🍓 你有一台草莓糖机器，会自动生产',
+        '📦 满足订单需求即可获得金币和分数',
+        '👆 点击传送带上的糖果收入库存',
+        '🔧 赚够金币可以添加新机器或升级',
+        '⏰ 订单有时间限制，超时会失败!',
+        '🔥 连续完成订单触发连击加分!'
+    ];
+    for(var i=0;i<tips.length;i++){
+        ctx.fillText(tips[i],W/2,oy+75*SF+i*32*SF);
+    }
+    // 按钮
+    var bw=140*SF,bh=40*SF,bx=W/2-bw/2,by2=oy+oh-55*SF;
+    var bg=ctx.createLinearGradient(bx,by2,bx,by2+bh);
+    bg.addColorStop(0,'#2ed573');bg.addColorStop(1,'#17c964');
+    ctx.fillStyle=bg;ctx.beginPath();drawRoundRect(bx,by2,bw,bh,8*SF);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold '+16*SF+'px "Microsoft YaHei"';
+    ctx.fillText('开始生产!',W/2,by2+bh/2);
+}
+
+function renderGameOver(){
+    var g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#1a0a2e');g.addColorStop(1,'#0f3460');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    // 装饰粒子
+    for(var i=0;i<15;i++){
+        var px=(Date.now()*0.01+i*100)%W,py=(Math.sin(Date.now()*0.0008+i)*40+H*0.4+i*30)%H;
+        ctx.globalAlpha=0.15;ctx.fillStyle=['#ff4757','#ffd32a','#5352ed'][i%3];
+        ctx.beginPath();ctx.arc(px,py,4,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle='#ff4757';ctx.font='bold '+50*SF+'px "Microsoft YaHei"';
+    ctx.fillText('工厂倒闭',W/2,H*0.20);
+    ctx.fillStyle='#aaa';ctx.font=16*SF+'px "Microsoft YaHei"';
+    ctx.fillText('没有及时完成订单，工厂关门了...',W/2,H*0.30);
+    // 统计
+    ctx.fillStyle='#fff';ctx.font=20*SF+'px "Microsoft YaHei"';
+    ctx.fillText('最终分数: '+G.score,W/2,H*0.42);
+    ctx.fillText('完成订单: '+G.completedOrders,W/2,H*0.50);
+    ctx.fillText('生产糖果: '+G.totalProduced,W/2,H*0.58);
+    ctx.fillText('到达天数: '+G.day,W/2,H*0.66);
+    if(G.score>=G.highScore&&G.score>0){
+        ctx.fillStyle='#ffd32a';ctx.font='bold '+22*SF+'px "Microsoft YaHei"';
+        ctx.fillText('🏆 新纪录!',W/2,H*0.74);
+    }
+    ctx.fillStyle='#ffd32a';ctx.font=15*SF+'px "Microsoft YaHei"';
+    ctx.fillText('最高分: '+Math.max(G.score,G.highScore),W/2,H*0.80);
+    // 重玩
+    var bw=200*SF,bh=50*SF,bx=W/2-bw/2,by=H*0.87;
+    var bg=ctx.createLinearGradient(bx,by,bx,by+bh);
+    bg.addColorStop(0,'#2ed573');bg.addColorStop(1,'#17c964');
+    ctx.fillStyle=bg;ctx.beginPath();drawRoundRect(bx,by,bw,bh,10*SF);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold '+22*SF+'px "Microsoft YaHei"';
+    ctx.fillText('再来一次',W/2,by+bh/2);
+}
+
+// ==================== 工具函数 ====================
+function drawRoundRect(x,y,w,h,r){
+    ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+
+// ==================== 输入处理 ====================
+function gp(cx,cy){var r=canvas.getBoundingClientRect();return{x:(cx-r.left)/SF,y:(cy-r.top)/SF};}
+
+function handleClick(x,y){
+    if(G.state==='menu'){
+        var bw=220,bh=55,bx=400-bw/2,by=600*0.52;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh) initGame();
+        return;
+    }
+    if(G.state==='gameover'){
+        var bw=200,bh=50,bx=400-bw/2,by=600*0.87;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh) initGame();
+        return;
+    }
+    if(G.state!=='playing') return;
+    // 教程
+    if(!G.tutorialDone){
+        var ow=420,oh=320,ox=(800-ow)/2,oy=(600-oh)/2;
+        var bx2=400-70,by2=oy+oh-55;
+        if(x>=bx2&&x<=bx2+140&&y>=by2&&y<=by2+40){
+            G.tutorialDone=true;
+            for(var i=0;i<G.machines.length;i++){G.machines[i].producing=true;G.machines[i].progress=0;}
+            return;
+        }
+        return;
+    }
+    // 收集糖果
+    if(y>=420&&y<=510){collectCandy(x,y);return;}
+    // 机器点击
+    for(var i=0;i<G.machines.length;i++){
+        var m=G.machines[i];
+        if(x>=m.x&&x<=m.x+m.w&&y>=m.y&&y<=m.y+m.h){
+            G.selectedMachine=i;emitParticles(m.x+55,m.y+45,'#ffd32a',8);return;
+        }
+    }
+    // 添加机器按钮
+    if(x>=50&&x<=160&&y>=500&&y<=542){addMachine(G.machines.length%5);return;}
+    // 升级按钮
+    if(G.selectedMachine>=0&&x>=180&&x<=290&&y>=500&&y<=542){upgradeMachine(G.selectedMachine);return;}
+    G.selectedMachine=-1;
+}
+
+canvas.addEventListener('click',function(e){var p=gp(e.clientX,e.clientY);handleClick(p.x,p.y);});
+canvas.addEventListener('touchstart',function(e){e.preventDefault();var t=e.touches[0];var p=gp(t.clientX,t.clientY);handleClick(p.x,p.y);},{passive:false});
+
+document.addEventListener('keydown',function(e){
+    if(G.state==='menu'){if(e.code==='Space'||e.code==='Enter')initGame();return;}
+    if(G.state==='gameover'){if(e.code==='Space'||e.code==='Enter')initGame();return;}
+    if(G.state==='playing'){
+        if(e.code==='Space'){/* 暂停未实装，避免误触 */return;}
+        if(e.code==='KeyA') addMachine(G.machines.length%5);
+        if(e.code==='KeyU'&&G.selectedMachine>=0) upgradeMachine(G.selectedMachine);
+        if(e.code==='Digit1')G.selectedCandyType=0;
+        if(e.code==='Digit2')G.selectedCandyType=1;
+        if(e.code==='Digit3')G.selectedCandyType=2;
+        if(e.code==='Digit4')G.selectedCandyType=3;
+        if(e.code==='Digit5')G.selectedCandyType=4;
+    }
+});
+
+// ==================== 启动 ====================
+initStars();
+requestAnimationFrame(loop);
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

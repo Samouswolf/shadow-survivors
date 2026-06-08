@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管道工</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;font-family:'Microsoft YaHei',sans-serif;overflow:hidden;touch-action:none}
+canvas{display:block}
+</style>
+
+<style>
+/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+let W,H,gameState='menu',score=0,level=0,highScore=+localStorage.getItem('pipe_hi')||0;
+let grid=[],cols=6,rows=6,cellSize=60,offsetX=0,offsetY=0;
+let sourcePos={r:0,c:0},sinkPos={r:5,c:5},waterFlowing=false,waterPath=[],flowTimer=0;
+let message='',msgTimer=0,particles=[];
+
+function resize(){
+    W=cv.width=innerWidth;H=cv.height=innerHeight;
+    cellSize=Math.min((W-40)/cols,(H-180)/rows,70);
+    offsetX=(W-cellSize*cols)/2;
+    offsetY=120;
+}
+addEventListener('resize',resize);resize();
+
+// 管道类型：0空 1直横 2直竖 3弯左下 4弯右下 5弯左上 6弯右上
+const PIPE_DIRS={
+    0:[], // 空
+    1:[['left','right']], // 直横
+    2:[['up','down']], // 直竖
+    3:[['left','down']], // 弯左下
+    4:[['right','down']], // 弯右下
+    5:[['left','up']], // 弯左上
+    6:[['right','up']], // 弯右上
+};
+
+const PIPE_NAMES=['','━','┃','┛','┗','┓','┏'];
+
+function rotatePipe(type){
+    if(type<=2)return type;
+    const map={3:5,5:6,6:4,4:3};
+    return map[type]||type;
+}
+
+const LEVELS=[
+// Level 1: 简单L形
+{cols:5,rows:5,source:{r:0,c:0},sink:{r:4,c:4},pipes:[
+    [1,1,3,0,0],
+    [0,0,2,0,0],
+    [0,0,2,0,0],
+    [0,0,2,0,0],
+    [0,0,5,1,1],
+],rotated:[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]},
+// Level 2: S形
+{cols:5,rows:5,source:{r:0,c:0},sink:{r:4,c:0},pipes:[
+    [1,3,0,0,0],
+    [0,2,0,0,0],
+    [0,6,1,3,0],
+    [0,0,0,2,0],
+    [0,5,1,4,0],
+],rotated:[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]},
+// Level 3: 更复杂
+{cols:6,rows:6,source:{r:0,c:0},sink:{r:5,c:5},pipes:[
+    [1,3,0,0,0,0],
+    [0,2,0,0,0,0],
+    [0,6,1,1,3,0],
+    [0,0,0,0,2,0],
+    [0,0,0,0,2,0],
+    [0,0,0,0,5,1],
+],rotated:[[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0]]},
+// Level 4
+{cols:6,rows:6,source:{r:0,c:2},sink:{r:5,c:3},pipes:[
+    [0,0,2,0,0,0],
+    [0,0,6,1,3,0],
+    [0,0,0,0,2,0],
+    [0,5,1,3,4,0],
+    [0,2,0,0,0,0],
+    [0,4,1,1,1,1],
+],rotated:[[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0]]},
+// Level 5
+{cols:7,rows:7,source:{r:0,c:0},sink:{r:6,c:6},pipes:[
+    [1,1,3,0,0,0,0],
+    [0,0,2,0,0,0,0],
+    [0,0,6,1,1,3,0],
+    [0,0,0,0,0,2,0],
+    [0,0,0,5,3,4,0],
+    [0,0,0,2,0,0,0],
+    [0,0,0,5,1,1,1],
+],rotated:[[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0]]},
+];
+
+function loadLevel(){
+    if(level>=LEVELS.length){gameState='win';return}
+    const l=LEVELS[level];
+    cols=l.cols;rows=l.rows;sourcePos=l.source;sinkPos=l.sink;
+    grid=l.pipes.map(row=>[...row]);
+    resize();
+    waterFlowing=false;waterPath=[];flowTimer=0;
+}
+
+function getConnections(r,c){
+    const type=grid[r][c];
+    if(type===0)return[];
+    let dirs=PIPE_DIRS[type];
+    // 检查是否需要旋转（基于rotated数组）
+    return dirs[0]||[];
+}
+
+function isConnected(r1,c1,r2,c2){
+    const d1=getConnections(r1,c1);
+    const d2=getConnections(r2,c2);
+    let dir12='';
+    if(r2===r1-1)dir12='up';
+    if(r2===r1+1)dir12='down';
+    if(c2===c1-1)dir12='left';
+    if(c2===c1+1)dir12='right';
+    const opposite={up:'down',down:'up',left:'right',right:'left'};
+    return d1.includes(dir12)&&d2.includes(opposite[dir12]);
+}
+
+function checkPath(){
+    // BFS from source to sink
+    const visited=new Set();
+    const queue=[[sourcePos.r,sourcePos.c,[]]];
+    visited.add(`${sourcePos.r},${sourcePos.c}`);
+    while(queue.length){
+        const [r,c,path]=queue.shift();
+        const newPath=[...path,{r,c}];
+        if(r===sinkPos.r&&c===sinkPos.c){
+            waterPath=newPath;
+            waterFlowing=true;flowTimer=0;
+            score+=10;
+            if(score>highScore){highScore=score;localStorage.setItem('pipe_hi',highScore)}
+            message='✅ 水流畅通！';msgTimer=90;
+            spawnP(offsetX+c*cellSize+cellSize/2,offsetY+r*cellSize+cellSize/2,20,'#4fc3f7');
+            return true;
+        }
+        const neighbors=[[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
+        for(const[nr,nc]of neighbors){
+            if(nr>=0&&nr<rows&&nc>=0&&nc<cols&&!visited.has(`${nr},${nc}`)&&grid[nr][nc]>0&&isConnected(r,c,nr,nc)){
+                visited.add(`${nr},${nc}`);
+                queue.push([nr,nc,newPath]);
+            }
+        }
+    }
+    return false;
+}
+
+function drawBg(){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#0d1117');g.addColorStop(0.5,'#161b22');g.addColorStop(1,'#0d1117');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+}
+function drawText(t,x,y,s,c,a){ctx.fillStyle=c||'#fff';ctx.font=`bold ${s}px 'Microsoft YaHei',sans-serif`;ctx.textAlign=a||'center';ctx.textBaseline='middle';ctx.fillText(t,x,y)}
+
+class Particle{
+    constructor(x,y,c){this.x=x;this.y=y;this.vx=(Math.random()-0.5)*4;this.vy=(Math.random()-0.5)*4;this.life=1;this.color=c;this.size=Math.random()*4+2}
+    update(){this.x+=this.vx;this.y+=this.vy;this.life-=0.02}
+    draw(){ctx.globalAlpha=this.life;ctx.fillStyle=this.color;ctx.beginPath();ctx.arc(this.x,this.y,this.size,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1}
+}
+function spawnP(x,y,n,c){for(let i=0;i<n;i++)particles.push(new Particle(x,y,c))}
+
+function drawPipe(x,y,type,size,highlight,water){
+    const cx=x+size/2,cy=y+size/2,r=size*0.4;
+    ctx.strokeStyle=water?'#4fc3f7':highlight?'#ffd700':'#78909c';
+    ctx.lineWidth=size*0.18;ctx.lineCap='round';
+    if(type===1){// 直横
+        ctx.beginPath();ctx.moveTo(cx-r,cy);ctx.lineTo(cx+r,cy);ctx.stroke();
+    }else if(type===2){// 直竖
+        ctx.beginPath();ctx.moveTo(cx,cy-r);ctx.lineTo(cx,cy+r);ctx.stroke();
+    }else if(type===3){// 弯左下
+        ctx.beginPath();ctx.moveTo(cx-r,cy);ctx.quadraticCurveTo(cx,cy,cx,cy+r);ctx.stroke();
+    }else if(type===4){// 弯右下
+        ctx.beginPath();ctx.moveTo(cx+r,cy);ctx.quadraticCurveTo(cx,cy,cx,cy+r);ctx.stroke();
+    }else if(type===5){// 弯左上
+        ctx.beginPath();ctx.moveTo(cx-r,cy);ctx.quadraticCurveTo(cx,cy,cx,cy-r);ctx.stroke();
+    }else if(type===6){// 弯右上
+        ctx.beginPath();ctx.moveTo(cx+r,cy);ctx.quadraticCurveTo(cx,cy,cx,cy-r);ctx.stroke();
+    }
+    // 水滴特效
+    if(water){
+        ctx.fillStyle='rgba(79,195,247,0.3)';
+        ctx.beginPath();ctx.arc(cx,cy,r*0.3,0,Math.PI*2);ctx.fill();
+    }
+}
+
+function drawMenu(){
+    drawBg();
+    drawText('管道工',W/2,H*0.22,Math.min(W*0.08,44),'#4fc3f7');
+    drawText('旋转管道连接水源到终点',W/2,H*0.32,Math.min(W*0.035,18),'#78909c');
+    const bw=Math.min(W*0.4,200),bh=50,bx=W/2-bw/2,by=H*0.48;
+    ctx.fillStyle='#0097a7';ctx.beginPath();ctx.roundRect(bx,by,bw,bh,12);ctx.fill();
+    drawText('开始游戏',W/2,by+bh/2,20,'#fff');
+    drawText(`最高分: ${highScore}`,W/2,H*0.62,16,'#78909c');
+    drawText('点击管道旋转 | 5关',W/2,H*0.72,14,'#546e7a');
+}
+
+function drawGame(){
+    drawBg();
+    drawText(`第 ${level+1} 关`,W/2,30,16,'#78909c');
+    drawText(`得分: ${score}`,W/2,55,16,'#4fc3f7');
+    // 网格
+    for(let r=0;r<rows;r++){
+        for(let c=0;c<cols;c++){
+            const x=offsetX+c*cellSize,y=offsetY+r*cellSize;
+            ctx.fillStyle='rgba(255,255,255,0.03)';
+            ctx.strokeStyle='rgba(255,255,255,0.1)';ctx.lineWidth=1;
+            ctx.beginPath();ctx.rect(x,y,cellSize,cellSize);ctx.fill();ctx.stroke();
+            // 管道
+            const type=grid[r][c];
+            const isSource=r===sourcePos.r&&c===sourcePos.c;
+            const isSink=r===sinkPos.r&&c===sinkPos.c;
+            const isWater=waterFlowing&&waterPath.some(p=>p.r===r&&p.c===c);
+            if(type>0)drawPipe(x,y,type,cellSize,isSource||isSink,isWater);
+            // 水源/终点标记
+            if(isSource){drawText('💧',x+cellSize/2,y+cellSize/2,cellSize*0.4)}
+            if(isSink){drawText('🚰',x+cellSize/2,y+cellSize/2,cellSize*0.4)}
+        }
+    }
+    // 提示
+    if(!waterFlowing){
+        drawText('点击管道旋转，连接水源到终点',W/2,H-40,14,'#546e7a');
+    }
+    // 消息
+    if(msgTimer>0){drawText(message,W/2,H-70,16,message.includes('✅')?'#4fc3f7':'#ff6b6b');msgTimer--}
+}
+
+function drawEnd(){
+    drawBg();
+    const isWin=gameState==='win';
+    drawText(isWin?'🎉 全部通关！':'管道工',W/2,H*0.28,Math.min(W*0.07,36),isWin?'#4fc3f7':'#78909c');
+    drawText(`得分: ${score}`,W/2,H*0.42,24,'#fff');
+    drawText(`通过: ${level} 关`,W/2,H*0.5,18,'#78909c');
+    const bw=Math.min(W*0.4,200),bh=50,bx=W/2-bw/2,by=H*0.62;
+    ctx.fillStyle='#0097a7';ctx.beginPath();ctx.roundRect(bx,by,bw,bh,12);ctx.fill();
+    drawText('再来一局',W/2,by+bh/2,20,'#fff');
+}
+
+function startGame(){gameState='playing';score=0;level=0;loadLevel()}
+
+addEventListener('click',e=>{
+    const x=e.clientX,y=e.clientY;
+    if(gameState==='menu'){
+        const bw=Math.min(W*0.4,200),bh=50,bx=W/2-bw/2,by=H*0.48;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh)startGame();
+    }else if(gameState==='playing'&&!waterFlowing){
+        // 点击管道旋转
+        const c=Math.floor((x-offsetX)/cellSize);
+        const r=Math.floor((y-offsetY)/cellSize);
+        if(r>=0&&r<rows&&c>=0&&c<cols&&grid[r][c]>0){
+            grid[r][c]=rotatePipe(grid[r][c]);
+            spawnP(offsetX+c*cellSize+cellSize/2,offsetY+r*cellSize+cellSize/2,5,'#4fc3f7');
+            checkPath();
+        }
+        // 检查是否下一关
+    }else if(gameState==='playing'&&waterFlowing){
+        level++;loadLevel();
+    }else if(gameState==='win'||gameState==='gameover'){
+        const bw=Math.min(W*0.4,200),bh=50,bx=W/2-bw/2,by=H*0.62;
+        if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh)startGame();
+    }
+});
+
+function loop(){
+    if(gameState==='menu')drawMenu();
+    else if(gameState==='playing')drawGame();
+    else drawEnd();
+    particles.forEach(p=>{p.update();p.draw()});particles=particles.filter(p=>p.life>0);
+    requestAnimationFrame(loop);
+}
+loop();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+// 插屏广告（游戏结束时显示）
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+</body>
+</html>

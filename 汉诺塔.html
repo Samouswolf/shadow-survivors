@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>汉诺塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a2e;font-family:'Microsoft YaHei','PingFang SC',sans-serif}
+canvas{display:block;position:absolute;top:0;left:0}
+#ad-banner{position:fixed;bottom:0;left:0;width:100%;height:60px;background:linear-gradient(135deg,#1a1a3e,#2d2d6e);display:flex;align-items:center;justify-content:center;z-index:100;border-top:1px solid rgba(255,255,255,0.1)}
+#ad-banner .ad-text{color:rgba(255,255,255,0.6);font-size:13px;letter-spacing:1px}
+#ad-banner .sponsor-btn{margin-left:15px;padding:6px 16px;background:linear-gradient(135deg,#ff6b6b,#ee5a24);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;transition:transform 0.2s}
+#ad-banner .sponsor-btn:hover{transform:scale(1.05)}
+#sponsor-modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center}
+#sponsor-modal.active{display:flex}
+.modal-content{background:linear-gradient(135deg,#1a1a3e,#2d2d6e);border-radius:16px;padding:30px;max-width:360px;width:90%;text-align:center;border:1px solid rgba(255,255,255,0.1)}
+.modal-content h3{color:#fff;font-size:20px;margin-bottom:15px}
+.modal-content p{color:rgba(255,255,255,0.7);font-size:14px;line-height:1.6;margin-bottom:20px}
+.modal-content .qr-placeholder{width:150px;height:150px;background:rgba(255,255,255,0.1);border-radius:8px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.4);font-size:12px}
+.modal-close{padding:8px 30px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:20px;cursor:pointer;font-size:14px}
+#interstitial{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:300;align-items:center;justify-content:center;flex-direction:column}
+#interstitial.active{display:flex}
+#interstitial .ad-label{color:rgba(255,255,255,0.4);font-size:11px;margin-bottom:10px;letter-spacing:2px}
+#interstitial .ad-box{width:300px;height:250px;background:linear-gradient(135deg,#2d2d6e,#1a1a3e);border-radius:12px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.3);font-size:14px;border:1px solid rgba(255,255,255,0.1)}
+#interstitial .skip-btn{margin-top:20px;padding:8px 24px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:20px;cursor:pointer;font-size:13px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ad-banner">
+    <span class="ad-text">广告位招租 - 联系开发者</span>
+    <button class="sponsor-btn" onclick="showSponsor()">赞助</button>
+</div>
+<div id="sponsor-modal">
+    <div class="modal-content">
+        <h3>感谢支持</h3>
+        <p>您的赞助将帮助我们开发更多有趣的小游戏</p>
+        <div class="qr-placeholder">收款二维码</div>
+        <button class="modal-close" onclick="hideSponsor()">关闭</button>
+    </div>
+</div>
+<div id="interstitial">
+    <span class="ad-label">ADVERTISEMENT</span>
+    <div class="ad-box">广告内容</div>
+    <button class="skip-btn" onclick="hideInterstitial()">关闭广告</button>
+</div>
+
+<script>
+// ==================== 广告系统 ====================
+var sponsorModal=document.getElementById('sponsor-modal');
+var interstitial=document.getElementById('interstitial');
+var interstitialTimer=null;
+var gamesPlayed=0;
+function showSponsor(){sponsorModal.classList.add('active')}
+function hideSponsor(){sponsorModal.classList.remove('active')}
+function showInterstitial(){interstitial.classList.add('active')}
+function hideInterstitial(){interstitial.classList.remove('active')}
+function triggerGameEndAd(){
+    gamesPlayed++;
+    if(gamesPlayed%3===0){
+        setTimeout(showInterstitial,500);
+    }
+}
+sponsorModal.addEventListener('click',function(e){if(e.target===this)hideSponsor()});
+interstitial.addEventListener('click',function(e){if(e.target===this)hideInterstitial()});
+
+// ==================== Canvas 设置 ====================
+var canvas=document.getElementById('c');
+var ctx=canvas.getContext('2d');
+var W,H,dpr;
+var adBannerH=60;
+
+function resizeCanvas(){
+    dpr=window.devicePixelRatio||1;
+    W=window.innerWidth;
+    H=window.innerHeight-adBannerH;
+    canvas.width=W*dpr;
+    canvas.height=H*dpr;
+    canvas.style.width=W+'px';
+    canvas.style.height=H+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas();
+
+// ==================== 工具函数 ====================
+function lerp(a,b,t){return a+(b-a)*t}
+function easeInOut(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
+function easeOut(t){return 1-(1-t)*(1-t)*(1-t)}
+function rand(a,b){return a+Math.random()*(b-a)}
+function randInt(a,b){return Math.floor(rand(a,b+1))}
+function dist(x1,y1,x2,y2){return Math.sqrt((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2))}
+
+// ==================== 粒子系统 ====================
+var particles=[];
+function spawnParticle(x,y,color,count,speed,life){
+    for(var i=0;i<count;i++){
+        var angle=rand(0,Math.PI*2);
+        var spd=rand(speed*0.3,speed);
+        particles.push({
+            x:x,y:y,
+            vx:Math.cos(angle)*spd,
+            vy:Math.sin(angle)*spd,
+            life:life||rand(0.5,1.2),
+            maxLife:life||rand(0.5,1.2),
+            color:color||'rgba(255,220,100,1)',
+            size:rand(2,5)
+        });
+    }
+}
+function updateParticles(dt){
+    for(var i=particles.length-1;i>=0;i--){
+        var p=particles[i];
+        p.x+=p.vx*dt;
+        p.y+=p.vy*dt;
+        p.vy+=120*dt;
+        p.life-=dt;
+        if(p.life<=0)particles.splice(i,1);
+    }
+}
+function drawParticles(){
+    for(var i=0;i<particles.length;i++){
+        var p=particles[i];
+        var alpha=Math.max(0,p.life/p.maxLife);
+        ctx.globalAlpha=alpha;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size*alpha,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+// ==================== 背景星星 ====================
+var stars=[];
+function initStars(){
+    stars=[];
+    for(var i=0;i<80;i++){
+        stars.push({x:rand(0,W),y:rand(0,H),size:rand(0.5,2),twinkle:rand(0,Math.PI*2),speed:rand(0.5,2)});
+    }
+}
+initStars();
+function updateStars(dt){
+    for(var i=0;i<stars.length;i++){
+        stars[i].twinkle+=stars[i].speed*dt;
+    }
+}
+function drawStars(){
+    for(var i=0;i<stars.length;i++){
+        var s=stars[i];
+        var alpha=0.3+0.7*Math.abs(Math.sin(s.twinkle));
+        ctx.globalAlpha=alpha*0.6;
+        ctx.fillStyle='#fff';
+        ctx.beginPath();
+        ctx.arc(s.x,s.y,s.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+// ==================== 颜色定义 ====================
+var DISK_COLORS=[
+    ['#ff6b6b','#ee5a24'],
+    ['#ff9ff3','#f368e0'],
+    ['#feca57','#ff9f43'],
+    ['#48dbfb','#0abde3'],
+    ['#ff9ff3','#f368e0'],
+    ['#54a0ff','#2e86de'],
+    ['#5f27cd','#341f97'],
+    ['#01a3a4','#00cec9'],
+    ['#f9ca24','#f0932b']
+];
+
+// ==================== 游戏状态 ====================
+var STATE={MENU:0,PLAYING:1,ANIMATING:2,SOLVING:3,WIN:4};
+var G={
+    state:STATE.MENU,
+    diskCount:5,
+    towers:[[],[],[]],
+    selectedDisk:null,
+    selectedTower:-1,
+    moves:0,
+    minMoves:0,
+    timer:0,
+    timerRunning:false,
+    bestScores:{},
+    animating:false,
+    animQueue:[],
+    solveSteps:[],
+    solveIdx:0,
+    solveSpeed:0.5,
+    solveTimer:0,
+    hoverTower:-1,
+    menuAnim:0,
+    winAnim:0,
+    buttonPulse:0,
+    diskDropping:false,
+    dropAnim:null
+};
+
+// 加载最高分
+function loadBest(){
+    try{
+        var s=localStorage.getItem('hanoi_best');
+        if(s)G.bestScores=JSON.parse(s);
+    }catch(e){}
+}
+function saveBest(){
+    try{
+        localStorage.setItem('hanoi_best',JSON.stringify(G.bestScores));
+    }catch(e){}
+}
+loadBest();
+
+// ==================== 初始化游戏 ====================
+function initGame(){
+    G.towers=[[],[],[]];
+    for(var i=G.diskCount;i>=1;i--){
+        G.towers[0].push(i);
+    }
+    G.selectedDisk=null;
+    G.selectedTower=-1;
+    G.moves=0;
+    G.minMoves=Math.pow(2,G.diskCount)-1;
+    G.timer=0;
+    G.timerRunning=true;
+    G.state=STATE.PLAYING;
+    G.animating=false;
+    G.animQueue=[];
+    G.solveSteps=[];
+    G.solveIdx=0;
+    G.solveTimer=0;
+    G.winAnim=0;
+    G.diskDropping=false;
+    G.dropAnim=null;
+}
+
+// ==================== 汉诺塔求解 ====================
+function solveHanoi(n,from,to,aux){
+    if(n===0)return;
+    solveHanoi(n-1,from,aux,to);
+    G.solveSteps.push({from:from,to:to});
+    solveHanoi(n-1,aux,to,from);
+}
+
+function startAutoSolve(){
+    G.solveSteps=[];
+    solveHanoi(G.diskCount,0,2,1);
+    G.solveIdx=0;
+    G.solveTimer=0;
+    G.state=STATE.SOLVING;
+    G.timerRunning=true;
+    G.moves=0;
+    G.towers=[[],[],[]];
+    for(var i=G.diskCount;i>=1;i--){
+        G.towers[0].push(i);
+    }
+}
+
+// ==================== 移动验证 ====================
+function canMove(from,to){
+    if(G.towers[from].length===0)return false;
+    var disk=G.towers[from][G.towers[from].length-1];
+    if(G.towers[to].length===0)return true;
+    return disk<G.towers[to][G.towers[to].length-1];
+}
+
+function moveDisk(from,to){
+    if(!canMove(from,to))return false;
+    var disk=G.towers[from].pop();
+    G.towers[to].push(disk);
+    G.moves++;
+    spawnParticle(getTowerX(to),getDiskY(to,disk),'rgba(255,220,100,1)',8,80,0.8);
+    return true;
+}
+
+// ==================== 坐标计算 ====================
+function getTowerX(idx){
+    var spacing=W/4;
+    return spacing*(idx+1);
+}
+
+function getBaseY(){
+    return H*0.75;
+}
+
+function getDiskY(towerIdx,diskSize){
+    var baseY=getBaseY();
+    var idx=G.towers[towerIdx].indexOf(diskSize);
+    return baseY-(idx+1)*getDiskHeight();
+}
+
+function getDiskHeight(){
+    return Math.min(28,(H*0.45)/(G.diskCount+1));
+}
+
+function getDiskWidth(diskSize){
+    var maxW=W*0.2;
+    var minW=W*0.05;
+    return minW+(maxW-minW)*(diskSize-0.5)/G.diskCount;
+}
+
+// ==================== 碰撞检测 ====================
+function getTowerAtPos(x,y){
+    var towerW=W*0.25;
+    for(var i=0;i<3;i++){
+        var tx=getTowerX(i);
+        if(Math.abs(x-tx)<towerW/2)return i;
+    }
+    return -1;
+}
+
+function getTopDiskAtTower(towerIdx){
+    if(G.towers[towerIdx].length===0)return null;
+    return G.towers[towerIdx][G.towers[towerIdx].length-1];
+}
+
+// ==================== 动画系统 ====================
+function animateMove(from,to,callback){
+    G.animating=true;
+    var disk=G.towers[from][G.towers[from].length-1];
+    var startX=getTowerX(from);
+    var startY=getDiskY(from,disk);
+    var endX=getTowerX(to);
+    var peakY=H*0.15;
+    var endYBase=getBaseY()-(G.towers[to].length+1)*getDiskHeight();
+
+    G.dropAnim={
+        disk:disk,
+        from:from,
+        to:to,
+        phase:0,
+        t:0,
+        startX:startX,
+        startY:startY,
+        peakY:peakY,
+        endX:endX,
+        endYBase:endYBase,
+        diskIdx:G.towers[from].length-1,
+        callback:callback
+    };
+}
+
+function updateDropAnim(dt){
+    if(!G.dropAnim)return;
+    var a=G.dropAnim;
+    a.t+=dt*2.5;
+    if(a.t>1)a.t=1;
+
+    if(a.phase===0){
+        var t=easeInOut(a.t);
+        a.curX=lerp(a.startX,a.startX,t);
+        a.curY=lerp(a.startY,a.peakY,t);
+        if(a.t>=1){a.phase=1;a.t=0;}
+    }else if(a.phase===1){
+        var t=easeInOut(a.t);
+        a.curX=lerp(a.startX,a.endX,t);
+        a.curY=lerp(a.peakY,a.peakY,t);
+        if(a.t>=1){a.phase=2;a.t=0;}
+    }else{
+        var t=easeOut(a.t);
+        a.curX=lerp(a.endX,a.endX,t);
+        a.curY=lerp(a.peakY,a.endYBase,t);
+        if(a.t>=1){
+            var disk=G.towers[a.from].pop();
+            G.towers[a.to].push(disk);
+            G.moves++;
+            spawnParticle(a.endX,a.endYBase,'rgba(255,220,100,1)',12,100,1);
+            G.animating=false;
+            G.dropAnim=null;
+            if(a.callback)a.callback();
+        }
+    }
+}
+
+// ==================== 绘制函数 ====================
+function drawBackground(){
+    var grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#0a0a2e');
+    grad.addColorStop(0.5,'#1a1a4e');
+    grad.addColorStop(1,'#0d0d3d');
+    ctx.fillStyle=grad;
+    ctx.fillRect(0,0,W,H);
+    drawStars();
+}
+
+function drawTowerBase(){
+    var baseY=getBaseY();
+    var dh=getDiskHeight();
+
+    for(var i=0;i<3;i++){
+        var tx=getTowerX(i);
+
+        // 柱子
+        ctx.fillStyle='rgba(255,255,255,0.15)';
+        var pillarW=Math.max(8,W*0.01);
+        ctx.fillRect(tx-pillarW/2,baseY-G.diskCount*dh-dh,pillarW,G.diskCount*dh+dh);
+
+        // 底座
+        var baseW=W*0.22;
+        var baseH=dh*0.6;
+        ctx.fillStyle='rgba(255,255,255,0.08)';
+        ctx.beginPath();
+        ctx.roundRect(tx-baseW/2,baseY,baseW,baseH,6);
+        ctx.fill();
+
+        // 柱子标签
+        ctx.fillStyle='rgba(255,255,255,0.3)';
+        ctx.font=Math.max(12,W*0.015)+'px sans-serif';
+        ctx.textAlign='center';
+        ctx.fillText(['A','B','C'][i],tx,baseY+baseH+20);
+    }
+}
+
+function drawDisk(x,y,w,h,diskSize,isHover,isSelected){
+    var colorIdx=(diskSize-1)%DISK_COLORS.length;
+    var colors=DISK_COLORS[colorIdx];
+
+    var grad=ctx.createLinearGradient(x-w/2,y,x+w/2,y);
+    grad.addColorStop(0,colors[0]);
+    grad.addColorStop(1,colors[1]);
+
+    ctx.save();
+    if(isSelected){
+        ctx.shadowColor='rgba(255,255,255,0.6)';
+        ctx.shadowBlur=15;
+    }else if(isHover){
+        ctx.shadowColor='rgba(255,255,255,0.3)';
+        ctx.shadowBlur=8;
+    }
+
+    ctx.fillStyle=grad;
+    ctx.beginPath();
+    ctx.roundRect(x-w/2,y-h*0.45,w,h*0.9,6);
+    ctx.fill();
+
+    // 高光
+    ctx.fillStyle='rgba(255,255,255,0.2)';
+    ctx.beginPath();
+    ctx.roundRect(x-w/2+2,y-h*0.45+2,w-4,h*0.35,4);
+    ctx.fill();
+
+    // 数字
+    ctx.fillStyle='rgba(255,255,255,0.9)';
+    ctx.font='bold '+Math.min(16,h*0.6)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(diskSize,x,y);
+
+    ctx.restore();
+}
+
+function drawGameDisks(){
+    var dh=getDiskHeight();
+
+    for(var t=0;t<3;t++){
+        var tx=getTowerX(t);
+        var isHover=(t===G.hoverTower&&G.state===STATE.PLAYING&&!G.animating);
+
+        for(var d=0;d<G.towers[t].length;d++){
+            var disk=G.towers[t][d];
+            var y=getBaseY()-(d+1)*dh;
+            var w=getDiskWidth(disk);
+            var isSelected=(G.selectedTower===t&&d===G.towers[t].length-1&&G.selectedDisk===disk);
+            drawDisk(tx,y,w,dh,disk,isHover,isSelected);
+        }
+    }
+
+    // 动画中的磁盘
+    if(G.dropAnim){
+        var a=G.dropAnim;
+        var dh2=getDiskHeight();
+        var w=getDiskWidth(a.disk);
+        drawDisk(a.curX,a.curY,w,dh2,a.disk,false,true);
+    }
+}
+
+function drawUI(){
+    var pad=20;
+
+    // 步数
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+Math.max(16,W*0.02)+'px sans-serif';
+    ctx.textAlign='left';
+    ctx.fillText('步数: '+G.moves,pad,30);
+
+    // 最少步数
+    ctx.fillStyle='rgba(255,255,255,0.6)';
+    ctx.font=Math.max(13,W*0.015)+'px sans-serif';
+    ctx.fillText('最少: '+G.minMoves,pad,52);
+
+    // 计时
+    var min=Math.floor(G.timer/60);
+    var sec=Math.floor(G.timer%60);
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+Math.max(16,W*0.02)+'px sans-serif';
+    ctx.textAlign='right';
+    ctx.fillText((min<10?'0':'')+min+':'+(sec<10?'0':'')+sec,W-pad,30);
+
+    // 层数
+    ctx.fillStyle='rgba(255,255,255,0.6)';
+    ctx.font=Math.max(13,W*0.015)+'px sans-serif';
+    ctx.fillText(G.diskCount+'层',W-pad,52);
+
+    // 重置/求解按钮
+    if(G.state===STATE.PLAYING||G.state===STATE.ANIMATING||G.state===STATE.SOLVING){
+        var btnY=H*0.88;
+        var btnW=Math.min(100,W*0.12);
+        var btnH=36;
+
+        // 重置按钮
+        var rx=W/2-btnW-10;
+        ctx.fillStyle='rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.roundRect(rx-btnW/2,btnY-btnH/2,btnW,btnH,8);
+        ctx.fill();
+        ctx.strokeStyle='rgba(255,255,255,0.3)';
+        ctx.lineWidth=1;
+        ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.font=Math.max(13,W*0.015)+'px sans-serif';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        ctx.fillText('重置',rx,btnY);
+
+        // 求解按钮
+        var sx=W/2+btnW+10;
+        ctx.fillStyle='rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.roundRect(sx-btnW/2,btnY-btnH/2,btnW,btnH,8);
+        ctx.fill();
+        ctx.strokeStyle='rgba(255,255,255,0.3)';
+        ctx.lineWidth=1;
+        ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.fillText(G.state===STATE.SOLVING?'停止':'求解',sx,btnY);
+
+        G._resetBtn={x:rx,y:btnY,w:btnW,h:btnH};
+        G._solveBtn={x:sx,y:btnY,w:btnW,h:btnH};
+    }
+
+    // 求解速度控制
+    if(G.state===STATE.SOLVING){
+        var sy=H*0.82;
+        ctx.fillStyle='rgba(255,255,255,0.5)';
+        ctx.font=Math.max(12,W*0.013)+'px sans-serif';
+        ctx.textAlign='center';
+        ctx.fillText('速度: '+G.solveSpeed.toFixed(1)+'x',W/2,sy);
+        ctx.fillText('◀ ▶',W/2,sy+18);
+        G._speedArea={x:W/2-40,y:sy-5,w:80,h:25};
+    }
+}
+
+// ==================== 菜单界面 ====================
+function drawMenu(){
+    drawBackground();
+
+    G.menuAnim+=0.02;
+
+    // 标题
+    var titleY=H*0.2;
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+Math.max(40,W*0.06)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('汉 诺 塔',W/2,titleY);
+
+    // 副标题
+    ctx.fillStyle='rgba(255,255,255,0.6)';
+    ctx.font=Math.max(14,W*0.018)+'px sans-serif';
+    ctx.fillText('Tower of Hanoi',W/2,titleY+40);
+
+    // 层数选择
+    var selY=H*0.45;
+    ctx.fillStyle='rgba(255,255,255,0.7)';
+    ctx.font=Math.max(16,W*0.02)+'px sans-serif';
+    ctx.fillText('选择层数',W/2,selY-35);
+
+    var btnSize=Math.min(50,W*0.07);
+    var gap=Math.min(12,W*0.015);
+    var totalW=(btnSize+gap)*8-gap;
+    var startX=(W-totalW)/2;
+
+    G._menuBtns=[];
+    for(var i=3;i<=8;i++){
+        var x=startX+(i-3)*(btnSize+gap)+btnSize/2;
+        var y=selY;
+        var selected=(i===G.diskCount);
+        var pulse=Math.sin(G.menuAnim*3+i)*0.5+0.5;
+
+        if(selected){
+            ctx.shadowColor='rgba(100,200,255,0.5)';
+            ctx.shadowBlur=10+pulse*5;
+        }
+
+        var grad=ctx.createLinearGradient(x-btnSize/2,y-btnSize/2,x+btnSize/2,y+btnSize/2);
+        if(selected){
+            grad.addColorStop(0,'#48dbfb');
+            grad.addColorStop(1,'#0abde3');
+        }else{
+            grad.addColorStop(0,'rgba(255,255,255,0.1)');
+            grad.addColorStop(1,'rgba(255,255,255,0.05)');
+        }
+
+        ctx.fillStyle=grad;
+        ctx.beginPath();
+        ctx.roundRect(x-btnSize/2,y-btnSize/2,btnSize,btnSize,10);
+        ctx.fill();
+
+        ctx.strokeStyle=selected?'rgba(100,200,255,0.8)':'rgba(255,255,255,0.2)';
+        ctx.lineWidth=selected?2:1;
+        ctx.stroke();
+
+        ctx.shadowColor='transparent';
+        ctx.shadowBlur=0;
+
+        ctx.fillStyle=selected?'#fff':'rgba(255,255,255,0.7)';
+        ctx.font='bold '+Math.max(18,W*0.025)+'px sans-serif';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        ctx.fillText(i,x,y);
+
+        // 最少步数
+        ctx.fillStyle='rgba(255,255,255,0.4)';
+        ctx.font=Math.max(10,W*0.012)+'px sans-serif';
+        ctx.fillText((Math.pow(2,i)-1)+'步',x,y+btnSize/2+14);
+
+        G._menuBtns.push({x:x,y:y,size:btnSize,n:i});
+    }
+
+    // 最高分显示
+    var bestKey=G.diskCount+'disks';
+    var best=G.bestScores[bestKey];
+    if(best){
+        ctx.fillStyle='rgba(255,220,100,0.8)';
+        ctx.font=Math.max(13,W*0.015)+'px sans-serif';
+        ctx.fillText('最高记录: '+best.moves+'步 / '+best.time,W/2,selY+55);
+    }
+
+    // 开始按钮
+    var btnY=H*0.68;
+    var btnW=Math.min(200,W*0.3);
+    var btnH=50;
+    var pulse=Math.sin(G.menuAnim*4)*0.3+0.7;
+
+    ctx.shadowColor='rgba(100,200,255,'+pulse*0.5+')';
+    ctx.shadowBlur=15;
+
+    var grad=ctx.createLinearGradient(W/2-btnW/2,btnY-btnH/2,W/2+btnW/2,btnY+btnH/2);
+    grad.addColorStop(0,'#48dbfb');
+    grad.addColorStop(1,'#0abde3');
+    ctx.fillStyle=grad;
+    ctx.beginPath();
+    ctx.roundRect(W/2-btnW/2,btnY-btnH/2,btnW,btnH,btnH/2);
+    ctx.fill();
+
+    ctx.shadowColor='transparent';
+    ctx.shadowBlur=0;
+
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+Math.max(18,W*0.025)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('开始游戏',W/2,btnY);
+
+    G._startBtn={x:W/2,y:btnY,w:btnW,h:btnH};
+
+    // 操作说明
+    ctx.fillStyle='rgba(255,255,255,0.4)';
+    ctx.font=Math.max(12,W*0.014)+'px sans-serif';
+    ctx.fillText('点击磁盘或柱子进行移动 | 目标: 将所有磁盘移到C柱',W/2,H*0.82);
+    ctx.fillText('每次只能移动一个 | 大盘不能放在小盘上',W/2,H*0.86);
+}
+
+// ==================== 胜利界面 ====================
+function drawWin(){
+    drawBackground();
+
+    G.winAnim+=0.03;
+
+    // 标题
+    var titleY=H*0.22;
+    var scale=1+Math.sin(G.winAnim*2)*0.05;
+    ctx.save();
+    ctx.translate(W/2,titleY);
+    ctx.scale(scale,scale);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold '+Math.max(42,W*0.06)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('恭喜通关!',0,0);
+    ctx.restore();
+
+    // 评价
+    var rating='';
+    var ratingColor='';
+    if(G.moves<=G.minMoves){
+        rating='完美! 最少步数通关!';
+        ratingColor='#ffd700';
+    }else if(G.moves<=G.minMoves*1.5){
+        rating='优秀! 接近最少步数!';
+        ratingColor='#48dbfb';
+    }else if(G.moves<=G.minMoves*2){
+        rating='良好! 继续加油!';
+        ratingColor='#ff9ff3';
+    }else{
+        rating='已完成! 尝试更少步数';
+        ratingColor='rgba(255,255,255,0.7)';
+    }
+    ctx.fillStyle=ratingColor;
+    ctx.font=Math.max(16,W*0.02)+'px sans-serif';
+    ctx.fillText(rating,W/2,titleY+45);
+
+    // 统计
+    var statsY=H*0.42;
+    ctx.fillStyle='rgba(255,255,255,0.7)';
+    ctx.font=Math.max(14,W*0.018)+'px sans-serif';
+
+    var min=Math.floor(G.timer/60);
+    var sec=Math.floor(G.timer%60);
+    ctx.fillText('用时: '+(min<10?'0':'')+min+':'+(sec<10?'0':'')+sec,W/2,statsY);
+    ctx.fillText('步数: '+G.moves+' / 最少: '+G.minMoves,W/2,statsY+30);
+
+    // 最高分
+    var bestKey=G.diskCount+'disks';
+    var best=G.bestScores[bestKey];
+    var isNewBest=best&&best.moves===G.moves;
+    if(isNewBest){
+        ctx.fillStyle='#ffd700';
+        ctx.font='bold '+Math.max(15,W*0.018)+'px sans-serif';
+        ctx.fillText('新纪录!',W/2,statsY+65);
+    }else if(best){
+        ctx.fillStyle='rgba(255,255,255,0.5)';
+        ctx.font=Math.max(13,W*0.015)+'px sans-serif';
+        ctx.fillText('最高记录: '+best.moves+'步',W/2,statsY+65);
+    }
+
+    // 按钮
+    var btnY=H*0.68;
+    var btnW=Math.min(180,W*0.25);
+    var btnH=45;
+    var gap=20;
+
+    // 再来一局
+    var rx=W/2-btnW/2-gap/2;
+    var grad=ctx.createLinearGradient(rx-btnW/2,btnY-btnH/2,rx+btnW/2,btnY+btnH/2);
+    grad.addColorStop(0,'#48dbfb');
+    grad.addColorStop(1,'#0abde3');
+    ctx.fillStyle=grad;
+    ctx.beginPath();
+    ctx.roundRect(rx-btnW/2,btnY-btnH/2,btnW,btnH,btnH/2);
+    ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+Math.max(16,W*0.02)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('再来一局',rx,btnY);
+
+    // 返回菜单
+    var bx=W/2+btnW/2+gap/2;
+    ctx.fillStyle='rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.roundRect(bx-btnW/2,btnY-btnH/2,btnW,btnH,btnH/2);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.lineWidth=1;
+    ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.fillText('返回菜单',bx,btnY);
+
+    G._replayBtn={x:rx,y:btnY,w:btnW,h:btnH};
+    G._menuBtn={x:bx,y:btnY,w:btnW,h:btnH};
+}
+
+// ==================== 更新逻辑 ====================
+var lastTime=0;
+function update(timestamp){
+    var dt=(timestamp-lastTime)/1000;
+    lastTime=timestamp;
+    if(dt>0.1)dt=0.1;
+
+    updateStars(dt);
+    updateParticles(dt);
+
+    if(G.state===STATE.PLAYING||G.state===STATE.SOLVING){
+        if(G.timerRunning)G.timer+=dt;
+    }
+
+    if(G.state===STATE.SOLVING){
+        G.solveTimer+=dt;
+        var interval=G.solveSpeed;
+        while(G.solveTimer>=interval&&G.solveIdx<G.solveSteps.length){
+            G.solveTimer-=interval;
+            var step=G.solveSteps[G.solveIdx];
+            G.towers[step.to].push(G.towers[step.from].pop());
+            G.moves++;
+            spawnParticle(getTowerX(step.to),getDiskY(step.to,G.towers[step.to][G.towers[step.to].length-1]),'rgba(255,220,100,1)',6,60,0.6);
+            G.solveIdx++;
+        }
+        if(G.solveIdx>=G.solveSteps.length){
+            checkWin();
+        }
+    }
+
+    if(G.state===STATE.PLAYING||G.state===STATE.ANIMATING){
+        updateDropAnim(dt);
+        if(!G.dropAnim&&G.state===STATE.ANIMATING){
+            G.state=STATE.PLAYING;
+            checkWin();
+        }
+    }
+
+    if(G.state===STATE.WIN){
+        G.winAnim+=dt;
+        updateParticles(dt);
+    }
+}
+
+function checkWin(){
+    if(G.towers[2].length===G.diskCount){
+        G.state=STATE.WIN;
+        G.timerRunning=false;
+
+        // 保存最高分
+        var bestKey=G.diskCount+'disks';
+        var best=G.bestScores[bestKey];
+        if(!best||G.moves<best.moves){
+            G.bestScores[bestKey]={moves:G.moves,time:formatTime(G.timer)};
+            saveBest();
+        }
+
+        // 胜利粒子
+        for(var i=0;i<5;i++){
+            setTimeout(function(){
+                spawnParticle(rand(W*0.2,W*0.8),rand(H*0.2,H*0.5),'rgba(255,215,0,1)',20,150,1.5);
+            },i*200);
+        }
+
+        triggerGameEndAd();
+    }
+}
+
+function formatTime(t){
+    var min=Math.floor(t/60);
+    var sec=Math.floor(t%60);
+    return (min<10?'0':'')+min+':'+(sec<10?'0':'')+sec;
+}
+
+// ==================== 渲染 ====================
+function render(){
+    ctx.clearRect(0,0,W,H);
+
+    if(G.state===STATE.MENU){
+        drawMenu();
+        return;
+    }
+
+    if(G.state===STATE.WIN){
+        drawWin();
+        drawParticles();
+        return;
+    }
+
+    drawBackground();
+    drawTowerBase();
+    drawGameDisks();
+    drawUI();
+    drawParticles();
+}
+
+// ==================== 游戏循环 ====================
+function gameLoop(timestamp){
+    update(timestamp);
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ==================== 输入处理 ====================
+function handleStart(x,y){
+    if(G.state===STATE.MENU){
+        // 检查层数选择按钮
+        for(var i=0;i<G._menuBtns.length;i++){
+            var b=G._menuBtns[i];
+            if(Math.abs(x-b.x)<b.size/2&&Math.abs(y-b.y)<b.size/2){
+                G.diskCount=b.n;
+                return;
+            }
+        }
+        // 检查开始按钮
+        var sb=G._startBtn;
+        if(sb&&Math.abs(x-sb.x)<sb.w/2&&Math.abs(y-sb.y)<sb.h/2){
+            initGame();
+        }
+        return;
+    }
+
+    if(G.state===STATE.WIN){
+        var rb=G._replayBtn;
+        if(rb&&Math.abs(x-rb.x)<rb.w/2&&Math.abs(y-rb.y)<rb.h/2){
+            initGame();
+            return;
+        }
+        var mb=G._menuBtn;
+        if(mb&&Math.abs(x-mb.x)<mb.w/2&&Math.abs(y-mb.y)<mb.h/2){
+            G.state=STATE.MENU;
+            return;
+        }
+        return;
+    }
+
+    if(G.state===STATE.PLAYING&&!G.animating){
+        // 检查重置/求解按钮
+        var rb=G._resetBtn;
+        if(rb&&Math.abs(x-rb.x)<rb.w/2&&Math.abs(y-rb.y)<rb.h/2){
+            initGame();
+            return;
+        }
+        var sb=G._solveBtn;
+        if(sb&&Math.abs(x-sb.x)<sb.w/2&&Math.abs(y-sb.y)<sb.h/2){
+            startAutoSolve();
+            return;
+        }
+
+        // 检查磁盘点击
+        var tower=getTowerAtPos(x,y);
+        if(tower>=0){
+            if(G.selectedTower>=0){
+                // 尝试移动
+                if(tower!==G.selectedTower&&canMove(G.selectedTower,tower)){
+                    animateMove(G.selectedTower,tower);
+                    G.selectedDisk=null;
+                    G.selectedTower=-1;
+                }else{
+                    // 取消选择或选择新磁盘
+                    var disk=getTopDiskAtTower(tower);
+                    if(disk){
+                        G.selectedDisk=disk;
+                        G.selectedTower=tower;
+                    }else{
+                        G.selectedDisk=null;
+                        G.selectedTower=-1;
+                    }
+                }
+            }else{
+                // 选择磁盘
+                var disk=getTopDiskAtTower(tower);
+                if(disk){
+                    G.selectedDisk=disk;
+                    G.selectedTower=tower;
+                    spawnParticle(getTowerX(tower),getDiskY(tower,disk),'rgba(100,200,255,1)',5,40,0.5);
+                }
+            }
+        }
+    }
+
+    if(G.state===STATE.SOLVING){
+        var rb=G._resetBtn;
+        if(rb&&Math.abs(x-rb.x)<rb.w/2&&Math.abs(y-rb.y)<rb.h/2){
+            G.state=STATE.PLAYING;
+            initGame();
+            return;
+        }
+        var sb=G._solveBtn;
+        if(sb&&Math.abs(x-sb.x)<sb.w/2&&Math.abs(y-sb.y)<sb.h/2){
+            G.state=STATE.PLAYING;
+            G.solveSteps=[];
+            return;
+        }
+
+        // 速度控制
+        var sa=G._speedArea;
+        if(sa&&y>sa.y&&y<sa.y+sa.h){
+            if(x<W/2){
+                G.solveSpeed=Math.max(0.1,G.solveSpeed-0.1);
+            }else{
+                G.solveSpeed=Math.min(2,G.solveSpeed+0.1);
+            }
+        }
+    }
+}
+
+function handleMove(x,y){
+    if(G.state===STATE.MENU||G.state===STATE.WIN)return;
+    G.hoverTower=getTowerAtPos(x,y);
+}
+
+function handleEnd(x,y){
+    // 触屏处理
+    handleStart(x,y);
+}
+
+// 鼠标事件
+canvas.addEventListener('mousedown',function(e){
+    var rect=canvas.getBoundingClientRect();
+    handleStart(e.clientX-rect.left,e.clientY-rect.top);
+});
+canvas.addEventListener('mousemove',function(e){
+    var rect=canvas.getBoundingClientRect();
+    handleMove(e.clientX-rect.left,e.clientY-rect.top);
+});
+
+// 触屏事件
+canvas.addEventListener('touchstart',function(e){
+    e.preventDefault();
+    var touch=e.touches[0];
+    var rect=canvas.getBoundingClientRect();
+    handleStart(touch.clientX-rect.left,touch.clientY-rect.top);
+},{passive:false});
+canvas.addEventListener('touchend',function(e){
+    e.preventDefault();
+    if(e.changedTouches.length>0){
+        var touch=e.changedTouches[0];
+        var rect=canvas.getBoundingClientRect();
+        handleEnd(touch.clientX-rect.left,touch.clientY-rect.top);
+    }
+},{passive:false});
+
+// 键盘事件
+document.addEventListener('keydown',function(e){
+    if(G.state===STATE.MENU){
+        if(e.key==='Enter'||e.key===' '){
+            initGame();
+            return;
+        }
+        if(e.key==='ArrowLeft'&&G.diskCount>3){
+            G.diskCount--;
+        }
+        if(e.key==='ArrowRight'&&G.diskCount<8){
+            G.diskCount++;
+        }
+        return;
+    }
+
+    if(G.state===STATE.WIN){
+        if(e.key==='Enter'||e.key===' '){
+            initGame();
+        }
+        if(e.key==='Escape'){
+            G.state=STATE.MENU;
+        }
+        return;
+    }
+
+    if(G.state===STATE.PLAYING&&!G.animating){
+        // A/S/D 或 1/2/3 选择柱子
+        var towerMap={'a':0,'s':1,'d':2,'1':0,'2':1,'3':2};
+        var key=e.key.toLowerCase();
+        if(key in towerMap){
+            var tower=towerMap[key];
+            if(G.selectedTower>=0){
+                if(tower!==G.selectedTower&&canMove(G.selectedTower,tower)){
+                    animateMove(G.selectedTower,tower);
+                    G.selectedDisk=null;
+                    G.selectedTower=-1;
+                }else{
+                    var disk=getTopDiskAtTower(tower);
+                    if(disk){
+                        G.selectedDisk=disk;
+                        G.selectedTower=tower;
+                    }else{
+                        G.selectedDisk=null;
+                        G.selectedTower=-1;
+                    }
+                }
+            }else{
+                var disk=getTopDiskAtTower(tower);
+                if(disk){
+                    G.selectedDisk=disk;
+                    G.selectedTower=tower;
+                }
+            }
+        }
+        if(e.key==='r'||e.key==='R'){
+            initGame();
+        }
+        if(e.key==='Escape'){
+            G.state=STATE.MENU;
+        }
+    }
+
+    if(G.state===STATE.SOLVING){
+        if(e.key==='Escape'){
+            G.state=STATE.PLAYING;
+            initGame();
+        }
+        if(e.key==='ArrowLeft'){
+            G.solveSpeed=Math.max(0.1,G.solveSpeed-0.1);
+        }
+        if(e.key==='ArrowRight'){
+            G.solveSpeed=Math.min(2,G.solveSpeed+0.1);
+        }
+    }
+});
+
+// ==================== roundRect polyfill ====================
+if(!CanvasRenderingContext2D.prototype.roundRect){
+    CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+        if(typeof r==='number')r={tl:r,tr:r,br:r,bl:r};
+        this.moveTo(x+r.tl,y);
+        this.lineTo(x+w-r.tr,y);
+        this.quadraticCurveTo(x+w,y,x+w,y+r.tr);
+        this.lineTo(x+w,y+h-r.br);
+        this.quadraticCurveTo(x+w,y+h,x+w-r.br,y+h);
+        this.lineTo(x+r.bl,y+h);
+        this.quadraticCurveTo(x,y+h,x,y+h-r.bl);
+        this.lineTo(x,y+r.tl);
+        this.quadraticCurveTo(x,y,x+r.tl,y);
+        this.closePath();
+        return this;
+    };
+}
+
+// ==================== 帮助界面 ====================
+var showHelp=false;
+var helpBtn={x:0,y:0,w:0,h:0};
+
+function drawHelpBtn(){
+    var size=Math.min(36,W*0.04);
+    var x=W-size-15;
+    var y=15;
+    helpBtn={x:x,y:y,w:size,h:size};
+
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(x+size/2,y+size/2,size/2,0,Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.lineWidth=1;
+    ctx.stroke();
+
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+Math.max(16,size*0.6)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('?',x+size/2,y+size/2);
+}
+
+function drawHelpOverlay(){
+    ctx.fillStyle='rgba(0,0,0,0.75)';
+    ctx.fillRect(0,0,W,H);
+
+    var boxW=Math.min(400,W*0.85);
+    var boxH=Math.min(500,H*0.75);
+    var boxX=(W-boxW)/2;
+    var boxY=(H-boxH)/2;
+
+    // 背景框
+    var grad=ctx.createLinearGradient(boxX,boxY,boxX,boxY+boxH);
+    grad.addColorStop(0,'#1a1a4e');
+    grad.addColorStop(1,'#0a0a2e');
+    ctx.fillStyle=grad;
+    ctx.beginPath();
+    ctx.roundRect(boxX,boxY,boxW,boxH,16);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.15)';
+    ctx.lineWidth=1;
+    ctx.stroke();
+
+    // 标题
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+Math.max(22,W*0.028)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText('游戏规则',W/2,boxY+35);
+
+    // 规则内容
+    ctx.fillStyle='rgba(255,255,255,0.8)';
+    ctx.font=Math.max(14,W*0.017)+'px sans-serif';
+    ctx.textAlign='left';
+    var lines=[
+        '1. 有三根柱子A、B、C',
+        '2. A柱上有若干个大小不同的圆盘',
+        '3. 目标：将所有圆盘从A移到C柱',
+        '',
+        '规则：',
+        '  - 每次只能移动一个圆盘',
+        '  - 大盘不能放在小盘上面',
+        '  - 可以借助B柱作为辅助',
+        '',
+        '操作：',
+        '  鼠标/触屏：点击选中磁盘，再点击目标柱子',
+        '  键盘：A/S/D 或 1/2/3 选择柱子',
+        '  R 重置 | Esc 返回菜单',
+        '',
+        '最少步数 = 2^n - 1 (n为层数)',
+        '3层=7步 | 4层=15步 | 5层=31步'
+    ];
+    var lineH=Math.max(20,W*0.025);
+    var startY=boxY+65;
+    for(var i=0;i<lines.length;i++){
+        ctx.fillText(lines[i],boxX+25,startY+i*lineH);
+    }
+
+    // 关闭按钮
+    var closeBtnY=boxY+boxH-40;
+    var closeBtnW=100;
+    var closeBtnH=32;
+    ctx.fillStyle='rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.roundRect(W/2-closeBtnW/2,closeBtnY-closeBtnH/2,closeBtnW,closeBtnH,16);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font=Math.max(14,W*0.017)+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('关闭',W/2,closeBtnY);
+
+    G._helpCloseBtn={x:W/2,y:closeBtnY,w:closeBtnW,h:closeBtnH};
+}
+
+// ==================== 提示文字系统 ====================
+var hints=[];
+var lastHintTime=0;
+
+function addHint(text){
+    hints.push({text:text,y:H*0.5,alpha:1,life:2.5});
+}
+
+function updateHints(dt){
+    for(var i=hints.length-1;i>=0;i--){
+        hints[i].y-=30*dt;
+        hints[i].life-=dt;
+        if(hints[i].life<1)hints[i].alpha=hints[i].life;
+        if(hints[i].life<=0)hints.splice(i,1);
+    }
+}
+
+function drawHints(){
+    for(var i=0;i<hints.length;i++){
+        var h=hints[i];
+        ctx.globalAlpha=Math.max(0,h.alpha);
+        ctx.fillStyle='rgba(255,220,100,0.9)';
+        ctx.font='bold '+Math.max(16,W*0.02)+'px sans-serif';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        ctx.fillText(h.text,W/2,h.y);
+    }
+    ctx.globalAlpha=1;
+}
+
+// ==================== 移动历史记录 ====================
+var moveHistory=[];
+
+function recordMove(from,to){
+    moveHistory.push({from:from,to:to});
+}
+
+function undoMove(){
+    if(moveHistory.length===0||G.animating||G.state!==STATE.PLAYING)return false;
+    var last=moveHistory.pop();
+    var disk=G.towers[last.to].pop();
+    G.towers[last.from].push(disk);
+    G.moves--;
+    spawnParticle(getTowerX(last.from),getDiskY(last.from,disk),'rgba(100,200,255,1)',5,50,0.6);
+    addHint('撤销一步');
+    return true;
+}
+
+// ==================== 增强的初始化 ====================
+var origInitGame=initGame;
+initGame=function(){
+    moveHistory=[];
+    hints=[];
+    origInitGame();
+};
+
+// ==================== 增强的moveDisk ====================
+var origAnimateMove=animateMove;
+animateMove=function(from,to,callback){
+    origAnimateMove(from,to,function(){
+        recordMove(from,to);
+        if(callback)callback();
+    });
+};
+
+// ==================== 渲染增强 ====================
+var origRender=render;
+render=function(){
+    origRender();
+    updateHints(0);
+    drawHints();
+
+    // 帮助按钮（所有界面）
+    if(G.state!==STATE.WIN){
+        drawHelpBtn();
+    }
+
+    // 帮助遮罩
+    if(showHelp){
+        drawHelpOverlay();
+    }
+};
+
+// ==================== 更新增强 ====================
+var origUpdate=update;
+update=function(timestamp){
+    var dt=(timestamp-lastTime)/1000;
+    lastTime=timestamp;
+    if(dt>0.1)dt=0.1;
+    updateHints(dt);
+    origUpdate(timestamp);
+};
+
+// ==================== 输入增强 ====================
+var origHandleStart=handleStart;
+handleStart=function(x,y){
+    // 帮助关闭按钮
+    if(showHelp){
+        var cb=G._helpCloseBtn;
+        if(cb&&Math.abs(x-cb.x)<cb.w/2&&Math.abs(y-cb.y)<cb.h/2){
+            showHelp=false;
+            return;
+        }
+        showHelp=false;
+        return;
+    }
+
+    // 帮助按钮
+    if(Math.abs(x-helpBtn.x-helpBtn.w/2)<helpBtn.w/2&&Math.abs(y-helpBtn.y-helpBtn.h/2)<helpBtn.h/2){
+        showHelp=true;
+        return;
+    }
+
+    origHandleStart(x,y);
+};
+
+// ==================== 键盘增强 ====================
+document.addEventListener('keydown',function(e){
+    if(e.key==='h'||e.key==='H'){
+        showHelp=!showHelp;
+    }
+    if(e.key==='z'&&(e.ctrlKey||e.metaKey)){
+        e.preventDefault();
+        undoMove();
+    }
+    if(e.key==='u'||e.key==='U'){
+        undoMove();
+    }
+});
+
+// ==================== 启动 ====================
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

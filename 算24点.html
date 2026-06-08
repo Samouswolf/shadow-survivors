@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>算24点</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a}
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
+#ad-bar{position:fixed;bottom:0;left:0;width:100%;height:50px;background:linear-gradient(135deg,#1a1a3e,#2d1b69);
+display:flex;align-items:center;justify-content:center;z-index:100;border-top:2px solid #6c5ce7}
+#ad-bar span{color:#dfe6e9;font-size:14px;font-family:sans-serif}
+#ad-bar .sponsor-btn{margin-left:16px;padding:6px 16px;background:linear-gradient(135deg,#e17055,#d63031);
+border:none;border-radius:20px;color:#fff;font-size:13px;cursor:pointer;font-family:sans-serif}
+#sponsor-modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);
+z-index:200;align-items:center;justify-content:center}
+#sponsor-modal.show{display:flex}
+#sponsor-modal .modal-box{background:linear-gradient(135deg,#1a1a3e,#0d0d2b);border:2px solid #6c5ce7;
+border-radius:16px;padding:32px;max-width:360px;width:90%;text-align:center}
+#sponsor-modal h3{color:#ffeaa7;font-size:20px;margin-bottom:12px}
+#sponsor-modal p{color:#dfe6e9;font-size:14px;line-height:1.6;margin-bottom:20px}
+#sponsor-modal .close-btn{padding:8px 28px;background:#6c5ce7;border:none;border-radius:20px;color:#fff;
+font-size:14px;cursor:pointer;font-family:sans-serif}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<div id="ad-bar">
+<span>📢 精彩广告位招租 | 支持开发者</span>
+<button class="sponsor-btn" onclick="showSponsor()">❤ 赞助</button>
+</div>
+<div id="sponsor-modal">
+<div class="modal-box">
+<h3>❤ 支持我们</h3>
+<p>感谢您的游玩！<br>您的赞助是我们持续开发的动力。<br>每一份支持都弥足珍贵！</p>
+<button class="close-btn" onclick="hideSponsor()">好的</button>
+</div>
+</div>
+<script>
+// ========== 广告系统 ==========
+function showSponsor(){
+    document.getElementById('sponsor-modal').classList.add('show');
+    if(G && G.state==='playing') G.paused=true;
+}
+function hideSponsor(){
+    document.getElementById('sponsor-modal').classList.remove('show');
+    if(G && G.state==='playing') G.paused=false;
+}
+
+// ========== Canvas Setup ==========
+const canvas=document.getElementById('C');
+const ctx=canvas.getContext('2d');
+let W,H,SCALE;
+function resize(){
+    W=window.innerWidth;H=window.innerHeight;
+    const dpr=window.devicePixelRatio||1;
+    canvas.width=W*dpr;canvas.height=H*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    SCALE=Math.min(W/400,H/700);
+}
+resize();
+window.addEventListener('resize',resize);
+
+// ========== 常量 ==========
+const CARD_W=70*1.3,CARD_H=100*1.3;
+const SUITS=['♠','♥','♦','♣'];
+const SUIT_COLORS=['#dfe6e9','#e17055','#e17055','#dfe6e9'];
+const RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const OPS=['+','-','×','÷'];
+const OP_FUNCS=[
+    (a,b)=>a+b,
+    (a,b)=>a-b,
+    (a,b)=>a*b,
+    (a,b)=>b!==0?a/b:NaN
+];
+
+// ========== 题库生成 ==========
+function generateAllPuzzles(){
+    const puzzles=[];
+    for(let a=1;a<=13;a++){
+        for(let b=a;b<=13;b++){
+            for(let c=b;c<=13;c++){
+                for(let d=c;d<=13;d++){
+                    const nums=[a,b,c,d];
+                    if(canMake24(nums)){
+                        puzzles.push(nums);
+                    }
+                }
+            }
+        }
+    }
+    return puzzles;
+}
+
+function canMake24(nums){
+    const perms=permute(nums);
+    for(const p of perms){
+        for(let o1=0;o1<4;o1++){
+            for(let o2=0;o2<4;o2++){
+                for(let o3=0;o3<4;o3++){
+                    // ((a op b) op c) op d
+                    let r=OP_FUNCS[o1](p[0],p[1]);
+                    r=OP_FUNCS[o2](r,p[2]);
+                    r=OP_FUNCS[o3](r,p[3]);
+                    if(Math.abs(r-24)<1e-9) return true;
+                    // (a op b) op (c op d)
+                    r=OP_FUNCS[o1](p[0],p[1]);
+                    let r2=OP_FUNCS[o3](p[2],p[3]);
+                    let rr=OP_FUNCS[o2](r,r2);
+                    if(Math.abs(rr-24)<1e-9) return true;
+                    // a op ((b op c) op d)
+                    r=OP_FUNCS[o2](p[1],p[2]);
+                    r=OP_FUNCS[o3](r,p[3]);
+                    rr=OP_FUNCS[o1](p[0],r);
+                    if(Math.abs(rr-24)<1e-9) return true;
+                    // a op (b op (c op d))
+                    r=OP_FUNCS[o3](p[2],p[3]);
+                    r=OP_FUNCS[o2](p[1],r);
+                    rr=OP_FUNCS[o1](p[0],r);
+                    if(Math.abs(rr-24)<1e-9) return true;
+                    // (a op (b op c)) op d
+                    r=OP_FUNCS[o2](p[1],p[2]);
+                    r=OP_FUNCS[o1](p[0],r);
+                    rr=OP_FUNCS[o3](r,p[3]);
+                    if(Math.abs(rr-24)<1e-9) return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+function permute(arr){
+    if(arr.length<=1) return [arr];
+    const result=[];
+    for(let i=0;i<arr.length;i++){
+        const rest=[...arr.slice(0,i),...arr.slice(i+1)];
+        for(const p of permute(rest)){
+            result.push([arr[i],...p]);
+        }
+    }
+    return result;
+}
+
+function findSolution(nums){
+    const perms=permute(nums);
+    for(const p of perms){
+        for(let o1=0;o1<4;o1++){
+            for(let o2=0;o2<4;o2++){
+                for(let o3=0;o3<4;o3++){
+                    let r=OP_FUNCS[o1](p[0],p[1]);
+                    r=OP_FUNCS[o2](r,p[2]);
+                    r=OP_FUNCS[o3](r,p[3]);
+                    if(Math.abs(r-24)<1e-9)
+                        return `((${p[0]}${OPS[o1]}${p[1]})${OPS[o2]}${p[2]})${OPS[o3]}${p[3]}`;
+                    r=OP_FUNCS[o1](p[0],p[1]);
+                    let r2=OP_FUNCS[o3](p[2],p[3]);
+                    let rr=OP_FUNCS[o2](r,r2);
+                    if(Math.abs(rr-24)<1e-9)
+                        return `(${p[0]}${OPS[o1]}${p[1]})${OPS[o2]}(${p[2]}${OPS[o3]}${p[3]})`;
+                    r=OP_FUNCS[o2](p[1],p[2]);
+                    r=OP_FUNCS[o3](r,p[3]);
+                    rr=OP_FUNCS[o1](p[0],r);
+                    if(Math.abs(rr-24)<1e-9)
+                        return `${p[0]}${OPS[o1]}((${p[1]}${OPS[o2]}${p[2]})${OPS[o3]}${p[3]})`;
+                    r=OP_FUNCS[o3](p[2],p[3]);
+                    r=OP_FUNCS[o2](p[1],r);
+                    rr=OP_FUNCS[o1](p[0],r);
+                    if(Math.abs(rr-24)<1e-9)
+                        return `${p[0]}${OPS[o1]}(${p[1]}${OPS[o2]}(${p[2]}${OPS[o3]}${p[3]}))`;
+                    r=OP_FUNCS[o2](p[1],p[2]);
+                    r=OP_FUNCS[o1](p[0],r);
+                    rr=OP_FUNCS[o3](r,p[3]);
+                    if(Math.abs(rr-24)<1e-9)
+                        return `(${p[0]}${OPS[o1]}(${p[1]}${OPS[o2]}${p[2]}))${OPS[o3]}${p[3]}`;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+// ========== 粒子系统 ==========
+const particles=[];
+function spawnParticles(x,y,color,count){
+    for(let i=0;i<count;i++){
+        particles.push({
+            x,y,
+            vx:(Math.random()-0.5)*6,
+            vy:(Math.random()-0.5)*6-2,
+            life:1,
+            decay:0.015+Math.random()*0.02,
+            size:2+Math.random()*4,
+            color
+        });
+    }
+}
+function updateParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i];
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.1;
+        p.life-=p.decay;
+        if(p.life<=0) particles.splice(i,1);
+    }
+}
+function drawParticles(){
+    for(const p of particles){
+        ctx.globalAlpha=p.life;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+// ========== 背景星星 ==========
+const stars=[];
+for(let i=0;i<80;i++){
+    stars.push({
+        x:Math.random(),y:Math.random(),
+        size:0.5+Math.random()*2,
+        speed:0.0002+Math.random()*0.0005,
+        bright:0.3+Math.random()*0.7
+    });
+}
+function drawStars(){
+    for(const s of stars){
+        s.bright+=Math.sin(Date.now()*s.speed)*0.01;
+        const b=Math.max(0.2,Math.min(1,s.bright));
+        ctx.globalAlpha=b;
+        ctx.fillStyle='#fff';
+        ctx.beginPath();
+        ctx.arc(s.x*W,s.y*H,s.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+// ========== 游戏状态 ==========
+let ALL_PUZZLES=[];
+try{ALL_PUZZLES=generateAllPuzzles();}catch(e){ALL_PUZZLES=[];}
+if(ALL_PUZZLES.length<50){
+    // fallback: generate simple puzzles
+    ALL_PUZZLES=[];
+    for(let a=1;a<=10;a++) for(let b=1;b<=10;b++) for(let c=1;c<=10;c++) for(let d=1;d<=10;d++)
+        if(canMake24([a,b,c,d])) ALL_PUZZLES.push([a,b,c,d]);
+}
+// deduplicate
+const seen=new Set();
+ALL_PUZZLES=ALL_PUZZLES.filter(p=>{
+    const k=p.slice().sort((a,b)=>a-b).join(',');
+    if(seen.has(k)) return false; seen.add(k); return true;
+});
+
+const BEST_KEY='game24_best';
+const BEST_ROUND_KEY='game24_best_round';
+
+const G={
+    state:'menu', // menu, playing, gameover, paused
+    cards:[], // [{rank,suit,value,selected,x,y,targetX,targetY}]
+    selectedCards:[], // indices
+    selectedOp:-1, // 0-3
+    currentResult:0,
+    hasResult:false,
+    score:0,
+    round:0,
+    totalRounds:15,
+    timeLeft:60,
+    timer:0,
+    combo:0,
+    maxCombo:0,
+    bestScore:parseInt(localStorage.getItem(BEST_KEY))||0,
+    bestRound:parseInt(localStorage.getItem(BEST_ROUND_KEY))||0,
+    puzzleIndex:0,
+    puzzles:[],
+    hintUsed:false,
+    message:'',
+    messageTimer:0,
+    shakeTimer:0,
+    bgHue:0,
+    adShown:false,
+    interstitialTimer:0,
+    showInterstitial:false,
+    paused:false
+};
+
+function shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+        const j=Math.floor(Math.random()*(i+1));
+        [arr[i],arr[j]]=[arr[j],arr[i]];
+    }
+    return arr;
+}
+
+function newGame(){
+    G.state='playing';
+    G.score=0;G.round=0;G.combo=0;G.maxCombo=0;
+    G.timeLeft=60;G.timer=0;
+    G.puzzles=shuffle([...ALL_PUZZLES]).slice(0,G.totalRounds);
+    G.puzzleIndex=0;
+    G.message='';G.messageTimer=0;
+    G.hintUsed=false;
+    G.showInterstitial=false;G.interstitialTimer=0;G.adShown=false;
+    G.paused=false;
+    loadPuzzle();
+}
+
+function loadPuzzle(){
+    if(G.puzzleIndex>=G.puzzles.length){
+        endGame();return;
+    }
+    const puz=G.puzzles[G.puzzleIndex];
+    G.cards=puz.map((v,i)=>{
+        const suitIdx=Math.floor(Math.random()*4);
+        return{
+            rank:RANKS[v-1],suit:SUITS[suitIdx],value:v,
+            selected:false,
+            x:0,y:0,targetX:0,targetY:0
+        };
+    });
+    G.selectedCards=[];G.selectedOp=-1;
+    G.currentResult=0;G.hasResult=false;
+    G.hintUsed=false;
+    G.round=G.puzzleIndex+1;
+    G.timeLeft=60;
+    G.shakeTimer=0;
+    positionCards();
+}
+
+function positionCards(){
+    const cx=W/2;
+    const cy=H*0.45;
+    const gap=Math.min(CARD_W+12,W*0.85/4);
+    const startX=cx-gap*1.5;
+    for(let i=0;i<4;i++){
+        G.cards[i].targetX=startX+i*gap;
+        G.cards[i].targetY=cy;
+        G.cards[i].x=G.cards[i].targetX;
+        G.cards[i].y=-CARD_H;
+    }
+}
+
+function endGame(){
+    G.state='gameover';
+    if(G.score>G.bestScore){
+        G.bestScore=G.score;
+        localStorage.setItem(BEST_KEY,G.bestScore);
+    }
+    if(G.round>G.bestRound){
+        G.bestRound=G.round;
+        localStorage.setItem(BEST_ROUND_KEY,G.bestRound);
+    }
+    // Show interstitial ad after first game
+    if(!G.adShown){
+        G.showInterstitial=true;
+        G.interstitialTimer=180; // 3 seconds at 60fps
+        G.adShown=true;
+    }
+}
+
+function showMessage(msg,color){
+    G.message=msg;G.messageTimer=120;
+    G.messageColor=color||'#ffeaa7';
+}
+
+// ========== 输入处理 ==========
+function getCardAt(mx,my){
+    for(let i=3;i>=0;i--){
+        const c=G.cards[i];
+        if(!c) continue;
+        const dx=mx-(c.x+CARD_W/2);
+        const dy=my-(c.y+CARD_H/2);
+        if(Math.abs(dx)<CARD_W/2&&Math.abs(dy)<CARD_H/2) return i;
+    }
+    return -1;
+}
+
+function getOpAt(mx,my){
+    const cy=H*0.65;
+    const gap=Math.min(80,W*0.7/4);
+    const startX=W/2-gap*1.5;
+    for(let i=0;i<4;i++){
+        const ox=startX+i*gap+30;
+        if(Math.abs(mx-ox)<35&&Math.abs(my-cy)<30) return i;
+    }
+    return -1;
+}
+
+function getButtonAt(mx,my){
+    // Submit button
+    const bx=W/2,by=H*0.78;
+    if(Math.abs(mx-bx)<70&&Math.abs(my-by)<25) return 'submit';
+    // Hint button
+    const hx=W/2-90,hy=H*0.78;
+    if(Math.abs(mx-hx)<50&&Math.abs(my-hy)<25) return 'hint';
+    // Reset button
+    const rx=W/2+90,ry=H*0.78;
+    if(Math.abs(mx-rx)<50&&Math.abs(my-ry)<25) return 'reset';
+    // Skip button
+    const sx=W/2,sy=H*0.85;
+    if(Math.abs(mx-sx)<50&&Math.abs(my-sy)<22) return 'skip';
+    return null;
+}
+
+function handleTap(mx,my){
+    if(G.state!=='playing'||G.paused) return;
+    if(G.showInterstitial){
+        G.showInterstitial=false;return;
+    }
+    // Check op buttons
+    const op=getOpAt(mx,my);
+    if(op>=0){
+        G.selectedOp=op;
+        tryCalc();
+        return;
+    }
+    // Check card
+    const ci=getCardAt(mx,my);
+    if(ci>=0){
+        if(G.cards[ci].selected){
+            // deselect
+            G.cards[ci].selected=false;
+            G.selectedCards=G.selectedCards.filter(x=>x!==ci);
+            G.hasResult=false;
+            G.selectedOp=-1;
+        }else if(G.selectedCards.length<2){
+            G.cards[ci].selected=true;
+            G.selectedCards.push(ci);
+            if(G.selectedCards.length===2&&G.selectedOp>=0){
+                tryCalc();
+            }
+        }
+        return;
+    }
+    // Check buttons
+    const btn=getButtonAt(mx,my);
+    if(btn==='submit') submitAnswer();
+    else if(btn==='hint') showHint();
+    else if(btn==='reset') resetCards();
+    else if(btn==='skip') skipPuzzle();
+}
+
+function tryCalc(){
+    if(G.selectedCards.length!==2||G.selectedOp<0) return;
+    const a=G.cards[G.selectedCards[0]].value;
+    const b=G.cards[G.selectedCards[1]].value;
+    const op=G.selectedOp;
+    if(op===3&&b===0){
+        showMessage('不能除以零!','#e17055');
+        G.shakeTimer=15;
+        return;
+    }
+    const result=OP_FUNCS[op](a,b);
+    if(!isFinite(result)){
+        showMessage('计算错误!','#e17055');
+        G.shakeTimer=15;return;
+    }
+    // Keep first selected card as result, remove second
+    const keep=G.selectedCards[0];
+    const remove=G.selectedCards[1];
+    G.cards[keep].value=result;
+    G.cards[keep].rank=Number.isInteger(result)?(result>0&&result<=13?RANKS[result-1]:''+result):result.toFixed(2);
+    G.cards[keep].suit='';
+    G.cards[keep].selected=false;
+    // Remove the second card
+    G.cards.splice(remove>keep?remove:remove,1);
+    // Also fix the keep index if needed
+    G.selectedCards=[];G.selectedOp=-1;
+    G.hasResult=true;
+    G.currentResult=result;
+    spawnParticles(G.cards[0]?G.cards[0].x+CARD_W/2:W/2,G.cards[0]?G.cards[0].y+CARD_H/2:H/2,'#ffeaa7',10);
+}
+
+function submitAnswer(){
+    if(G.cards.length!==1){
+        showMessage('还需要继续计算!','#e17055');return;
+    }
+    const val=G.cards[0].value;
+    if(Math.abs(val-24)<1e-9){
+        // Correct!
+        const bonus=G.hintUsed?5:10;
+        const timeBonus=Math.floor(G.timeLeft/2);
+        const comboBonus=G.combo*2;
+        const pts=bonus+timeBonus+comboBonus;
+        G.score+=pts;
+        G.combo++;
+        if(G.combo>G.maxCombo) G.maxCombo=G.combo;
+        spawnParticles(W/2,H/2,'#00b894',30);
+        showMessage(`正确! +${pts}分 (连击×${G.combo})`,'#00b894');
+        setTimeout(()=>{G.puzzleIndex++;loadPuzzle();},800);
+    }else{
+        showMessage(`结果是${val.toFixed(2)},不是24!`,'#e17055');
+        G.combo=0;G.shakeTimer=15;
+    }
+}
+
+function resetCards(){
+    if(G.puzzleIndex<G.puzzles.length){
+        loadPuzzle();
+    }
+}
+
+function skipPuzzle(){
+    G.combo=0;
+    const sol=findSolution(G.puzzles[G.puzzleIndex]);
+    showMessage(sol?`答案: ${sol}`:'无解,跳过','#fdcb6e');
+    G.puzzleIndex++;
+    setTimeout(()=>loadPuzzle(),1500);
+}
+
+function showHint(){
+    if(G.hintUsed) return;
+    G.hintUsed=true;
+    const sol=findSolution(G.puzzles[G.puzzleIndex]);
+    if(sol){
+        showMessage(`提示: ${sol}`,'#fdcb6e');
+    }else{
+        showMessage('这题无法算出24点','#fdcb6e');
+    }
+}
+
+// ========== 事件监听 ==========
+canvas.addEventListener('click',e=>{
+    const rect=canvas.getBoundingClientRect();
+    handleTap(e.clientX-rect.left,e.clientY-rect.top);
+});
+canvas.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    const touch=e.touches[0];
+    const rect=canvas.getBoundingClientRect();
+    handleTap(touch.clientX-rect.left,touch.clientY-rect.top);
+},{passive:false});
+
+document.addEventListener('keydown',e=>{
+    if(G.state==='menu'){
+        if(e.key==='Enter'||e.key===' ') newGame();
+        return;
+    }
+    if(G.state==='gameover'){
+        if(e.key==='Enter'||e.key===' ') newGame();
+        return;
+    }
+    if(G.state!=='playing'||G.paused) return;
+    // Number keys 1-4 to select card
+    if(e.key>='1'&&e.key<='4'){
+        const ci=parseInt(e.key)-1;
+        if(ci<G.cards.length){
+            if(G.cards[ci].selected){
+                G.cards[ci].selected=false;
+                G.selectedCards=G.selectedCards.filter(x=>x!==ci);
+            }else if(G.selectedCards.length<2){
+                G.cards[ci].selected=true;
+                G.selectedCards.push(ci);
+                if(G.selectedCards.length===2&&G.selectedOp>=0) tryCalc();
+            }
+        }
+    }
+    // Op keys
+    if(e.key==='+') {G.selectedOp=0;if(G.selectedCards.length===2) tryCalc();}
+    if(e.key==='-') {G.selectedOp=1;if(G.selectedCards.length===2) tryCalc();}
+    if(e.key==='*'||e.key==='x'||e.key==='X') {G.selectedOp=2;if(G.selectedCards.length===2) tryCalc();}
+    if(e.key==='/') {G.selectedOp=3;if(G.selectedCards.length===2) tryCalc();}
+    // Enter to submit
+    if(e.key==='Enter') submitAnswer();
+    // H for hint
+    if(e.key==='h'||e.key==='H') showHint();
+    // R for reset
+    if(e.key==='r'||e.key==='R') resetCards();
+    // S for skip
+    if(e.key==='s'||e.key==='S') skipPuzzle();
+    // P for pause
+    if(e.key==='p'||e.key==='P'||e.key==='Escape'){
+        G.paused=!G.paused;
+    }
+});
+
+// ========== 绘制函数 ==========
+function drawBackground(){
+    G.bgHue=(G.bgHue+0.1)%360;
+    const grd=ctx.createLinearGradient(0,0,W,H);
+    grd.addColorStop(0,`hsl(${240+G.bgHue*0.1},60%,8%)`);
+    grd.addColorStop(0.5,`hsl(${260+G.bgHue*0.1},50%,12%)`);
+    grd.addColorStop(1,`hsl(${280+G.bgHue*0.1},60%,8%)`);
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,0,W,H);
+    drawStars();
+}
+
+function drawCard(c,idx){
+    const x=c.x,y=c.y;
+    const isSelected=c.selected;
+    const shake=G.shakeTimer>0?(Math.random()-0.5)*4:0;
+
+    ctx.save();
+    ctx.translate(x+CARD_W/2+shake,y+CARD_H/2);
+    // Animate
+    const dx=c.targetX-c.x;
+    const dy=c.targetY-c.y;
+    if(Math.abs(dx)>1) c.x+=dx*0.2;
+    if(Math.abs(dy)>1) c.y+=dy*0.2;
+
+    // Shadow
+    ctx.shadowColor=isSelected?'#ffeaa7':'rgba(0,0,0,0.5)';
+    ctx.shadowBlur=isSelected?20:8;
+    ctx.shadowOffsetY=4;
+
+    // Card bg
+    const grd=ctx.createLinearGradient(-CARD_W/2,-CARD_H/2,CARD_W/2,CARD_H/2);
+    grd.addColorStop(0,isSelected?'#ffeaa7':'#f8f9fa');
+    grd.addColorStop(1,isSelected?'#fdcb6e':'#dfe6e9');
+    ctx.fillStyle=grd;
+    roundRect(ctx,-CARD_W/2,-CARD_H/2,CARD_W,CARD_H,10);
+    ctx.fill();
+
+    ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+
+    // Border
+    ctx.strokeStyle=isSelected?'#e17055':'#636e72';
+    ctx.lineWidth=isSelected?3:1.5;
+    roundRect(ctx,-CARD_W/2,-CARD_H/2,CARD_W,CARD_H,10);
+    ctx.stroke();
+
+    // Number
+    const isRed=c.suit==='♥'||c.suit==='♦';
+    ctx.fillStyle=isSelected?'#2d3436':(isRed?'#d63031':'#2d3436');
+    ctx.font=`bold ${Math.floor(CARD_W*0.35)}px sans-serif`;
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    const displayText=c.rank.length>2?c.rank:c.rank+(c.suit||'');
+    ctx.fillText(displayText,0,-8);
+
+    // Index number
+    ctx.fillStyle=isSelected?'#e17055':'#b2bec3';
+    ctx.font=`${Math.floor(CARD_W*0.18)}px sans-serif`;
+    ctx.fillText(`[${idx+1}]`,0,CARD_H*0.3);
+
+    ctx.restore();
+}
+
+function roundRect(c,x,y,w,h,r){
+    c.beginPath();
+    c.moveTo(x+r,y);
+    c.lineTo(x+w-r,y);
+    c.quadraticCurveTo(x+w,y,x+w,y+r);
+    c.lineTo(x+w,y+h-r);
+    c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    c.lineTo(x+r,y+h);
+    c.quadraticCurveTo(x,y+h,x,y+h-r);
+    c.lineTo(x,y+r);
+    c.quadraticCurveTo(x,y,x+r,y);
+    c.closePath();
+}
+
+function drawOpButtons(){
+    const cy=H*0.65;
+    const gap=Math.min(80,W*0.7/4);
+    const startX=W/2-gap*1.5;
+    for(let i=0;i<4;i++){
+        const ox=startX+i*gap+30;
+        const isActive=G.selectedOp===i;
+        ctx.save();
+        ctx.translate(ox,cy);
+        ctx.shadowColor=isActive?'#6c5ce7':'rgba(0,0,0,0.3)';
+        ctx.shadowBlur=isActive?15:5;
+        const grd=ctx.createLinearGradient(-28,-22,28,22);
+        grd.addColorStop(0,isActive?'#6c5ce7':'#2d3436');
+        grd.addColorStop(1,isActive?'#a29bfe':'#636e72');
+        ctx.fillStyle=grd;
+        roundRect(ctx,-28,-22,56,44,10);
+        ctx.fill();
+        ctx.shadowBlur=0;
+        ctx.strokeStyle=isActive?'#ffeaa7':'#b2bec3';
+        ctx.lineWidth=isActive?2:1;
+        roundRect(ctx,-28,-22,56,44,10);
+        ctx.stroke();
+        ctx.fillStyle=isActive?'#ffeaa7':'#dfe6e9';
+        ctx.font='bold 24px sans-serif';
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(OPS[i],0,0);
+        ctx.restore();
+    }
+}
+
+function drawActionButtons(){
+    const by=H*0.78;
+    // Submit
+    ctx.save();
+    ctx.shadowColor='#00b894';ctx.shadowBlur=10;
+    const grd=ctx.createLinearGradient(W/2-70,by-25,W/2+70,by+25);
+    grd.addColorStop(0,'#00b894');grd.addColorStop(1,'#00cec9');
+    ctx.fillStyle=grd;
+    roundRect(ctx,W/2-70,by-25,140,50,12);
+    ctx.fill();ctx.shadowBlur=0;
+    ctx.fillStyle='#fff';ctx.font='bold 18px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('提交 (=24)',W/2,by);
+    ctx.restore();
+
+    // Hint
+    ctx.save();
+    ctx.fillStyle='#636e72';
+    roundRect(ctx,W/2-140,by-20,80,40,8);
+    ctx.fill();
+    ctx.fillStyle=G.hintUsed?'#b2bec3':'#ffeaa7';
+    ctx.font='bold 14px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(G.hintUsed?'已提示':'提示(H)',W/2-100,by);
+    ctx.restore();
+
+    // Reset
+    ctx.save();
+    ctx.fillStyle='#636e72';
+    roundRect(ctx,W/2+60,by-20,80,40,8);
+    ctx.fill();
+    ctx.fillStyle='#dfe6e9';ctx.font='bold 14px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('重置(R)',W/2+100,by);
+    ctx.restore();
+
+    // Skip
+    const sy=H*0.85;
+    ctx.save();
+    ctx.fillStyle='#636e72';
+    roundRect(ctx,W/2-40,sy-18,80,36,8);
+    ctx.fill();
+    ctx.fillStyle='#b2bec3';ctx.font='13px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('跳过(S)',W/2,sy);
+    ctx.restore();
+}
+
+function drawHUD(){
+    // Score
+    ctx.fillStyle='#ffeaa7';ctx.font='bold 20px sans-serif';
+    ctx.textAlign='left';ctx.textBaseline='top';
+    ctx.fillText(`分数: ${G.score}`,16,16);
+    // Round
+    ctx.textAlign='center';
+    ctx.fillStyle='#dfe6e9';
+    ctx.fillText(`第 ${G.round}/${G.totalRounds} 题`,W/2,16);
+    // Combo
+    if(G.combo>1){
+        ctx.fillStyle='#fdcb6e';
+        ctx.fillText(`连击 ×${G.combo}`,W/2,42);
+    }
+    // Timer
+    ctx.textAlign='right';
+    const tColor=G.timeLeft<10?'#e17055':'#00b894';
+    ctx.fillStyle=tColor;
+    ctx.fillText(`时间: ${G.timeLeft}s`,W-16,16);
+    // Timer bar
+    const barW=W-32;
+    const barH=6;
+    const barY=42;
+    ctx.fillStyle='#2d3436';
+    roundRect(ctx,16,barY,barW,barH,3);
+    ctx.fill();
+    ctx.fillStyle=tColor;
+    roundRect(ctx,16,barY,barW*(G.timeLeft/60),barH,3);
+    ctx.fill();
+    // Best
+    ctx.textAlign='left';
+    ctx.fillStyle='#b2bec3';ctx.font='13px sans-serif';
+    ctx.fillText(`最高: ${G.bestScore}`,16,56);
+}
+
+function drawMessage(){
+    if(G.messageTimer<=0) return;
+    G.messageTimer--;
+    const alpha=Math.min(1,G.messageTimer/30);
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=G.messageColor||'#ffeaa7';
+    ctx.font='bold 18px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(G.message,W/2,H*0.55);
+    ctx.globalAlpha=1;
+}
+
+function drawMenu(){
+    drawBackground();
+    // Title
+    const titleY=H*0.2;
+    ctx.save();
+    ctx.shadowColor='#6c5ce7';ctx.shadowBlur=30;
+    ctx.fillStyle='#ffeaa7';ctx.font=`bold ${Math.floor(48*SCALE)}px sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('算 24 点',W/2,titleY);
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#dfe6e9';ctx.font=`${Math.floor(16*SCALE)}px sans-serif`;
+    ctx.fillText('经典数学益智游戏',W/2,titleY+40*SCALE);
+    ctx.restore();
+
+    // 4 cards animation
+    const t=Date.now()/1000;
+    const demoCards=['A','7','8','9'];
+    const demoSuits=['♠','♥','♦','♣'];
+    const demoColors=['#dfe6e9','#e17055','#e17055','#dfe6e9'];
+    const gap=Math.min(CARD_W+12,W*0.85/4);
+    const startX=W/2-gap*1.5;
+    for(let i=0;i<4;i++){
+        const cx=startX+i*gap+CARD_W/2;
+        const cy=titleY+120*SCALE+Math.sin(t*2+i)*8;
+        ctx.save();
+        ctx.shadowColor='rgba(108,92,231,0.4)';ctx.shadowBlur=15;
+        const grd=ctx.createLinearGradient(cx-CARD_W/2,cy-CARD_H/2,cx+CARD_W/2,cy+CARD_H/2);
+        grd.addColorStop(0,'#f8f9fa');grd.addColorStop(1,'#dfe6e9');
+        ctx.fillStyle=grd;
+        roundRect(ctx,cx-CARD_W/2,cy-CARD_H/2,CARD_W,CARD_H,10);
+        ctx.fill();ctx.shadowBlur=0;
+        ctx.strokeStyle='#636e72';ctx.lineWidth=1.5;
+        roundRect(ctx,cx-CARD_W/2,cy-CARD_H/2,CARD_W,CARD_H,10);
+        ctx.stroke();
+        ctx.fillStyle=demoColors[i];ctx.font=`bold ${Math.floor(CARD_W*0.35)}px sans-serif`;
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(demoCards[i]+demoSuits[i],cx,cy-8);
+        ctx.restore();
+    }
+
+    // Start button
+    const btnY=H*0.58;
+    const pulse=1+Math.sin(t*3)*0.05;
+    ctx.save();
+    ctx.translate(W/2,btnY);
+    ctx.scale(pulse,pulse);
+    ctx.shadowColor='#e17055';ctx.shadowBlur=20;
+    const grd=ctx.createLinearGradient(-100,-30,100,30);
+    grd.addColorStop(0,'#e17055');grd.addColorStop(1,'#d63031');
+    ctx.fillStyle=grd;
+    roundRect(ctx,-100,-30,200,60,16);
+    ctx.fill();ctx.shadowBlur=0;
+    ctx.fillStyle='#fff';ctx.font=`bold ${Math.floor(22*SCALE)}px sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('开始游戏',0,0);
+    ctx.restore();
+
+    // Instructions
+    ctx.fillStyle='#b2bec3';ctx.font=`${Math.floor(13*SCALE)}px sans-serif`;
+    ctx.textAlign='center';
+    const iy=H*0.72;
+    ctx.fillText('用 + - × ÷ 将4张牌算出24',W/2,iy);
+    ctx.fillText('键盘: 1-4选牌, +-*/运算, Enter提交',W/2,iy+22*SCALE);
+    ctx.fillText('触屏: 点击选牌和运算符',W/2,iy+44*SCALE);
+
+    // Best score
+    ctx.fillStyle='#ffeaa7';ctx.font=`${Math.floor(15*SCALE)}px sans-serif`;
+    ctx.fillText(`最高分: ${G.bestScore} | 最佳轮次: ${G.bestRound}`,W/2,H*0.88);
+
+    // Click to start
+    ctx.fillStyle='#636e72';ctx.font=`${Math.floor(12*SCALE)}px sans-serif`;
+    ctx.fillText('点击任意处或按 Enter 开始',W/2,H*0.94);
+
+    // Click handler for menu
+    if(G._menuClickSet) return;
+    G._menuClickSet=true;
+    canvas.addEventListener('click',function menuClick(e){
+        if(G.state!=='menu') return;
+        // Remove this listener
+        canvas.removeEventListener('click',menuClick);
+        G._menuClickSet=false;
+        newGame();
+    });
+    canvas.addEventListener('touchstart',function menuTouch(e){
+        if(G.state!=='menu') return;
+        canvas.removeEventListener('touchstart',menuTouch);
+        G._menuTouchSet=false;
+        newGame();
+    },{once:true});
+}
+
+function drawGameOver(){
+    drawBackground();
+    const cy=H*0.3;
+    ctx.fillStyle='#ffeaa7';ctx.font=`bold ${Math.floor(36*SCALE)}px sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('游戏结束',W/2,cy);
+
+    ctx.fillStyle='#dfe6e9';ctx.font=`${Math.floor(20*SCALE)}px sans-serif`;
+    ctx.fillText(`最终得分: ${G.score}`,W/2,cy+50*SCALE);
+    ctx.fillText(`完成题数: ${G.round}/${G.totalRounds}`,W/2,cy+80*SCALE);
+    ctx.fillText(`最大连击: ${G.maxCombo}`,W/2,cy+110*SCALE);
+
+    if(G.score>=G.bestScore&&G.score>0){
+        ctx.fillStyle='#fdcb6e';ctx.font=`bold ${Math.floor(18*SCALE)}px sans-serif`;
+        ctx.fillText('新纪录!',W/2,cy+150*SCALE);
+        spawnParticles(W/2,cy+150*SCALE,'#fdcb6e',3);
+    }
+
+    // Restart button
+    const by=H*0.65;
+    ctx.save();
+    const t=Date.now()/1000;
+    const pulse=1+Math.sin(t*3)*0.05;
+    ctx.translate(W/2,by);ctx.scale(pulse,pulse);
+    ctx.shadowColor='#6c5ce7';ctx.shadowBlur=15;
+    const grd=ctx.createLinearGradient(-90,-25,90,25);
+    grd.addColorStop(0,'#6c5ce7');grd.addColorStop(1,'#a29bfe');
+    ctx.fillStyle=grd;
+    roundRect(ctx,-90,-25,180,50,14);
+    ctx.fill();ctx.shadowBlur=0;
+    ctx.fillStyle='#fff';ctx.font=`bold ${Math.floor(18*SCALE)}px sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('再来一局',0,0);
+    ctx.restore();
+
+    ctx.fillStyle='#b2bec3';ctx.font=`${Math.floor(13*SCALE)}px sans-serif`;
+    ctx.textAlign='center';
+    ctx.fillText('点击或按 Enter 重新开始',W/2,H*0.78);
+}
+
+function drawPaused(){
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#ffeaa7';ctx.font=`bold ${Math.floor(32*SCALE)}px sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('暂停',W/2,H*0.4);
+    ctx.fillStyle='#dfe6e9';ctx.font=`${Math.floor(16*SCALE)}px sans-serif`;
+    ctx.fillText('按 P 或 ESC 继续',W/2,H*0.5);
+}
+
+function drawInterstitial(){
+    if(!G.showInterstitial) return;
+    ctx.fillStyle='rgba(0,0,0,0.85)';
+    ctx.fillRect(0,0,W,H);
+    // Ad box
+    const bw=Math.min(320,W*0.85);
+    const bh=220;
+    const bx=(W-bw)/2;
+    const by=(H-bh)/2;
+    ctx.save();
+    ctx.shadowColor='#6c5ce7';ctx.shadowBlur=20;
+    const grd=ctx.createLinearGradient(bx,by,bx+bw,by+bh);
+    grd.addColorStop(0,'#1a1a3e');grd.addColorStop(1,'#0d0d2b');
+    ctx.fillStyle=grd;
+    roundRect(ctx,bx,by,bw,bh,16);
+    ctx.fill();ctx.shadowBlur=0;
+    ctx.strokeStyle='#6c5ce7';ctx.lineWidth=2;
+    roundRect(ctx,bx,by,bw,bh,16);
+    ctx.stroke();
+    // Ad content
+    ctx.fillStyle='#ffeaa7';ctx.font='bold 22px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('📢 广告时间',W/2,by+50);
+    ctx.fillStyle='#dfe6e9';ctx.font='15px sans-serif';
+    ctx.fillText('感谢游玩! 支持开发者持续创作',W/2,by+90);
+    ctx.fillText('精彩内容即将呈现...',W/2,by+120);
+    // Close button
+    ctx.fillStyle='#6c5ce7';
+    roundRect(ctx,W/2-50,by+bh-55,100,35,10);
+    ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';
+    ctx.fillText(`关闭 (${Math.ceil(G.interstitialTimer/60)})`,W/2,by+bh-38);
+    ctx.restore();
+}
+
+// ========== 游戏主循环 ==========
+function update(){
+    if(G.state==='playing'&&!G.paused&&!G.showInterstitial){
+        G.timer++;
+        if(G.timer>=60){
+            G.timer=0;
+            G.timeLeft--;
+            if(G.timeLeft<=0){
+                showMessage('时间到!','#e17055');
+                G.combo=0;
+                G.puzzleIndex++;
+                if(G.puzzleIndex>=G.puzzles.length) endGame();
+                else setTimeout(()=>loadPuzzle(),1000);
+            }
+        }
+        // Card entrance animation
+        for(const c of G.cards){
+            if(c.y<c.targetY-1) c.y+=(c.targetY-c.y)*0.15;
+        }
+    }
+    if(G.shakeTimer>0) G.shakeTimer--;
+    if(G.showInterstitial){
+        G.interstitialTimer--;
+        if(G.interstitialTimer<=0) G.showInterstitial=false;
+    }
+    updateParticles();
+}
+
+function render(){
+    if(G.state==='menu'){
+        drawMenu();return;
+    }
+    drawBackground();
+    if(G.state==='gameover'){
+        drawGameOver();
+        drawParticles();
+        return;
+    }
+    // Playing state
+    drawHUD();
+    // Cards
+    for(let i=0;i<G.cards.length;i++){
+        drawCard(G.cards[i],i);
+    }
+    drawOpButtons();
+    drawActionButtons();
+    drawMessage();
+    drawParticles();
+    if(G.paused) drawPaused();
+    if(G.showInterstitial) drawInterstitial();
+}
+
+function gameLoop(){
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// ========== 启动 ==========
+gameLoop();
+</script>
+</body>
+</html>
