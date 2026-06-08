@@ -1,0 +1,1506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>跳远</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #1a0a2e;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+canvas { display: block; }
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ============================================================
+// 跳远 - Long Jump Game
+// ============================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// ============================================================
+// 1. 常量定义
+// ============================================================
+const CONFIG = {
+    // 物理
+    GRAVITY: 0.45,
+    MAX_RUN_SPEED: 8,
+    RUN_ACCEL: 0.15,
+    JUMP_POWER_MIN: 8,
+    JUMP_POWER_MAX: 16,
+    JUMP_CHARGE_RATE: 0.12,
+    ANGLE_MIN: 30,
+    ANGLE_MAX: 70,
+    ANGLE_CHARGE_RATE: 0.5,
+    AIR_DRAG: 0.998,
+    PLAYER_RADIUS: 14,
+    SAND_DUST_COUNT: 20,
+
+    // 场地
+    RUNWAY_LENGTH: 400,
+    SAND_PIT_LENGTH: 300,
+    SAND_PIT_START: 450,
+    GROUND_Y_RATIO: 0.72,
+    TRACK_LINES: 8,
+
+    // 视觉
+    PARTICLE_COUNT: 40,
+    TRAIL_LENGTH: 60,
+
+    // 音频
+    AUDIO_ENABLED: true
+};
+
+// ============================================================
+// 2. 颜色主题
+// ============================================================
+const COLORS = {
+    skyTop: '#0a0025',
+    skyBottom: '#1a2a5e',
+    runway: '#8B7355',
+    runwayLine: '#FFFFFF',
+    sand: '#F4D03F',
+    sandDark: '#D4AC0D',
+    grass: '#27AE60',
+    player: '#E74C3C',
+    playerShadow: 'rgba(0,0,0,0.3)',
+    powerBar: '#2ECC71',
+    powerBarBg: 'rgba(0,0,0,0.5)',
+    angleBar: '#3498DB',
+    distanceText: '#F1C40F',
+    uiText: '#FFFFFF',
+    uiDim: 'rgba(255,255,255,0.5)',
+    particle: ['#F39C12', '#E74C3C', '#F1C40F', '#FFFFFF', '#3498DB'],
+    star: '#F1C40F',
+    cloud: 'rgba(255,255,255,0.15)',
+    banner: '#2C3E50'
+};
+
+// ============================================================
+// 3. 游戏数据
+// ============================================================
+const DISTANCE_RECORDS = [
+    { range: [0, 3], label: '初学者', stars: 0 },
+    { range: [3, 5], label: '新手', stars: 1 },
+    { range: [5, 7], label: '业余', stars: 2 },
+    { range: [7, 9], label: '运动员', stars: 3 },
+    { range: [9, 11], label: '高手', stars: 4 },
+    { range: [11, 14], label: '精英', stars: 5 },
+    { range: [14, 20], label: '传奇', stars: 6 }
+];
+
+const TIPS = [
+    '按住空格助跑，松开起跳',
+    '起跳角度45度最远',
+    '速度越快跳得越远',
+    '完美起跳可以获得额外距离',
+    '助跑节奏很重要',
+    '触屏：长按助跑，松开起跳'
+];
+
+// ============================================================
+// 4. 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, ready, running, jumping, landing, result, gameover
+    score: 0,
+    round: 0,
+    maxRounds: 5,
+    bestScore: 0,
+    currentDistance: 0,
+    bestRound: 0,
+    attempts: [],
+
+    // 玩家
+    player: {
+        x: 50,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        speed: 0,
+        angle: 45,
+        power: 0,
+        isCharging: false,
+        isAngleCharging: false,
+        angleDir: 1,
+        grounded: true,
+        phase: 'idle', // idle, running, charging_angle, airborne, landed
+        animFrame: 0,
+        animTimer: 0,
+        trail: [],
+        rotation: 0
+    },
+
+    // 场地
+    camera: { x: 0 },
+    groundY: 0,
+    runwayEnd: 0,
+    sandPitStart: 0,
+    sandPitEnd: 0,
+
+    // 特效
+    particles: [],
+    sandDust: [],
+    clouds: [],
+    stars: [],
+    screenShake: 0,
+
+    // UI
+    showTips: true,
+    tipIndex: 0,
+    fadeAlpha: 1,
+    fadeDir: 0,
+    adTimer: 0,
+    adInterval: 180000, // 3分钟
+    showAd: false,
+    showSponsor: false,
+
+    // 时间
+    lastTime: 0,
+    dt: 0
+};
+
+// ============================================================
+// 5. 音频系统
+// ============================================================
+var audioCtx = null;
+
+function initAudio() {
+    if (audioCtx) return;
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(e) {}
+}
+
+function playSound(type) {
+    if (!audioCtx || !CONFIG.AUDIO_ENABLED) return;
+    try {
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        var now = audioCtx.currentTime;
+        switch(type) {
+            case 'run':
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(120, now);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+                osc.start(now);
+                osc.stop(now + 0.05);
+                break;
+            case 'charge':
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.linearRampToValueAtTime(600, now + 0.3);
+                gain.gain.setValueAtTime(0.08, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+                break;
+            case 'jump':
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.linearRampToValueAtTime(800, now + 0.2);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+                break;
+            case 'land':
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(50, now + 0.3);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+                break;
+            case 'record':
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523, now);
+                osc.frequency.setValueAtTime(659, now + 0.1);
+                osc.frequency.setValueAtTime(784, now + 0.2);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+                osc.start(now);
+                osc.stop(now + 0.4);
+                break;
+            case 'click':
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, now);
+                gain.gain.setValueAtTime(0.08, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+                osc.start(now);
+                osc.stop(now + 0.08);
+                break;
+            case 'fail':
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.linearRampToValueAtTime(80, now + 0.4);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+                osc.start(now);
+                osc.stop(now + 0.4);
+                break;
+        }
+    } catch(e) {}
+}
+
+// ============================================================
+// 6. 响应式画布
+// ============================================================
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    G.groundY = canvas.height * CONFIG.GROUND_Y_RATIO;
+    G.runwayEnd = CONFIG.RUNWAY_LENGTH;
+    G.sandPitStart = CONFIG.SAND_PIT_START;
+    G.sandPitEnd = CONFIG.SAND_PIT_START + CONFIG.SAND_PIT_LENGTH;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============================================================
+// 7. 初始化函数
+// ============================================================
+function loadBestScore() {
+    try {
+        var s = localStorage.getItem('longjump_best');
+        if (s) G.bestScore = parseFloat(s);
+    } catch(e) {}
+}
+
+function saveBestScore() {
+    try {
+        localStorage.setItem('longjump_best', G.bestScore.toString());
+    } catch(e) {}
+}
+
+function initGame() {
+    G.state = 'ready';
+    G.score = 0;
+    G.round = 0;
+    G.attempts = [];
+    G.bestRound = 0;
+    G.currentDistance = 0;
+    G.showAd = false;
+    G.showSponsor = false;
+    resetRound();
+    initClouds();
+    initStars();
+}
+
+function resetRound() {
+    var p = G.player;
+    p.x = 50;
+    p.y = G.groundY;
+    p.vx = 0;
+    p.vy = 0;
+    p.speed = 0;
+    p.angle = 45;
+    p.power = 0;
+    p.isCharging = false;
+    p.isAngleCharging = false;
+    p.angleDir = 1;
+    p.grounded = true;
+    p.phase = 'idle';
+    p.animFrame = 0;
+    p.animTimer = 0;
+    p.trail = [];
+    p.rotation = 0;
+    G.camera.x = 0;
+    G.particles = [];
+    G.sandDust = [];
+    G.currentDistance = 0;
+    G.showTips = true;
+    G.tipIndex = Math.floor(Math.random() * TIPS.length);
+}
+
+function initClouds() {
+    G.clouds = [];
+    for (var i = 0; i < 8; i++) {
+        G.clouds.push({
+            x: Math.random() * 1200,
+            y: 30 + Math.random() * (G.groundY * 0.5),
+            w: 60 + Math.random() * 100,
+            h: 20 + Math.random() * 30,
+            speed: 0.1 + Math.random() * 0.3
+        });
+    }
+}
+
+function initStars() {
+    G.stars = [];
+    for (var i = 0; i < 100; i++) {
+        G.stars.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * (G.groundY * 0.8),
+            r: 0.5 + Math.random() * 1.5,
+            twinkle: Math.random() * Math.PI * 2,
+            speed: 0.02 + Math.random() * 0.05
+        });
+    }
+}
+
+// ============================================================
+// 8. 粒子系统
+// ============================================================
+function spawnParticles(x, y, count, type) {
+    for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = type === 'sand' ? (1 + Math.random() * 4) : (1 + Math.random() * 3);
+        var life = type === 'sand' ? (20 + Math.random() * 30) : (30 + Math.random() * 40);
+        G.particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - (type === 'jump' ? 2 : 0),
+            life: life,
+            maxLife: life,
+            r: type === 'sand' ? (2 + Math.random() * 3) : (1.5 + Math.random() * 2.5),
+            color: type === 'sand' ? COLORS.sand : COLORS.particle[Math.floor(Math.random() * COLORS.particle.length)],
+            type: type
+        });
+    }
+}
+
+function updateParticles() {
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.type === 'sand' || p.type === 'land') {
+            p.vy += 0.15;
+        } else {
+            p.vy += 0.05;
+        }
+        p.vx *= 0.98;
+        p.life--;
+        if (p.life <= 0) {
+            G.particles.splice(i, 1);
+        }
+    }
+}
+
+function drawParticles() {
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        var alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x - G.camera.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// 9. 游戏逻辑
+// ============================================================
+function updatePlayer() {
+    var p = G.player;
+
+    switch(p.phase) {
+        case 'idle':
+            p.animTimer++;
+            if (p.animTimer > 60) {
+                p.animTimer = 0;
+            }
+            break;
+
+        case 'running':
+            // 加速
+            p.speed = Math.min(p.speed + CONFIG.RUN_ACCEL, CONFIG.MAX_RUN_SPEED);
+            p.x += p.speed;
+            p.animTimer++;
+            if (p.animTimer % 6 === 0) {
+                p.animFrame = (p.animFrame + 1) % 4;
+                playSound('run');
+            }
+
+            // 到达起跳区
+            if (p.x >= G.runwayEnd - 20) {
+                p.phase = 'idle';
+                p.speed = 0;
+            }
+            break;
+
+        case 'charging_angle':
+            // 角度充能
+            p.angle += CONFIG.ANGLE_CHARGE_RATE * p.angleDir;
+            if (p.angle >= CONFIG.ANGLE_MAX) {
+                p.angleDir = -1;
+            } else if (p.angle <= CONFIG.ANGLE_MIN) {
+                p.angleDir = 1;
+            }
+            break;
+
+        case 'airborne':
+            // 空中物理
+            p.vx = p.speed * Math.cos(p.angle * Math.PI / 180);
+            p.vy += CONFIG.GRAVITY;
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vx *= CONFIG.AIR_DRAG;
+
+            // 旋转
+            p.rotation += (p.vy > 0 ? 3 : -1) * 0.5;
+
+            // 轨迹
+            p.trail.push({ x: p.x, y: p.y });
+            if (p.trail.length > CONFIG.TRAIL_LENGTH) {
+                p.trail.shift();
+            }
+
+            // 落地检测
+            if (p.y >= G.groundY) {
+                p.y = G.groundY;
+                p.vy = 0;
+                p.vx = 0;
+                p.grounded = true;
+                p.phase = 'landed';
+                p.rotation = 0;
+                handleLanding();
+            }
+
+            // 相机跟随
+            var targetCam = Math.max(0, p.x - canvas.width * 0.4);
+            G.camera.x += (targetCam - G.camera.x) * 0.08;
+            break;
+
+        case 'landed':
+            // 落地后等待
+            break;
+    }
+}
+
+function handleLanding() {
+    var p = G.player;
+    var landX = p.x;
+    var distance = 0;
+    var foul = false;
+    var inSand = false;
+
+    // 判断是否在沙坑内
+    if (landX < G.sandPitStart) {
+        // 踩线或未到沙坑 - 犯规
+        foul = true;
+        distance = 0;
+        playSound('fail');
+    } else if (landX > G.sandPitEnd) {
+        // 超出沙坑
+        distance = (G.sandPitEnd - G.runwayEnd) / 50; // 转换为米
+        inSand = true;
+    } else {
+        distance = (landX - G.runwayEnd) / 50; // 转换为米
+        inSand = true;
+    }
+
+    if (inSand) {
+        spawnParticles(p.x, p.y, CONFIG.SAND_DUST_COUNT, 'sand');
+        playSound('land');
+        G.screenShake = 8;
+    }
+
+    G.currentDistance = Math.max(0, distance);
+    G.round++;
+    G.attempts.push({
+        round: G.round,
+        distance: G.currentDistance,
+        foul: foul
+    });
+
+    // 更新最佳
+    if (!foul && G.currentDistance > G.bestRound) {
+        G.bestRound = G.currentDistance;
+    }
+
+    // 总分
+    if (!foul) {
+        G.score += G.currentDistance;
+    }
+
+    G.state = 'result';
+
+    // 检查是否破纪录
+    if (G.score > G.bestScore) {
+        G.bestScore = G.score;
+        saveBestScore();
+        playSound('record');
+    }
+
+    // 检查是否结束
+    if (G.round >= G.maxRounds) {
+        setTimeout(function() {
+            G.state = 'gameover';
+        }, 2000);
+    }
+}
+
+function startRunning() {
+    if (G.state !== 'ready') return;
+    var p = G.player;
+    p.phase = 'running';
+    p.isCharging = true;
+    G.state = 'running';
+    initAudio();
+    playSound('charge');
+}
+
+function stopRunning() {
+    if (G.state !== 'running') return;
+    var p = G.player;
+    if (p.x < G.runwayEnd - 50) {
+        // 太早停止，继续跑
+        return;
+    }
+    p.isCharging = false;
+    p.phase = 'charging_angle';
+    G.state = 'jumping';
+    playSound('charge');
+}
+
+function doJump() {
+    if (G.state !== 'jumping') return;
+    var p = G.player;
+    var speedFactor = p.speed / CONFIG.MAX_RUN_SPEED;
+    var jumpPower = CONFIG.JUMP_POWER_MIN + (CONFIG.JUMP_POWER_MAX - CONFIG.JUMP_POWER_MIN) * speedFactor;
+
+    p.vx = p.speed * Math.cos(p.angle * Math.PI / 180);
+    p.vy = -jumpPower * Math.sin(p.angle * Math.PI / 180);
+    p.grounded = false;
+    p.phase = 'airborne';
+    G.state = 'jumping';
+
+    spawnParticles(p.x, p.y, 8, 'jump');
+    playSound('jump');
+}
+
+// ============================================================
+// 10. 渲染函数
+// ============================================================
+function drawBackground() {
+    // 天空渐变
+    var skyGrad = ctx.createLinearGradient(0, 0, 0, G.groundY);
+    skyGrad.addColorStop(0, COLORS.skyTop);
+    skyGrad.addColorStop(1, COLORS.skyBottom);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, canvas.width, G.groundY);
+
+    // 星星
+    for (var i = 0; i < G.stars.length; i++) {
+        var s = G.stars[i];
+        s.twinkle += s.speed;
+        var alpha = 0.3 + Math.sin(s.twinkle) * 0.4;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 云朵
+    for (var i = 0; i < G.clouds.length; i++) {
+        var c = G.clouds[i];
+        c.x += c.speed;
+        if (c.x > canvas.width + 100) c.x = -c.w;
+        ctx.fillStyle = COLORS.cloud;
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y, c.w / 2, c.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(c.x - c.w * 0.25, c.y + 5, c.w * 0.3, c.h * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(c.x + c.w * 0.25, c.y + 3, c.w * 0.35, c.h * 0.45, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 地面
+    ctx.fillStyle = COLORS.grass;
+    ctx.fillRect(0, G.groundY, canvas.width, canvas.height - G.groundY);
+
+    // 跑道
+    var offsetX = -G.camera.x;
+    ctx.fillStyle = COLORS.runway;
+    ctx.fillRect(offsetX, G.groundY, CONFIG.RUNWAY_LENGTH, 30);
+
+    // 跑道线
+    ctx.strokeStyle = COLORS.runwayLine;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([15, 10]);
+    ctx.beginPath();
+    ctx.moveTo(offsetX, G.groundY + 15);
+    ctx.lineTo(offsetX + CONFIG.RUNWAY_LENGTH, G.groundY + 15);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 起跳板
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(offsetX + G.runwayEnd - 10, G.groundY - 3, 10, 33);
+    ctx.fillStyle = '#E74C3C';
+    ctx.fillRect(offsetX + G.runwayEnd - 8, G.groundY, 6, 27);
+
+    // 沙坑
+    var sandGrad = ctx.createLinearGradient(0, G.groundY, 0, G.groundY + 30);
+    sandGrad.addColorStop(0, COLORS.sand);
+    sandGrad.addColorStop(1, COLORS.sandDark);
+    ctx.fillStyle = sandGrad;
+    ctx.fillRect(offsetX + G.sandPitStart, G.groundY, CONFIG.SAND_PIT_LENGTH, 30);
+
+    // 沙坑纹理
+    ctx.fillStyle = 'rgba(212, 172, 13, 0.3)';
+    for (var i = 0; i < 20; i++) {
+        var sx = G.sandPitStart + Math.random() * CONFIG.SAND_PIT_LENGTH;
+        var sy = G.groundY + Math.random() * 25;
+        ctx.beginPath();
+        ctx.arc(offsetX + sx, sy, 1 + Math.random() * 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 距离标记
+    ctx.fillStyle = COLORS.uiDim;
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    for (var d = 2; d <= 14; d += 2) {
+        var markX = G.runwayEnd + d * 50;
+        if (markX <= G.sandPitEnd) {
+            ctx.fillText(d + 'm', offsetX + markX, G.groundY + 45);
+            ctx.beginPath();
+            ctx.moveTo(offsetX + markX, G.groundY + 30);
+            ctx.lineTo(offsetX + markX, G.groundY + 35);
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+    }
+}
+
+function drawPlayer() {
+    var p = G.player;
+    var screenX = p.x - G.camera.x;
+    var screenY = p.y;
+
+    // 阴影
+    if (!p.grounded && p.phase === 'airborne') {
+        ctx.fillStyle = COLORS.playerShadow;
+        ctx.beginPath();
+        ctx.ellipse(screenX, G.groundY + 2, 10, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.save();
+    ctx.translate(screenX, screenY - 20);
+    if (p.phase === 'airborne') {
+        ctx.rotate(p.rotation * Math.PI / 180);
+    }
+
+    // 身体
+    ctx.fillStyle = COLORS.player;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 10, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 头
+    ctx.fillStyle = '#F5CBA7';
+    ctx.beginPath();
+    ctx.arc(0, -18, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 腿部动画
+    ctx.strokeStyle = COLORS.player;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    if (p.phase === 'running') {
+        var legAngle = Math.sin(p.animTimer * 0.3) * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(0, 10);
+        ctx.lineTo(Math.sin(legAngle) * 12, 25);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, 10);
+        ctx.lineTo(Math.sin(-legAngle) * 12, 25);
+        ctx.stroke();
+    } else if (p.phase === 'airborne') {
+        // 蹬腿姿势
+        ctx.beginPath();
+        ctx.moveTo(0, 10);
+        ctx.lineTo(-8, 22);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, 10);
+        ctx.lineTo(8, 18);
+        ctx.stroke();
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(0, 10);
+        ctx.lineTo(-5, 25);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, 10);
+        ctx.lineTo(5, 25);
+        ctx.stroke();
+    }
+
+    // 手臂
+    ctx.strokeStyle = '#F5CBA7';
+    ctx.lineWidth = 2.5;
+    if (p.phase === 'running') {
+        var armAngle = Math.sin(p.animTimer * 0.3) * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(Math.sin(armAngle) * 15, 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(Math.sin(-armAngle) * 15, 5);
+        ctx.stroke();
+    } else if (p.phase === 'airborne') {
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(-12, -15);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(12, -10);
+        ctx.stroke();
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(-10, 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(10, 5);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // 轨迹
+    if (p.phase === 'airborne' && p.trail.length > 1) {
+        for (var i = 1; i < p.trail.length; i++) {
+            var alpha = i / p.trail.length * 0.4;
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#E74C3C';
+            ctx.beginPath();
+            ctx.arc(p.trail[i].x - G.camera.x, p.trail[i].y - 20, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+}
+
+function drawUI() {
+    var p = G.player;
+
+    // 顶部信息
+    ctx.fillStyle = COLORS.uiText;
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('第 ' + Math.min(G.round + 1, G.maxRounds) + ' / ' + G.maxRounds + ' 轮', 20, 30);
+
+    ctx.textAlign = 'right';
+    ctx.fillText('总距离: ' + G.score.toFixed(2) + 'm', canvas.width - 20, 30);
+    ctx.fillText('最佳单次: ' + G.bestRound.toFixed(2) + 'm', canvas.width - 20, 55);
+
+    // 历史记录
+    if (G.attempts.length > 0) {
+        ctx.textAlign = 'left';
+        ctx.font = '14px Arial';
+        ctx.fillStyle = COLORS.uiDim;
+        for (var i = 0; i < G.attempts.length; i++) {
+            var a = G.attempts[i];
+            var txt = a.foul ? '犯规' : a.distance.toFixed(2) + 'm';
+            ctx.fillText('第' + a.round + '轮: ' + txt, 20, 60 + i * 22);
+        }
+    }
+
+    // 助跑速度条
+    if (p.phase === 'running' || p.phase === 'idle') {
+        var barW = 150;
+        var barH = 12;
+        var barX = canvas.width / 2 - barW / 2;
+        var barY = G.groundY + 50;
+
+        ctx.fillStyle = COLORS.powerBarBg;
+        ctx.fillRect(barX, barY, barW, barH);
+
+        var fill = p.speed / CONFIG.MAX_RUN_SPEED;
+        var grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+        grad.addColorStop(0, '#27AE60');
+        grad.addColorStop(0.5, '#F1C40F');
+        grad.addColorStop(1, '#E74C3C');
+        ctx.fillStyle = grad;
+        ctx.fillRect(barX, barY, barW * fill, barH);
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX, barY, barW, barH);
+
+        ctx.fillStyle = COLORS.uiText;
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('速度', canvas.width / 2, barY + barH + 16);
+    }
+
+    // 角度指示器
+    if (p.phase === 'charging_angle') {
+        var arcX = canvas.width / 2;
+        var arcY = G.groundY - 60;
+        var arcR = 50;
+
+        // 角度弧线
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(arcX, arcY, arcR, -Math.PI, 0);
+        ctx.stroke();
+
+        // 当前角度
+        var angleRad = -p.angle * Math.PI / 180;
+        ctx.strokeStyle = COLORS.angleBar;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(arcX, arcY);
+        ctx.lineTo(arcX + Math.cos(angleRad) * arcR, arcY + Math.sin(angleRad) * arcR);
+        ctx.stroke();
+
+        // 角度值
+        ctx.fillStyle = COLORS.angleBar;
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.angle.toFixed(0) + '度', arcX, arcY - arcR - 10);
+
+        ctx.fillStyle = COLORS.uiText;
+        ctx.font = '14px Arial';
+        ctx.fillText('点击/按空格起跳', arcX, arcY + arcR + 30);
+    }
+
+    // 提示
+    if (G.showTips && p.phase === 'idle') {
+        ctx.fillStyle = 'rgba(255,255,255,' + (0.5 + Math.sin(Date.now() / 500) * 0.3) + ')';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(TIPS[G.tipIndex], canvas.width / 2, G.groundY + 80);
+    }
+
+    // 结果显示
+    if (G.state === 'result') {
+        var resultY = canvas.height * 0.35;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, resultY - 40, canvas.width, 120);
+
+        if (G.attempts[G.attempts.length - 1].foul) {
+            ctx.fillStyle = '#E74C3C';
+            ctx.font = 'bold 36px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('犯规!', canvas.width / 2, resultY);
+        } else {
+            ctx.fillStyle = COLORS.distanceText;
+            ctx.font = 'bold 42px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(G.currentDistance.toFixed(2) + 'm', canvas.width / 2, resultY);
+
+            // 评级
+            var rating = getRating(G.currentDistance);
+            ctx.fillStyle = COLORS.star;
+            ctx.font = '20px Arial';
+            ctx.fillText(rating.label + ' ' + getStarsText(rating.stars), canvas.width / 2, resultY + 35);
+        }
+
+        if (G.round < G.maxRounds) {
+            ctx.fillStyle = COLORS.uiText;
+            ctx.font = '16px Arial';
+            ctx.fillText('点击继续下一轮', canvas.width / 2, resultY + 65);
+        }
+    }
+
+    // 游戏结束
+    if (G.state === 'gameover') {
+        drawGameOver();
+    }
+}
+
+function drawGameOver() {
+    var overlayH = 320;
+    var overlayY = (canvas.height - overlayH) / 2;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, overlayY, canvas.width, overlayH);
+
+    ctx.fillStyle = COLORS.distanceText;
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('比赛结束!', canvas.width / 2, overlayY + 45);
+
+    ctx.fillStyle = COLORS.uiText;
+    ctx.font = '22px Arial';
+    ctx.fillText('总距离: ' + G.score.toFixed(2) + 'm', canvas.width / 2, overlayY + 85);
+    ctx.fillText('最佳单次: ' + G.bestRound.toFixed(2) + 'm', canvas.width / 2, overlayY + 115);
+    ctx.fillText('历史最佳: ' + G.bestScore.toFixed(2) + 'm', canvas.width / 2, overlayY + 145);
+
+    // 评级
+    var totalRating = getRating(G.score / G.maxRounds);
+    ctx.fillStyle = COLORS.star;
+    ctx.font = '18px Arial';
+    ctx.fillText('综合评级: ' + totalRating.label, canvas.width / 2, overlayY + 180);
+    ctx.fillText(getStarsText(totalRating.stars), canvas.width / 2, overlayY + 205);
+
+    // 各轮成绩
+    ctx.fillStyle = COLORS.uiDim;
+    ctx.font = '14px Arial';
+    var details = G.attempts.map(function(a) {
+        return '第' + a.round + '轮: ' + (a.foul ? '犯规' : a.distance.toFixed(2) + 'm');
+    }).join('  |  ');
+    ctx.fillText(details, canvas.width / 2, overlayY + 240);
+
+    // 重新开始按钮
+    var btnW = 180;
+    var btnH = 45;
+    var btnX = canvas.width / 2 - btnW / 2;
+    var btnY = overlayY + 260;
+
+    ctx.fillStyle = '#2ECC71';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 8);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px Arial';
+    ctx.fillText('再来一次', canvas.width / 2, btnY + 30);
+}
+
+function getRating(dist) {
+    for (var i = DISTANCE_RECORDS.length - 1; i >= 0; i--) {
+        if (dist >= DISTANCE_RECORDS[i].range[0]) {
+            return DISTANCE_RECORDS[i];
+        }
+    }
+    return DISTANCE_RECORDS[0];
+}
+
+function getStarsText(count) {
+    var s = '';
+    for (var i = 0; i < count; i++) s += '★';
+    for (var i = count; i < 6; i++) s += '☆';
+    return s;
+}
+
+// ============================================================
+// 11. 菜单界面
+// ============================================================
+function drawMenu() {
+    // 背景
+    var grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#0a0025');
+    grad.addColorStop(0.5, '#1a2a5e');
+    grad.addColorStop(1, '#2C3E50');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 装饰粒子
+    drawMenuParticles();
+
+    // 标题
+    ctx.fillStyle = COLORS.distanceText;
+    ctx.font = 'bold 56px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('跳 远', canvas.width / 2, canvas.height * 0.25);
+
+    ctx.fillStyle = COLORS.uiDim;
+    ctx.font = '18px Arial';
+    ctx.fillText('Long Jump', canvas.width / 2, canvas.height * 0.25 + 35);
+
+    // 说明
+    ctx.fillStyle = COLORS.uiText;
+    ctx.font = '15px Arial';
+    var instructions = [
+        '助跑 + 起跳 + 落地',
+        '键盘: 按住空格助跑，松开起跳',
+        '鼠标/触屏: 长按助跑，松开起跳',
+        '起跳时点击调整角度',
+        '共5轮，总距离最远获胜'
+    ];
+    for (var i = 0; i < instructions.length; i++) {
+        ctx.fillText(instructions[i], canvas.width / 2, canvas.height * 0.4 + i * 28);
+    }
+
+    // 最佳成绩
+    if (G.bestScore > 0) {
+        ctx.fillStyle = COLORS.star;
+        ctx.font = '16px Arial';
+        ctx.fillText('历史最佳: ' + G.bestScore.toFixed(2) + 'm', canvas.width / 2, canvas.height * 0.62);
+    }
+
+    // 开始按钮
+    var btnW = 200;
+    var btnH = 55;
+    var btnX = canvas.width / 2 - btnW / 2;
+    var btnY = canvas.height * 0.7;
+
+    ctx.fillStyle = '#2ECC71';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 10);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('开始比赛', canvas.width / 2, btnY + 36);
+
+    // 版本
+    ctx.fillStyle = COLORS.uiDim;
+    ctx.font = '12px Arial';
+    ctx.fillText('v1.0 | Canvas Game', canvas.width / 2, canvas.height - 30);
+}
+
+var menuParticles = [];
+function initMenuParticles() {
+    menuParticles = [];
+    for (var i = 0; i < 30; i++) {
+        menuParticles.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            r: 1 + Math.random() * 3,
+            alpha: 0.2 + Math.random() * 0.4
+        });
+    }
+}
+
+function drawMenuParticles() {
+    for (var i = 0; i < menuParticles.length; i++) {
+        var p = menuParticles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// 12. 广告系统
+// ============================================================
+var adBanner = {
+    visible: true,
+    height: 50,
+    text: '支持开发者 - 点击赞助',
+    timer: 0
+};
+
+function drawAdBanner() {
+    if (!adBanner.visible) return;
+    var bannerY = canvas.height - adBanner.height;
+
+    ctx.fillStyle = 'rgba(44, 62, 80, 0.9)';
+    ctx.fillRect(0, bannerY, canvas.width, adBanner.height);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(adBanner.text, canvas.width / 2, bannerY + 22);
+
+    // 赞助按钮
+    var btnW = 70;
+    var btnH = 30;
+    var btnX = canvas.width - btnW - 10;
+    var btnY = bannerY + 10;
+
+    ctx.fillStyle = '#E67E22';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 5);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 12px Arial';
+    ctx.fillText('赞助', btnX + btnW / 2, btnY + 20);
+
+    // 关闭按钮
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '18px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('×', 10, bannerY + 28);
+}
+
+function drawSponsorModal() {
+    if (!G.showSponsor) return;
+
+    var modalW = 300;
+    var modalH = 200;
+    var modalX = (canvas.width - modalW) / 2;
+    var modalY = (canvas.height - modalH) / 2;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#2C3E50';
+    ctx.beginPath();
+    ctx.roundRect(modalX, modalY, modalW, modalH, 10);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('感谢支持!', canvas.width / 2, modalY + 40);
+
+    ctx.font = '14px Arial';
+    ctx.fillText('您的支持是我们持续开发的动力', canvas.width / 2, modalY + 70);
+
+    // 关闭按钮
+    ctx.fillStyle = '#E74C3C';
+    ctx.beginPath();
+    ctx.roundRect(canvas.width / 2 - 50, modalY + 140, 100, 35, 6);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText('关闭', canvas.width / 2, modalY + 163);
+}
+
+function drawInterstitialAd() {
+    if (!G.showAd) return;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var adW = 320;
+    var adH = 250;
+    var adX = (canvas.width - adW) / 2;
+    var adY = (canvas.height - adH) / 2;
+
+    ctx.fillStyle = '#34495E';
+    ctx.beginPath();
+    ctx.roundRect(adX, adY, adW, adH, 10);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('广告', canvas.width / 2, adY + 40);
+
+    ctx.font = '14px Arial';
+    ctx.fillStyle = COLORS.uiDim;
+    ctx.fillText('感谢游玩跳远!', canvas.width / 2, adY + 80);
+    ctx.fillText('更多精彩游戏即将上线', canvas.width / 2, adY + 105);
+
+    // 跳过按钮
+    var skipW = 100;
+    var skipH = 35;
+    var skipX = canvas.width / 2 - skipW / 2;
+    var skipY = adY + adH - 60;
+
+    ctx.fillStyle = '#2ECC71';
+    ctx.beginPath();
+    ctx.roundRect(skipX, skipY, skipW, skipH, 6);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText('继续游戏', canvas.width / 2, skipY + 23);
+}
+
+// ============================================================
+// 13. 输入处理
+// ============================================================
+var input = {
+    space: false,
+    mouse: false,
+    touch: false,
+    action: false
+};
+
+function handleActionStart() {
+    initAudio();
+
+    switch(G.state) {
+        case 'menu':
+            var btnW = 200;
+            var btnH = 55;
+            var btnX = canvas.width / 2 - btnW / 2;
+            var btnY = canvas.height * 0.7;
+            if (inputInRect(input.x, input.y, btnX, btnY, btnW, btnH)) {
+                playSound('click');
+                initGame();
+            }
+            break;
+        case 'ready':
+            startRunning();
+            break;
+        case 'running':
+            stopRunning();
+            break;
+        case 'jumping':
+            doJump();
+            break;
+        case 'result':
+            if (G.round >= G.maxRounds) {
+                // 已结束，等待gameover状态
+            } else {
+                resetRound();
+                G.state = 'ready';
+            }
+            break;
+        case 'gameover':
+            // 检查重新开始按钮
+            var overlayH = 320;
+            var overlayY = (canvas.height - overlayH) / 2;
+            var btnW = 180;
+            var btnH = 45;
+            var btnX = canvas.width / 2 - btnW / 2;
+            var btnY = overlayY + 260;
+            if (inputInRect(input.x, input.y, btnX, btnY, btnW, btnH)) {
+                playSound('click');
+                initGame();
+            }
+            break;
+    }
+
+    // 广告交互
+    if (G.showAd) {
+        var adW = 320;
+        var adH = 250;
+        var adX = (canvas.width - adW) / 2;
+        var adY = (canvas.height - adH) / 2;
+        var skipW = 100;
+        var skipH = 35;
+        var skipX = canvas.width / 2 - skipW / 2;
+        var skipY = adY + adH - 60;
+        if (inputInRect(input.x, input.y, skipX, skipY, skipW, skipH)) {
+            G.showAd = false;
+        }
+        return;
+    }
+
+    if (G.showSponsor) {
+        var modalW = 300;
+        var modalH = 200;
+        var modalX = (canvas.width - modalW) / 2;
+        var modalY = (canvas.height - modalH) / 2;
+        if (inputInRect(input.x, input.y, canvas.width / 2 - 50, modalY + 140, 100, 35)) {
+            G.showSponsor = false;
+        }
+        return;
+    }
+
+    // 广告栏交互
+    if (adBanner.visible) {
+        var bannerY = canvas.height - adBanner.height;
+        var btnX = canvas.width - 80;
+        var btnY = bannerY + 10;
+        if (inputInRect(input.x, input.y, btnX, btnY, 70, 30)) {
+            G.showSponsor = true;
+            playSound('click');
+        }
+        if (inputInRect(input.x, input.y, 0, bannerY, 30, adBanner.height)) {
+            adBanner.visible = false;
+        }
+    }
+}
+
+function handleActionEnd() {
+    if (G.state === 'running') {
+        stopRunning();
+    }
+}
+
+function inputInRect(x, y, rx, ry, rw, rh) {
+    return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+}
+
+// 键盘事件
+document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space' && !input.space) {
+        e.preventDefault();
+        input.space = true;
+        input.x = canvas.width / 2;
+        input.y = canvas.height / 2;
+        handleActionStart();
+    }
+    if (e.code === 'Enter') {
+        e.preventDefault();
+        input.x = canvas.width / 2;
+        input.y = canvas.height / 2;
+        handleActionStart();
+    }
+});
+
+document.addEventListener('keyup', function(e) {
+    if (e.code === 'Space') {
+        e.preventDefault();
+        input.space = false;
+        handleActionEnd();
+    }
+});
+
+// 鼠标事件
+canvas.addEventListener('mousedown', function(e) {
+    input.mouse = true;
+    input.x = e.clientX;
+    input.y = e.clientY;
+    handleActionStart();
+});
+
+canvas.addEventListener('mouseup', function(e) {
+    input.mouse = false;
+    handleActionEnd();
+});
+
+// 触屏事件
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    input.touch = true;
+    if (e.touches.length > 0) {
+        input.x = e.touches[0].clientX;
+        input.y = e.touches[0].clientY;
+    }
+    handleActionStart();
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    input.touch = false;
+    handleActionEnd();
+}, { passive: false });
+
+// ============================================================
+// 14. 主游戏循环
+// ============================================================
+function gameLoop(timestamp) {
+    if (!G.lastTime) G.lastTime = timestamp;
+    G.dt = Math.min((timestamp - G.lastTime) / 16.67, 3);
+    G.lastTime = timestamp;
+
+    // 清屏
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 屏幕震动
+    if (G.screenShake > 0) {
+        ctx.save();
+        var sx = (Math.random() - 0.5) * G.screenShake;
+        var sy = (Math.random() - 0.5) * G.screenShake;
+        ctx.translate(sx, sy);
+        G.screenShake *= 0.85;
+        if (G.screenShake < 0.5) G.screenShake = 0;
+    }
+
+    switch(G.state) {
+        case 'menu':
+            drawMenu();
+            break;
+        case 'ready':
+        case 'running':
+        case 'jumping':
+        case 'result':
+        case 'gameover':
+            drawBackground();
+            drawPlayer();
+            updatePlayer();
+            updateParticles();
+            drawParticles();
+            drawUI();
+            break;
+    }
+
+    if (G.screenShake > 0) {
+        ctx.restore();
+    }
+
+    // 广告
+    drawAdBanner();
+    drawSponsorModal();
+    drawInterstitialAd();
+
+    // 插屏广告计时
+    G.adTimer += 16.67;
+    if (G.adTimer >= G.adInterval && G.state === 'menu') {
+        G.showAd = true;
+        G.adTimer = 0;
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// 15. roundRect polyfill
+// ============================================================
+if (!ctx.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        var tl = r[0] || 0, tr = r[1] || 0, br = r[2] || 0, bl = r[3] || 0;
+        this.moveTo(x + tl, y);
+        this.lineTo(x + w - tr, y);
+        this.quadraticCurveTo(x + w, y, x + w, y + tr);
+        this.lineTo(x + w, y + h - br);
+        this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+        this.lineTo(x + bl, y + h);
+        this.quadraticCurveTo(x, y + h, x, y + h - bl);
+        this.lineTo(x, y + tl);
+        this.quadraticCurveTo(x, y, x + tl, y);
+        this.closePath();
+    };
+}
+
+// ============================================================
+// 16. 启动
+// ============================================================
+loadBestScore();
+initMenuParticles();
+G.state = 'menu';
+requestAnimationFrame(gameLoop);
+
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+</script>
+</body>
+</html>

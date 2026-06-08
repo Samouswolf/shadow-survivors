@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>剪纸艺术</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a0a2e;font-family:'Microsoft YaHei',sans-serif}
+#canvas{display:block;position:absolute;top:0;left:0}
+#ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+#ui>*{pointer-events:auto}
+#score-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);border-radius:20px;padding:8px 20px;color:#fff;font-size:16px;display:none;white-space:nowrap}
+#score-bar span{margin:0 10px}
+#pause-btn{position:absolute;top:10px;right:10px;width:40px;height:40px;background:rgba(0,0,0,0.6);border:2px solid #fff;border-radius:50%;color:#fff;font-size:20px;display:none;cursor:pointer;line-height:36px;text-align:center}
+#tutorial{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.85);border:2px solid #f5a623;border-radius:16px;padding:30px;color:#fff;max-width:350px;text-align:center;display:none}
+#tutorial h2{color:#f5a623;margin-bottom:15px}
+#tutorial p{margin:10px 0;line-height:1.6}
+#tutorial-btn{margin-top:15px;padding:10px 30px;background:#f5a623;border:none;border-radius:25px;color:#fff;font-size:16px;cursor:pointer}
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+
+</style>
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+<div id="score-bar"><span>图案：<span id="ui-pattern">1</span>/12</span><span>得分：<span id="ui-score">0</span></span><span>最高：<span id="ui-best">0</span></span></div>
+<div id="pause-btn">| |</div>
+<div id="tutorial">
+<h2>玩法说明</h2>
+<p>1. 在折叠的纸张上画出图案的一半</p>
+<p>2. 松手后自动展开，展现对称剪纸</p>
+<p>3. 尽量贴合参考线，越精准分数越高</p>
+<p>4. 完成所有图案挑战！</p>
+<button id="tutorial-btn">知道了</button>
+</div>
+</div>
+<script>
+(function(){
+'use strict';
+// ========== 配置 ==========
+const CONFIG={
+MAX_PATTERNS:12,
+DRAW_WIDTH:3,
+ERASE_WIDTH:8,
+CANVAS_BG:'#f0e6d3',
+FOLD_LINE_COLOR:'rgba(200,50,50,0.5)',
+GUIDE_COLOR:'rgba(100,100,100,0.3)',
+DRAW_COLOR:'#8b0000',
+SCORE_PERFECT:100,
+SCORE_GOOD:60,
+SCORE_OK:30,
+TIME_BONUS_FACTOR:2,
+STAR3_THRESHOLD:0.85,
+STAR2_THRESHOLD:0.6,
+STAR1_THRESHOLD:0.3
+};
+
+// ========== 广告系统 ==========
+const AD={
+bannerHTML:`<div id="ad-banner" style="position:fixed;bottom:0;left:0;width:100%;background:linear-gradient(135deg,#1a1a2e,#16213e);border-top:2px solid #e94560;padding:8px;display:flex;align-items:center;justify-content:space-between;z-index:1000;font-family:'Microsoft YaHei',sans-serif;">
+<div style="display:flex;align-items:center;gap:10px;">
+<div style="width:40px;height:40px;background:linear-gradient(135deg,#e94560,#0f3460);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;">🎮</div>
+<div>
+<div style="color:#fff;font-size:13px;font-weight:bold;">好玩吗？请作者喝杯咖啡 ☕</div>
+<div style="color:#aaa;font-size:11px;">您的支持是更新的动力</div>
+</div>
+</div>
+<button id="ad-sponsor-btn" style="background:linear-gradient(135deg,#e94560,#ff6b6b);border:none;color:#fff;padding:8px 16px;border-radius:20px;font-size:13px;cursor:pointer;font-weight:bold;">❤️ 赞助</button>
+</div>`,
+sponsorModalHTML:`<div id="sponsor-modal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:2000;">
+<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border:2px solid #e94560;border-radius:16px;padding:30px;max-width:350px;width:90%;text-align:center;">
+<div style="font-size:48px;margin-bottom:15px;">☕</div>
+<h3 style="color:#fff;margin-bottom:10px;">请作者喝杯咖啡</h3>
+<p style="color:#ccc;font-size:14px;margin-bottom:20px;">感谢您的支持！<br>每一份赞助都是对创作的鼓励</p>
+<div style="background:rgba(255,255,255,0.1);border-radius:12px;padding:15px;margin-bottom:20px;">
+<div style="display:flex;justify-content:center;gap:15px;margin-bottom:10px;">
+<button class="donate-amount" data-amount="5" style="background:#2d2d44;border:2px solid #e94560;color:#fff;padding:8px 16px;border-radius:20px;cursor:pointer;">¥5</button>
+<button class="donate-amount" data-amount="10" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:20px;cursor:pointer;font-weight:bold;">¥10</button>
+<button class="donate-amount" data-amount="20" style="background:#2d2d44;border:2px solid #e94560;color:#fff;padding:8px 16px;border-radius:20px;cursor:pointer;">¥20</button>
+</div>
+<p style="color:#888;font-size:12px;">（演示功能，感谢心意 ❤️）</p>
+</div>
+<button id="sponsor-close" style="background:transparent;border:1px solid #666;color:#999;padding:8px 24px;border-radius:20px;cursor:pointer;">关闭</button>
+</div>
+</div>`,
+interstitialHTML:`<div id="ad-interstitial" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:none;align-items:center;justify-content:center;z-index:3000;">
+<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border:2px solid #e94560;border-radius:20px;padding:30px;max-width:320px;width:85%;text-align:center;position:relative;">
+<div style="font-size:20px;color:#e94560;margin-bottom:5px;">广告</div>
+<div style="background:linear-gradient(135deg,#e94560,#0f3460);border-radius:12px;padding:20px;margin:15px 0;">
+<div style="font-size:48px;margin-bottom:10px;">🎯</div>
+<div style="color:#fff;font-size:18px;font-weight:bold;">发现更多精彩游戏</div>
+<div style="color:#aaa;font-size:13px;margin-top:8px;">点击探索更多好玩的</div>
+</div>
+<button id="interstitial-close" style="position:absolute;top:10px;right:15px;background:none;border:none;color:#666;font-size:24px;cursor:pointer;">✕</button>
+<button id="interstitial-action" style="background:linear-gradient(135deg,#e94560,#ff6b6b);border:none;color:#fff;padding:12px 30px;border-radius:25px;font-size:15px;cursor:pointer;margin-top:10px;">去看看</button>
+<div style="color:#666;font-size:11px;margin-top:15px;" id="ad-timer">广告将在 3 秒后可关闭</div>
+</div>
+</div>`,
+adCount:0,
+adThreshold:3,
+init(){
+document.body.insertAdjacentHTML('beforeend',this.bannerHTML);
+document.body.insertAdjacentHTML('beforeend',this.sponsorModalHTML);
+document.body.insertAdjacentHTML('beforeend',this.interstitialHTML);
+document.getElementById('ad-sponsor-btn').onclick=()=>this.showSponsor();
+document.getElementById('sponsor-close').onclick=()=>this.hideSponsor();
+document.querySelectorAll('.donate-amount').forEach(btn=>{
+btn.onclick=()=>{btn.style.background='#e94560';btn.style.fontWeight='bold';setTimeout(()=>this.hideSponsor(),800)};
+});
+document.getElementById('interstitial-close').onclick=()=>this.hideInterstitial();
+document.getElementById('interstitial-action').onclick=()=>this.hideInterstitial();
+},
+showSponsor(){document.getElementById('sponsor-modal').style.display='flex'},
+hideSponsor(){document.getElementById('sponsor-modal').style.display='none'},
+showInterstitial(){
+this.adCount=0;
+const el=document.getElementById('ad-interstitial');
+el.style.display='flex';
+const timerEl=document.getElementById('ad-timer');
+const closeBtn=document.getElementById('interstitial-close');
+closeBtn.style.display='none';
+let sec=3;
+timerEl.textContent=`广告将在 ${sec} 秒后可关闭`;
+const iv=setInterval(()=>{
+sec--;
+if(sec<=0){clearInterval(iv);timerEl.textContent='可以关闭了';closeBtn.style.display='block'}
+else timerEl.textContent=`广告将在 ${sec} 秒后可关闭`;
+},1000);
+},
+hideInterstitial(){document.getElementById('ad-interstitial').style.display='none'},
+checkAndShow(){
+this.adCount++;
+if(this.adCount>=this.adThreshold)this.showInterstitial();
+}
+};
+
+// ========== 图案数据 ==========
+const PATTERNS=[
+{
+name:'蝴蝶',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let i=0;i<=20;i++){
+const t=i/20;
+const x=cx*(1-t*0.6+Math.sin(t*Math.PI*3)*0.25);
+const y=cy*(0.3+t*1.2+Math.cos(t*Math.PI*2)*0.15);
+pts.push({x,y});
+}
+for(let i=20;i>=0;i--){
+const t=i/20;
+const x=cx*(1-t*0.6+Math.sin(t*Math.PI*3+1)*0.2);
+const y=cy*(0.5+t*1.0+Math.sin(t*Math.PI*2)*0.12);
+pts.push({x,y});
+}
+return pts;
+}
+},
+{
+name:'双喜',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+const drawHalf=(ox,oy,s)=>{
+pts.push({x:ox,y:oy-40*s},{x:ox+15*s,y:oy-40*s},{x:ox+15*s,y:oy-15*s},{x:ox+30*s,y:oy-15*s},{x:ox+30*s,y:oy-40*s},{x:ox+45*s,y:oy-40*s},{x:ox+45*s,y:oy},{x:ox+30*s,y:oy},{x:ox+30*s,y:oy+25*s},{x:ox+45*s,y:oy+25*s},{x:ox+45*s,y:oy+40*s},{x:ox+15*s,y:oy+40*s},{x:ox+15*s,y:oy+10*s},{x:ox,y:oy+10*s});
+};
+drawHalf(cx-50,cy,1);
+return pts;
+}
+},
+{
+name:'雪花',
+fold:'diagonal',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let a=0;a<6;a++){
+const angle=a*Math.PI/3;
+const r=Math.min(w,h)*0.35;
+pts.push({x:cx+Math.cos(angle)*r*0.2,y:cy+Math.sin(angle)*r*0.2});
+pts.push({x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});
+const la=angle+0.3,ra=angle-0.3;
+pts.push({x:cx+Math.cos(la)*r*0.6,y:cy+Math.sin(la)*r*0.6});
+pts.push({x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});
+pts.push({x:cx+Math.cos(ra)*r*0.6,y:cy+Math.sin(ra)*r*0.6});
+}
+return pts;
+}
+},
+{
+name:'窗花',
+fold:'diagonal',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,r=Math.min(w,h)*0.35,pts=[];
+for(let i=0;i<8;i++){
+const a=i*Math.PI/4;
+pts.push({x:cx+Math.cos(a)*r,y:cy+Math.sin(a)*r});
+const a2=a+Math.PI/8;
+pts.push({x:cx+Math.cos(a2)*r*0.5,y:cy+Math.sin(a2)*r*0.5});
+}
+return pts;
+}
+},
+{
+name:'鱼',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let i=0;i<=15;i++){
+const t=i/15;
+const x=cx*(-0.8+t*1.6);
+const y=cy*(Math.sin(t*Math.PI)*0.5+0.05*Math.sin(t*Math.PI*3));
+pts.push({x,y});
+}
+pts.push({x:cx+0.8*w*0.5,y:cy+0.1*h});
+pts.push({x:cx+0.6*w*0.5,y:cy});
+pts.push({x:cx+0.8*w*0.5,y:cy-0.1*h});
+for(let i=15;i>=0;i--){
+const t=i/15;
+const x=cx*(-0.8+t*1.6);
+const y=cy*(-Math.sin(t*Math.PI)*0.45-0.04*Math.sin(t*Math.PI*3));
+pts.push({x,y});
+}
+return pts;
+}
+},
+{
+name:'莲花',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,r=Math.min(w,h)*0.3,pts=[];
+for(let i=0;i<=10;i++){
+const t=i/10;
+const a=-Math.PI/2+t*Math.PI;
+const rr=r*(0.6+0.4*Math.sin(t*Math.PI*3));
+pts.push({x:cx+Math.cos(a)*rr*0.5,y:cy+Math.sin(a)*rr});
+}
+for(let i=10;i>=0;i--){
+const t=i/10;
+const a=-Math.PI/2+t*Math.PI;
+const rr=r*(0.4+0.3*Math.sin(t*Math.PI*2));
+pts.push({x:cx+Math.cos(a)*rr*0.4,y:cy+Math.sin(a)*rr*0.9});
+}
+return pts;
+}
+},
+{
+name:'桃花',
+fold:'diagonal',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let p=0;p<5;p++){
+const a=p*Math.PI*2/5-Math.PI/2;
+const px=cx+Math.cos(a)*Math.min(w,h)*0.25;
+const py=cy+Math.sin(a)*Math.min(w,h)*0.25;
+for(let i=0;i<=8;i++){
+const t=i/8;
+const pa=a-Math.PI/4+t*Math.PI/2;
+const pr=Math.min(w,h)*0.12*(0.5+0.5*Math.sin(t*Math.PI));
+pts.push({x:px+Math.cos(pa)*pr,y:py+Math.sin(pa)*pr});
+}
+}
+return pts;
+}
+},
+{
+name:'凤凰',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let i=0;i<=20;i++){
+const t=i/20;
+const x=cx*(0.3+t*1.2);
+const y=cy*(-0.3+Math.sin(t*Math.PI)*0.8-Math.sin(t*Math.PI*2)*0.15);
+pts.push({x,y});
+}
+for(let i=0;i<8;i++){
+const t=i/8;
+pts.push({x:cx*1.5+10+t*15,y:cy*(-0.3+t*0.6+Math.sin(t*Math.PI)*0.2)});
+}
+for(let i=20;i>=0;i--){
+const t=i/20;
+const x=cx*(0.3+t*1.2);
+const y=cy*(0.1-Math.sin(t*Math.PI)*0.3+Math.sin(t*Math.PI*3)*0.08);
+pts.push({x,y});
+}
+return pts;
+}
+},
+{
+name:'龙',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let i=0;i<=25;i++){
+const t=i/25;
+const x=cx*(0.2+t*1.4);
+const y=cy*(-0.2+Math.sin(t*Math.PI*2)*0.35+Math.sin(t*Math.PI*4)*0.1);
+pts.push({x,y});
+}
+pts.push({x:cx*1.6,y:cy*0.3},{x:cx*1.4,y:cy*0.5},{x:cx*1.2,y:cy*0.35});
+for(let i=25;i>=0;i--){
+const t=i/25;
+const x=cx*(0.2+t*1.4);
+const y=cy*(0.2-Math.sin(t*Math.PI*2)*0.25-Math.sin(t*Math.PI*4)*0.08);
+pts.push({x,y});
+}
+return pts;
+}
+},
+{
+name:'熊猫',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,r=Math.min(w,h)*0.15,pts=[];
+for(let i=0;i<=12;i++){
+const t=i/12;
+const a=Math.PI*0.5+t*Math.PI;
+pts.push({x:cx+Math.cos(a)*r*1.2,y:cy-0.1*h+Math.sin(a)*r*1.0});
+}
+for(let i=0;i<=10;i++){
+const t=i/10;
+const a=-Math.PI*0.5+t*Math.PI;
+pts.push({x:cx+Math.cos(a)*r*0.7,y:cy+0.15*h+Math.sin(a)*r*0.5});
+}
+pts.push({x:cx,y:cy+0.3*h},{x:cx+r*0.3,y:cy+0.4*h},{x:cx,y:cy+0.5*h});
+return pts;
+}
+},
+{
+name:'如意',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let i=0;i<=15;i++){
+const t=i/15;
+const x=cx*(0.6+t*0.6+Math.sin(t*Math.PI*2)*0.15);
+const y=cy*(-0.6+t*0.4+Math.sin(t*Math.PI*3)*0.1);
+pts.push({x,y});
+}
+for(let i=0;i<=10;i++){
+const t=i/10;
+const a=t*Math.PI;
+pts.push({x:cx*1.5+Math.cos(a)*20,y:cy*(-0.2+Math.sin(a)*0.3)});
+}
+for(let i=15;i>=0;i--){
+const t=i/15;
+const x=cx*(0.6+t*0.6-Math.sin(t*Math.PI*2)*0.12);
+const y=cy*(-0.2+t*0.4-Math.sin(t*Math.PI*3)*0.08);
+pts.push({x,y});
+}
+return pts;
+}
+},
+{
+name:'锦鲤',
+fold:'vertical',
+generatePoints(w,h){
+const cx=w/2,cy=h/2,pts=[];
+for(let i=0;i<=18;i++){
+const t=i/18;
+const x=cx*(-0.8+t*1.4);
+const y=cy*(Math.sin(t*Math.PI)*0.55+Math.sin(t*Math.PI*2)*0.1);
+pts.push({x,y});
+}
+pts.push({x:cx*0.8,y:cy*0.25},{x:cx*1.0,y:cy*0.15},{x:cx*0.7,y:cy*0.05});
+for(let i=18;i>=0;i--){
+const t=i/18;
+const x=cx*(-0.8+t*1.4);
+const y=cy*(-Math.sin(t*Math.PI)*0.45-Math.sin(t*Math.PI*2)*0.08);
+pts.push({x,y});
+}
+return pts;
+}
+}
+];
+
+// ========== 游戏状态 ==========
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+let W,H,foldX,foldY,drawArea;
+const G={
+state:'menu', // menu, playing, paused, result, gameover
+currentPattern:0,
+score:0,
+bestScore:parseInt(localStorage.getItem('papercut_best')||'0'),
+stars:0,
+totalStars:0,
+isDrawing:false,
+drawPoints:[],
+userPixels:null,
+guidePixels:null,
+timer:0,
+timeLimit:60,
+lastTime:0,
+particles:[],
+menuParticles:[],
+tutorialShown:false
+};
+
+// ========== 初始化 ==========
+function resize(){
+W=canvas.width=window.innerWidth;
+H=canvas.height=window.innerHeight;
+drawArea={x:W*0.1,y:H*0.15,w:W*0.8,h:H*0.7};
+foldX=drawArea.x+drawArea.w/2;
+foldY=drawArea.y+drawArea.h/2;
+}
+window.addEventListener('resize',resize);
+resize();
+
+// ========== 工具函数 ==========
+function lerp(a,b,t){return a+(b-a)*t}
+function dist(x1,y1,x2,y2){return Math.sqrt((x1-x2)**2+(y1-y2)**2)}
+function clamp(v,mn,mx){return Math.max(mn,Math.min(mx,v))}
+function pointInArea(x,y,a){return x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h}
+
+// ========== 粒子系统 ==========
+function spawnParticle(x,y,color,count,speed){
+for(let i=0;i<(count||5);i++){
+G.particles.push({
+x,y,
+vx:(Math.random()-0.5)*(speed||3),
+vy:(Math.random()-0.5)*(speed||3),
+life:1,
+decay:0.01+Math.random()*0.02,
+size:2+Math.random()*4,
+color:color||'#e94560'
+});
+}
+}
+function spawnStars(x,y,count){
+for(let i=0;i<(count||8);i++){
+const a=Math.random()*Math.PI*2;
+const sp=1+Math.random()*3;
+G.particles.push({
+x,y,
+vx:Math.cos(a)*sp,
+vy:Math.sin(a)*sp,
+life:1,
+decay:0.008+Math.random()*0.015,
+size:3+Math.random()*5,
+color:['#ffd700','#ffec8b','#ffa500','#ff6347'][Math.floor(Math.random()*4)],
+isStar:true
+});
+}
+}
+function updateParticles(dt){
+for(let i=G.particles.length-1;i>=0;i--){
+const p=G.particles[i];
+p.x+=p.vx;
+p.y+=p.vy;
+p.vy+=0.05;
+p.life-=p.decay;
+if(p.life<=0)G.particles.splice(i,1);
+}
+}
+function renderParticles(){
+for(const p of G.particles){
+ctx.save();
+ctx.globalAlpha=p.life;
+if(p.isStar){
+ctx.fillStyle=p.color;
+ctx.beginPath();
+for(let i=0;i<5;i++){
+const a=i*Math.PI*2/5-Math.PI/2;
+const ox=p.x+Math.cos(a)*p.size;
+const oy=p.y+Math.sin(a)*p.size;
+if(i===0)ctx.moveTo(ox,oy);
+else ctx.lineTo(ox,oy);
+const ia=a+Math.PI/5;
+ctx.lineTo(p.x+Math.cos(ia)*p.size*0.4,p.y+Math.sin(ia)*p.size*0.4);
+}
+ctx.closePath();
+ctx.fill();
+}else{
+ctx.fillStyle=p.color;
+ctx.beginPath();
+ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+ctx.fill();
+}
+ctx.restore();
+}
+}
+
+// ========== 菜单 ==========
+function renderMenu(){
+// 背景渐变
+const grad=ctx.createLinearGradient(0,0,W,H);
+grad.addColorStop(0,'#1a0a2e');
+grad.addColorStop(0.5,'#16213e');
+grad.addColorStop(1,'#0f3460');
+ctx.fillStyle=grad;
+ctx.fillRect(0,0,W,H);
+
+// 装饰粒子
+if(Math.random()<0.3){
+G.menuParticles.push({
+x:Math.random()*W,
+y:H+10,
+vx:(Math.random()-0.5)*0.5,
+vy:-1-Math.random()*2,
+life:1,
+size:2+Math.random()*3
+});
+}
+for(let i=G.menuParticles.length-1;i>=0;i--){
+const p=G.menuParticles[i];
+p.x+=p.vx;p.y+=p.vy;p.life-=0.005;
+if(p.life<=0)G.menuParticles.splice(i,1);
+}
+for(const p of G.menuParticles){
+ctx.save();
+ctx.globalAlpha=p.life*0.6;
+ctx.fillStyle='#e94560';
+ctx.beginPath();
+ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+ctx.fill();
+ctx.restore();
+}
+
+// 剪纸图案装饰
+ctx.save();
+ctx.globalAlpha=0.15;
+ctx.strokeStyle='#e94560';
+ctx.lineWidth=2;
+const cx=W/2,cy=H*0.3;
+for(let i=0;i<6;i++){
+const a=i*Math.PI/3;
+ctx.beginPath();
+ctx.moveTo(cx,cy);
+ctx.lineTo(cx+Math.cos(a)*120,cy+Math.sin(a)*120);
+ctx.stroke();
+}
+ctx.restore();
+
+// 标题
+const titleY=H*0.25;
+ctx.save();
+ctx.textAlign='center';
+ctx.fillStyle='#e94560';
+ctx.font=`bold ${Math.min(48,W*0.1)}px 'Microsoft YaHei'`;
+ctx.shadowColor='#e94560';
+ctx.shadowBlur=20;
+ctx.fillText('剪纸艺术',W/2,titleY);
+ctx.shadowBlur=0;
+
+ctx.fillStyle='#f5a623';
+ctx.font=`${Math.min(18,W*0.04)}px 'Microsoft YaHei'`;
+ctx.fillText('折叠 · 剪裁 · 展开对称之美',W/2,titleY+40);
+ctx.restore();
+
+// 剪刀图标
+ctx.save();
+ctx.translate(W/2,H*0.45);
+ctx.rotate(Math.sin(Date.now()/1000)*0.1);
+ctx.strokeStyle='#f5a623';
+ctx.lineWidth=3;
+ctx.beginPath();
+ctx.moveTo(-20,0);ctx.lineTo(-5,-15);ctx.lineTo(5,-15);ctx.lineTo(20,0);
+ctx.stroke();
+ctx.beginPath();
+ctx.arc(-10,10,8,0,Math.PI*2);ctx.stroke();
+ctx.beginPath();
+ctx.arc(10,10,8,0,Math.PI*2);ctx.stroke();
+ctx.restore();
+
+// 按钮
+const btnW=Math.min(200,W*0.5),btnH=50;
+const btnX=W/2-btnW/2,btnY=H*0.58;
+
+// 开始按钮
+const grad2=ctx.createLinearGradient(btnX,btnY,btnX+btnW,btnY+btnH);
+grad2.addColorStop(0,'#e94560');
+grad2.addColorStop(1,'#ff6b6b');
+ctx.fillStyle=grad2;
+ctx.beginPath();
+ctx.roundRect(btnX,btnY,btnW,btnH,25);
+ctx.fill();
+ctx.fillStyle='#fff';
+ctx.font=`bold ${Math.min(20,W*0.045)}px 'Microsoft YaHei'`;
+ctx.textAlign='center';
+ctx.fillText('开始创作',W/2,btnY+33);
+
+// 教程按钮
+const btn2Y=btnY+70;
+ctx.fillStyle='rgba(255,255,255,0.1)';
+ctx.strokeStyle='rgba(255,255,255,0.3)';
+ctx.lineWidth=1;
+ctx.beginPath();
+ctx.roundRect(btnX,btn2Y,btnW,btnH,25);
+ctx.fill();
+ctx.stroke();
+ctx.fillStyle='#fff';
+ctx.fillText('玩法说明',W/2,btn2Y+33);
+
+// 最高分
+if(G.bestScore>0){
+ctx.fillStyle='rgba(255,255,255,0.6)';
+ctx.font=`${Math.min(14,W*0.03)}px 'Microsoft YaHei'`;
+ctx.fillText(`最高分：${G.bestScore}`,W/2,btn2Y+80);
+}
+
+ctx.restore();
+
+// 存储按钮区域供点击检测
+G.menuBtns={
+start:{x:btnX,y:btnY,w:btnW,h:btnH},
+tutorial:{x:btnX,y:btn2Y,w:btnW,h:btnH}
+};
+}
+
+// ========== 游戏逻辑 ==========
+function startGame(){
+G.state='playing';
+G.currentPattern=0;
+G.score=0;
+G.totalStars=0;
+G.timer=0;
+G.particles=[];
+document.getElementById('score-bar').style.display='block';
+document.getElementById('pause-btn').style.display='block';
+startPattern();
+}
+
+function startPattern(){
+G.isDrawing=false;
+G.drawPoints=[];
+G.userPixels=null;
+G.timer=0;
+G.timeLimit=60-G.currentPattern*2;
+if(G.timeLimit<30)G.timeLimit=30;
+updateUI();
+}
+
+function renderFoldPaper(){
+const da=drawArea;
+ctx.save();
+
+// 折叠纸背景
+ctx.fillStyle=CONFIG.CANVAS_BG;
+ctx.fillRect(da.x,da.y,da.w,da.h);
+
+// 纸张纹理
+ctx.strokeStyle='rgba(200,180,150,0.3)';
+ctx.lineWidth=0.5;
+for(let y=da.y;y<da.y+da.h;y+=20){
+ctx.beginPath();
+ctx.moveTo(da.x,y);
+ctx.lineTo(da.x+da.w,y);
+ctx.stroke();
+}
+
+// 折叠线
+ctx.strokeStyle=CONFIG.FOLD_LINE_COLOR;
+ctx.lineWidth=2;
+ctx.setLineDash([8,4]);
+const pattern=PATTERNS[G.currentPattern];
+if(pattern.fold==='vertical'){
+foldX=da.x+da.w/2;
+ctx.beginPath();
+ctx.moveTo(foldX,da.y);
+ctx.lineTo(foldX,da.y+da.h);
+ctx.stroke();
+// 折叠阴影
+const sgrad=ctx.createLinearGradient(foldX,0,foldX+30,0);
+sgrad.addColorStop(0,'rgba(0,0,0,0.08)');
+sgrad.addColorStop(1,'rgba(0,0,0,0)');
+ctx.fillStyle=sgrad;
+ctx.fillRect(foldX,da.y,30,da.h);
+}else{
+foldX=da.x+da.w/2;
+foldY=da.y+da.h/2;
+ctx.beginPath();
+ctx.moveTo(da.x,da.y);
+ctx.lineTo(da.x+da.w,da.y+da.h);
+ctx.stroke();
+// 折叠阴影
+ctx.fillStyle='rgba(0,0,0,0.05)';
+ctx.beginPath();
+ctx.moveTo(da.x,da.y);
+ctx.lineTo(da.x+da.w,da.y+da.h);
+ctx.lineTo(da.x,da.y+da.h);
+ctx.closePath();
+ctx.fill();
+}
+ctx.setLineDash([]);
+
+// 参考线（半透明图案）
+ctx.strokeStyle=CONFIG.GUIDE_COLOR;
+ctx.lineWidth=1.5;
+ctx.setLineDash([4,4]);
+const pts=pattern.generatePoints(da.w,da.h);
+ctx.beginPath();
+for(let i=0;i<pts.length;i++){
+const px=da.x+pts[i].x;
+const py=da.y+pts[i].y;
+if(i===0)ctx.moveTo(px,py);
+else ctx.lineTo(px,py);
+}
+ctx.closePath();
+ctx.stroke();
+ctx.setLineDash([]);
+
+// "参考线"标签
+ctx.fillStyle='rgba(100,100,100,0.5)';
+ctx.font=`${Math.min(12,W*0.025)}px 'Microsoft YaHei'`;
+ctx.textAlign='center';
+ctx.fillText('参考线',da.x+da.w/2,da.y-5);
+
+ctx.restore();
+}
+
+function renderUserDrawing(){
+if(G.drawPoints.length<2)return;
+ctx.save();
+ctx.strokeStyle=CONFIG.DRAW_COLOR;
+ctx.lineWidth=CONFIG.DRAW_WIDTH;
+ctx.lineCap='round';
+ctx.lineJoin='round';
+
+// 绘制用户笔迹
+ctx.beginPath();
+for(let i=0;i<G.drawPoints.length;i++){
+const p=G.drawPoints[i];
+if(i===0)ctx.moveTo(p.x,p.y);
+else ctx.lineTo(p.x,p.y);
+}
+ctx.stroke();
+ctx.restore();
+}
+
+function renderSymmetry(){
+if(G.drawPoints.length<2)return;
+const da=drawArea;
+const pattern=PATTERNS[G.currentPattern];
+ctx.save();
+
+// 绘制对称图案
+ctx.strokeStyle=CONFIG.DRAW_COLOR;
+ctx.lineWidth=CONFIG.DRAW_WIDTH;
+ctx.lineCap='round';
+ctx.lineJoin='round';
+
+if(pattern.fold==='vertical'){
+// 镜像翻转
+ctx.beginPath();
+for(let i=0;i<G.drawPoints.length;i++){
+const p=G.drawPoints[i];
+const mx=da.x+da.w-(p.x-da.x);
+if(i===0)ctx.moveTo(mx,p.y);
+else ctx.lineTo(mx,p.y);
+}
+ctx.stroke();
+}else{
+// 对角线翻转
+ctx.beginPath();
+for(let i=0;i<G.drawPoints.length;i++){
+const p=G.drawPoints[i];
+const dx=p.x-da.x,dy=p.y-da.y;
+const mx=da.x+(da.w-dy*(da.w/da.h));
+const my=da.y+(da.h-dx*(da.h/da.w));
+if(i===0)ctx.moveTo(mx,my);
+else ctx.lineTo(mx,my);
+}
+ctx.stroke();
+}
+ctx.restore();
+}
+
+function calculateScore(){
+const da=drawArea;
+const pattern=PATTERNS[G.currentPattern];
+const guidePts=pattern.generatePoints(da.w,da.h);
+
+// 将用户笔迹和参考线采样比较
+let totalDist=0,sampleCount=0;
+const step=3;
+
+for(let i=0;i<G.drawPoints.length;i+=step){
+const p=G.drawPoints[i];
+let minD=Infinity;
+for(const gp of guidePts){
+const gx=da.x+gp.x,gy=da.y+gp.y;
+const d=dist(p.x,p.y,gx,gy);
+if(d<minD)minD=d;
+}
+totalDist+=minD;
+sampleCount++;
+}
+
+const avgDist=sampleCount>0?totalDist/sampleCount:500;
+const maxAcceptDist=Math.min(da.w,da.h)*0.4;
+const accuracy=clamp(1-avgDist/maxAcceptDist,0,1);
+
+// 时间奖励
+const timeBonus=Math.max(0,(G.timeLimit-G.timer)*CONFIG.TIME_BONUS_FACTOR/G.timeLimit);
+
+let baseScore,stars;
+if(accuracy>=CONFIG.STAR3_THRESHOLD){baseScore=CONFIG.SCORE_PERFECT;stars=3}
+else if(accuracy>=CONFIG.STAR2_THRESHOLD){baseScore=CONFIG.SCORE_GOOD;stars=2}
+else if(accuracy>=CONFIG.STAR1_THRESHOLD){baseScore=CONFIG.SCORE_OK;stars=1}
+else{baseScore=10;stars=0}
+
+const finalScore=Math.round(baseScore*(1+timeBonus*0.5));
+G.stars=stars;
+G.totalStars+=stars;
+G.score+=finalScore;
+
+// 更新最高分
+if(G.score>G.bestScore){
+G.bestScore=G.score;
+localStorage.setItem('papercut_best',G.bestScore.toString());
+}
+
+return{score:finalScore,stars,accuracy};
+}
+
+function showResult(result){
+G.state='result';
+G.resultData=result;
+if(result.stars>=2){
+spawnStars(W/2,H/2,20);
+spawnParticle(W/2,H/2,'#ffd700',15,4);
+}
+}
+
+function nextPattern(){
+G.currentPattern++;
+if(G.currentPattern>=CONFIG.MAX_PATTERNS){
+G.state='gameover';
+AD.checkAndShow();
+}else{
+G.state='playing';
+startPattern();
+}
+}
+
+function updateUI(){
+document.getElementById('ui-pattern').textContent=(G.currentPattern+1)+'/'+CONFIG.MAX_PATTERNS;
+document.getElementById('ui-score').textContent=G.score;
+document.getElementById('ui-best').textContent=G.bestScore;
+}
+
+// ========== 结果界面 ==========
+function renderResult(){
+const r=G.resultData;
+ctx.save();
+
+// 半透明背景
+ctx.fillStyle='rgba(0,0,0,0.7)';
+ctx.fillRect(0,0,W,H);
+
+// 卡片
+const cw=Math.min(320,W*0.85),ch=280;
+const cx=W/2-cw/2,cy=H/2-ch/2;
+
+ctx.fillStyle='#1a1a2e';
+ctx.strokeStyle='#e94560';
+ctx.lineWidth=2;
+ctx.beginPath();
+ctx.roundRect(cx,cy,cw,ch,16);
+ctx.fill();
+ctx.stroke();
+
+ctx.textAlign='center';
+
+// 图案名
+ctx.fillStyle='#f5a623';
+ctx.font=`bold ${Math.min(24,W*0.055)}px 'Microsoft YaHei'`;
+ctx.fillText(PATTERNS[G.currentPattern].name+' 完成！',W/2,cy+40);
+
+// 星星
+for(let i=0;i<3;i++){
+ctx.fillStyle=i<r.stars?'#ffd700':'#333';
+ctx.font='36px sans-serif';
+ctx.fillText(i<r.stars?'★':'☆',W/2-45+i*45,cy+90);
+}
+
+// 分数
+ctx.fillStyle='#fff';
+ctx.font=`${Math.min(18,W*0.04)}px 'Microsoft YaHei'`;
+ctx.fillText(`精准度：${Math.round(r.accuracy*100)}%`,W/2,cy+130);
+ctx.fillText(`得分：+${r.score}`,W/2,cy+158);
+
+// 总分
+ctx.fillStyle='#e94560';
+ctx.font=`bold ${Math.min(16,W*0.035)}px 'Microsoft YaHei'`;
+ctx.fillText(`总分：${G.score}`,W/2,cy+190);
+
+// 按钮
+const bw=120,bh=40;
+const by=cy+ch-60;
+
+// 继续按钮
+ctx.fillStyle='#e94560';
+ctx.beginPath();
+ctx.roundRect(W/2-bw-10,by,bw,bh,20);
+ctx.fill();
+ctx.fillStyle='#fff';
+ctx.font=`${Math.min(16,W*0.035)}px 'Microsoft YaHei'`;
+ctx.fillText('继续',W/2-bw/2-10,by+26);
+
+// 重画按钮
+ctx.strokeStyle='#f5a623';
+ctx.lineWidth=1;
+ctx.beginPath();
+ctx.roundRect(W/2+10,by,bw,bh,20);
+ctx.stroke();
+ctx.fillStyle='#f5a623';
+ctx.fillText('重画',W/2+bw/2+10,by+26);
+
+G.resultBtns={
+continue:{x:W/2-bw-10,y:by,w:bw,h:bh},
+retry:{x:W/2+10,y:by,w:bw,h:bh}
+};
+
+ctx.restore();
+}
+
+// ========== 游戏结束界面 ==========
+function renderGameOver(){
+ctx.save();
+
+const grad=ctx.createLinearGradient(0,0,W,H);
+grad.addColorStop(0,'#1a0a2e');
+grad.addColorStop(1,'#0f3460');
+ctx.fillStyle=grad;
+ctx.fillRect(0,0,W,H);
+
+ctx.textAlign='center';
+
+// 标题
+ctx.fillStyle='#e94560';
+ctx.font=`bold ${Math.min(36,W*0.08)}px 'Microsoft YaHei'`;
+ctx.fillText('创作完成！',W/2,H*0.2);
+
+// 总星数
+ctx.fillStyle='#ffd700';
+ctx.font=`${Math.min(24,W*0.05)}px 'Microsoft YaHei'`;
+ctx.fillText(`总星数：${G.totalStars}/${CONFIG.MAX_PATTERNS*3}`,W/2,H*0.3);
+
+// 总分
+ctx.fillStyle='#fff';
+ctx.font=`${Math.min(28,W*0.06)}px 'Microsoft YaHei'`;
+ctx.fillText(`最终得分：${G.score}`,W/2,H*0.4);
+
+// 最高分
+ctx.fillStyle='rgba(255,255,255,0.6)';
+ctx.font=`${Math.min(16,W*0.035)}px 'Microsoft YaHei'`;
+ctx.fillText(`最高分：${G.bestScore}`,W/2,H*0.48);
+
+// 评价
+let grade='';
+if(G.totalStars>=CONFIG.MAX_PATTERNS*2.5)grade='剪纸大师 ✨';
+else if(G.totalStars>=CONFIG.MAX_PATTERNS*2)grade='巧手匠人';
+else if(G.totalStars>=CONFIG.MAX_PATTERNS*1.5)grade='学艺初成';
+else grade='继续努力';
+ctx.fillStyle='#f5a623';
+ctx.font=`bold ${Math.min(22,W*0.05)}px 'Microsoft YaHei'`;
+ctx.fillText(grade,W/2,H*0.56);
+
+// 按钮
+const bw=Math.min(180,W*0.45),bh=50;
+const by=H*0.68;
+
+const grad2=ctx.createLinearGradient(W/2-bw/2,by,W/2+bw/2,by+bh);
+grad2.addColorStop(0,'#e94560');
+grad2.addColorStop(1,'#ff6b6b');
+ctx.fillStyle=grad2;
+ctx.beginPath();
+ctx.roundRect(W/2-bw/2,by,bw,bh,25);
+ctx.fill();
+ctx.fillStyle='#fff';
+ctx.font=`bold ${Math.min(18,W*0.04)}px 'Microsoft YaHei'`;
+ctx.fillText('再来一次',W/2,by+33);
+
+G.gameoverBtn={x:W/2-bw/2,y:by,w:bw,h:bh};
+
+ctx.restore();
+}
+
+// ========== 暂停界面 ==========
+function renderPause(){
+ctx.save();
+ctx.fillStyle='rgba(0,0,0,0.7)';
+ctx.fillRect(0,0,W,H);
+
+ctx.textAlign='center';
+ctx.fillStyle='#fff';
+ctx.font=`bold ${Math.min(32,W*0.07)}px 'Microsoft YaHei'`;
+ctx.fillText('已暂停',W/2,H*0.35);
+
+const bw=Math.min(180,W*0.45),bh=50;
+const by=H*0.5;
+
+// 继续
+ctx.fillStyle='#e94560';
+ctx.beginPath();
+ctx.roundRect(W/2-bw/2,by,bw,bh,25);
+ctx.fill();
+ctx.fillStyle='#fff';
+ctx.font=`${Math.min(18,W*0.04)}px 'Microsoft YaHei'`;
+ctx.fillText('继续',W/2,by+33);
+
+// 重新开始
+ctx.strokeStyle='#f5a623';
+ctx.lineWidth=1;
+ctx.beginPath();
+ctx.roundRect(W/2-bw/2,by+65,bw,bh,25);
+ctx.stroke();
+ctx.fillStyle='#f5a623';
+ctx.fillText('重新开始',W/2,by+98);
+
+G.pauseBtns={
+resume:{x:W/2-bw/2,y:by,w:bw,h:bh},
+restart:{x:W/2-bw/2,y:by+65,w:bw,h:bh}
+};
+
+ctx.restore();
+}
+
+// ========== 游戏主渲染 ==========
+function renderGame(){
+// 背景
+const grad=ctx.createLinearGradient(0,0,0,H);
+grad.addColorStop(0,'#2c1810');
+grad.addColorStop(1,'#1a0a2e');
+ctx.fillStyle=grad;
+ctx.fillRect(0,0,W,H);
+
+renderFoldPaper();
+renderUserDrawing();
+
+// 计时器
+ctx.save();
+ctx.fillStyle=G.timer>G.timeLimit*0.8?'#e94560':'#fff';
+ctx.font=`${Math.min(16,W*0.035)}px 'Microsoft YaHei'`;
+ctx.textAlign='center';
+const timeLeft=Math.max(0,Math.ceil(G.timeLimit-G.timer));
+ctx.fillText(`剩余时间：${timeLeft}秒`,W/2,drawArea.y-15);
+ctx.restore();
+
+// 提示
+ctx.save();
+ctx.fillStyle='rgba(255,255,255,0.5)';
+ctx.font=`${Math.min(14,W*0.03)}px 'Microsoft YaHei'`;
+ctx.textAlign='center';
+const pattern=PATTERNS[G.currentPattern];
+const foldText=pattern.fold==='vertical'?'纵向折叠':'对角线折叠';
+ctx.fillText(`在左侧画出图案 | ${foldText} | 松手自动展开`,W/2,drawArea.y+drawArea.h+25);
+ctx.restore();
+}
+
+// ========== 输入处理 ==========
+function getPos(e){
+if(e.touches&&e.touches.length>0)return{x:e.touches[0].clientX,y:e.touches[0].clientY};
+return{x:e.clientX,y:e.clientY};
+}
+
+function handleDrawStart(x,y){
+if(G.state!=='playing')return;
+if(!pointInArea(x,y,drawArea))return;
+G.isDrawing=true;
+G.drawPoints=[{x,y}];
+}
+
+function handleDrawMove(x,y){
+if(!G.isDrawing)return;
+if(!pointInArea(x,y,drawArea))return;
+G.drawPoints.push({x,y});
+}
+
+function handleDrawEnd(){
+if(!G.isDrawing)return;
+G.isDrawing=false;
+if(G.drawPoints.length>5){
+const result=calculateScore();
+showResult(result);
+}
+}
+
+function handleClick(x,y){
+if(G.state==='menu'){
+if(G.menuBtns&&pointInArea(x,y,G.menuBtns.start)){
+startGame();
+}else if(G.menuBtns&&pointInArea(x,y,G.menuBtns.tutorial)){
+document.getElementById('tutorial').style.display='block';
+}
+return;
+}
+if(G.state==='paused'){
+if(G.pauseBtns){
+if(pointInArea(x,y,G.pauseBtns.resume)){G.state='playing'}
+else if(pointInArea(x,y,G.pauseBtns.restart)){startGame()}
+}
+return;
+}
+if(G.state==='result'){
+if(G.resultBtns){
+if(pointInArea(x,y,G.resultBtns.continue))nextPattern();
+else if(pointInArea(x,y,G.resultBtns.retry))startPattern();
+}
+return;
+}
+if(G.state==='gameover'){
+if(G.gameoverBtn&&pointInArea(x,y,G.gameoverBtn)){
+G.state='menu';
+}
+return;
+}
+}
+
+// ========== 事件绑定 ==========
+canvas.addEventListener('mousedown',e=>{
+const p=getPos(e);
+handleDrawStart(p.x,p.y);
+});
+canvas.addEventListener('mousemove',e=>{
+const p=getPos(e);
+handleDrawMove(p.x,p.y);
+});
+canvas.addEventListener('mouseup',()=>handleDrawEnd());
+canvas.addEventListener('click',e=>{
+const p=getPos(e);
+handleClick(p.x,p.y);
+});
+
+canvas.addEventListener('touchstart',e=>{
+e.preventDefault();
+const p=getPos(e);
+handleDrawStart(p.x,p.y);
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+e.preventDefault();
+const p=getPos(e);
+handleDrawMove(p.x,p.y);
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+e.preventDefault();
+handleDrawEnd();
+},{passive:false});
+
+document.getElementById('pause-btn').addEventListener('click',()=>{
+if(G.state==='playing')G.state='paused';
+else if(G.state==='paused')G.state='playing';
+});
+
+document.getElementById('tutorial-btn').addEventListener('click',()=>{
+document.getElementById('tutorial').style.display='none';
+if(!G.tutorialShown){
+G.tutorialShown=true;
+startGame();
+}
+});
+
+// ========== 游戏循环 ==========
+function gameLoop(timestamp){
+if(!G.lastTime)G.lastTime=timestamp;
+const dt=(timestamp-G.lastTime)/1000;
+G.lastTime=timestamp;
+
+resize();
+
+if(G.state==='menu'){
+renderMenu();
+}else if(G.state==='playing'){
+G.timer+=dt;
+if(G.timer>=G.timeLimit){
+const result=calculateScore();
+showResult(result);
+}
+renderGame();
+}else if(G.state==='paused'){
+renderGame();
+renderPause();
+}else if(G.state==='result'){
+renderGame();
+renderResult();
+}else if(G.state==='gameover'){
+renderGameOver();
+}
+
+updateParticles(dt);
+renderParticles();
+
+requestAnimationFrame(gameLoop);
+}
+
+// ========== 启动 ==========
+AD.init();
+document.getElementById('ui-best').textContent=G.bestScore;
+requestAnimationFrame(gameLoop);
+
+})();
+var sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sc)sc.onclick=function(){sp.style.display='none'}
+var ia2=document.getElementById('interstitialAd'),si2=document.getElementById('skipInterstitial');
+if(ia2&&si2)si2.onclick=function(){ia2.style.display='none'}
+window.showInterstitialAd=function(){if(ia2)ia2.style.display='flex'};
+</script>
+</body>
+</html>
