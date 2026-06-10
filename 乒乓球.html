@@ -9,6 +9,27 @@
 html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a2e; touch-action: none; user-select: none; -webkit-user-select: none; }
 #gameCanvas { display: block; margin: 0 auto; background: #111; }
 </style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
@@ -46,6 +67,16 @@ var CONFIG = {
     COLOR_BALL: '#ffffff',
     COLOR_NET: 'rgba(255,255,255,0.25)',
     COLOR_TRAIL: 'rgba(255,255,255,0.08)',
+    // 旋转
+    SPIN_FACTOR: 0.04,
+    MAX_SPIN: 3,
+    // 蓄力射击
+    POWER_CHARGE_RATE: 0.015,
+    POWER_MAX: 1.0,
+    POWER_THRESHOLD: 0.7,
+    POWER_SPEED_MULT: 1.8,
+    // 背景星星
+    STAR_COUNT: 50,
     // 广告
     AD_HEIGHT: 50,
     AD_SHOW_INTERVAL: 60000,
@@ -87,7 +118,24 @@ var G = {
     showSponsorModal: false,
     sponsorClickTime: 0,
     screenFlash: 0,
-    lastAdTime: 0
+    lastAdTime: 0,
+    // 旋转
+    spin: 0,
+    // 蓄力
+    power: 0,
+    powerCharging: false,
+    powerActive: false,
+    // 背景星星
+    stars: [],
+    // 音频上下文
+    audioCtx: null,
+    // 暂停按钮
+    pauseBtnRect: null,
+    // 每局开始动画
+    setTransition: 0,
+    setTransitionText: '',
+    // 发球指示
+    serveIndicator: 0
 };
 
 // ==================== 输入系统 ====================
@@ -100,6 +148,98 @@ var input = {
     clickY: -1,
     clickHandled: false
 };
+
+// ==================== 音效系统 ====================
+function initAudio() {
+    try {
+        G.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+        G.audioCtx = null;
+    }
+}
+
+function playSound(freq, duration, type, volume) {
+    if (!G.audioCtx) return;
+    try {
+        var osc = G.audioCtx.createOscillator();
+        var gain = G.audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(G.audioCtx.destination);
+        osc.type = type || 'sine';
+        osc.frequency.setValueAtTime(freq, G.audioCtx.currentTime);
+        gain.gain.setValueAtTime(volume || 0.15, G.audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, G.audioCtx.currentTime + (duration || 0.15));
+        osc.start(G.audioCtx.currentTime);
+        osc.stop(G.audioCtx.currentTime + (duration || 0.15));
+    } catch (e) {}
+}
+
+function playPaddleHit() {
+    playSound(440, 0.08, 'square', 0.12);
+    playSound(660, 0.06, 'sine', 0.08);
+}
+
+function playWallHit() {
+    playSound(220, 0.06, 'sine', 0.1);
+}
+
+function playScore() {
+    playSound(330, 0.15, 'triangle', 0.15);
+    setTimeout(function() { playSound(440, 0.2, 'triangle', 0.12); }, 100);
+}
+
+function playWin() {
+    var notes = [523, 659, 784, 1047];
+    for (var i = 0; i < notes.length; i++) {
+        (function(idx) {
+            setTimeout(function() { playSound(notes[idx], 0.25, 'sine', 0.12); }, idx * 120);
+        })(i);
+    }
+}
+
+function playPowerCharge() {
+    playSound(200, 0.1, 'sawtooth', 0.05);
+}
+
+function playPowerShot() {
+    playSound(150, 0.3, 'sawtooth', 0.15);
+    playSound(300, 0.2, 'square', 0.1);
+}
+
+// ==================== 背景星星 ====================
+function initStars() {
+    G.stars = [];
+    for (var i = 0; i < CONFIG.STAR_COUNT; i++) {
+        G.stars.push({
+            x: Math.random() * W,
+            y: Math.random() * H,
+            size: rand(0.5, 2.5) * scale,
+            alpha: rand(0.1, 0.5),
+            speed: rand(0.002, 0.008),
+            phase: rand(0, Math.PI * 2)
+        });
+    }
+}
+
+function updateStars() {
+    var time = Date.now() * 0.001;
+    for (var i = 0; i < G.stars.length; i++) {
+        var s = G.stars[i];
+        s.alpha = 0.15 + 0.35 * Math.sin(time * s.speed * 100 + s.phase);
+    }
+}
+
+function drawStars() {
+    for (var i = 0; i < G.stars.length; i++) {
+        var s = G.stars[i];
+        ctx.globalAlpha = s.alpha;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
 
 // ==================== 响应式尺寸 ====================
 function resizeCanvas() {
@@ -247,16 +387,23 @@ function updateBall() {
     G.ball.x += G.ball.vx;
     G.ball.y += G.ball.vy;
 
+    // 球旋转影响
+    G.ball.vy += G.spin * CONFIG.SPIN_FACTOR * 0.1 * scale;
+
     // 上下墙壁碰撞
     if (G.ball.y - G.ball.radius < 0) {
         G.ball.y = G.ball.radius;
         G.ball.vy = -G.ball.vy;
+        G.spin *= 0.5;
         spawnParticles(G.ball.x, G.ball.y, '#ffffff', 4);
+        playWallHit();
     }
     if (G.ball.y + G.ball.radius > H) {
         G.ball.y = H - G.ball.radius;
         G.ball.vy = -G.ball.vy;
+        G.spin *= 0.5;
         spawnParticles(G.ball.x, G.ball.y, '#ffffff', 4);
+        playWallHit();
     }
 
     // 玩家球拍碰撞
@@ -310,8 +457,23 @@ function bounceOffPaddle(paddle, dir) {
     // 速度递增
     G.ball.speed = Math.min(G.ball.speed + CONFIG.BALL_SPEED_INC * scale, CONFIG.BALL_SPEED_MAX * scale);
 
+    // 蓄力射击加速
+    if (dir === -1 && G.powerActive) {
+        G.ball.speed = Math.min(G.ball.speed * CONFIG.POWER_SPEED_MULT, CONFIG.BALL_SPEED_MAX * 1.5 * scale);
+        G.powerActive = false;
+        G.power = 0;
+        playPowerShot();
+        spawnParticles(G.ball.x, G.ball.y, '#ffcc00', 15);
+    }
+
     G.ball.vx = dir * Math.cos(bounceAngle) * G.ball.speed * edgeBoost;
     G.ball.vy = Math.sin(bounceAngle) * G.ball.speed * edgeBoost;
+
+    // 应用旋转效果
+    if (dir === -1) {
+        G.ball.vy += G.spin * CONFIG.SPIN_FACTOR * scale;
+    }
+    G.spin = 0;
 
     // 防止嵌入球拍
     if (dir === -1) {
@@ -329,7 +491,8 @@ function bounceOffPaddle(paddle, dir) {
     spawnParticles(G.ball.x, G.ball.y, dir === -1 ? CONFIG.COLOR_PADDLE_P1 : CONFIG.COLOR_PADDLE_AI, 6);
     G.screenFlash = 4;
 
-    // 音效（简化为视觉反馈）
+    // 音效
+    playPaddleHit();
 }
 
 function scorePoint(who) {
@@ -344,6 +507,7 @@ function scorePoint(who) {
     // 击球得分特效
     spawnParticles(G.ball.x, G.ball.y, who === 'p1' ? '#00ff88' : '#ff4466', 15);
     G.screenFlash = 8;
+    playScore();
 
     // 检查本局胜负
     if (G.p1Score >= CONFIG.WIN_SCORE || G.aiScore >= CONFIG.WIN_SCORE) {
@@ -372,10 +536,14 @@ function endSet(winner) {
     } else if (G.aiMatchWins >= CONFIG.MATCH_WINS) {
         endMatch('ai');
     } else {
-        // 新一局
+        // 新一局过渡动画
+        G.setTransition = 120;
+        G.setTransitionText = '第' + G.setNumber + '局';
         G.p1Score = 0;
         G.aiScore = 0;
         G.serveDir = (G.setNumber % 2 === 1) ? 1 : -1;
+        G.power = 0;
+        G.powerActive = false;
         resetBall();
     }
 }
@@ -384,13 +552,15 @@ function endMatch(winner) {
     G.state = 'matchOver';
     G.matchWinner = winner;
 
-    // 更新最高连胜
     if (winner === 'p1') {
+        playWin();
         var totalWins = G.p1MatchWins;
         if (totalWins > G.highScore) {
             G.highScore = totalWins;
             localStorage.setItem('pong_highScore', G.highScore.toString());
         }
+    } else {
+        playScore();
     }
 }
 
@@ -454,9 +624,33 @@ function updatePlayer() {
     // 键盘控制
     if (input.keys['ArrowUp'] || input.keys['w'] || input.keys['W']) {
         targetY -= moveSpeed;
+        // 旋转控制：球接近时按方向键增加旋转
+        if (G.ball.vx < 0 && Math.abs(G.ball.x - G.p1.x) < 100 * scale) {
+            G.spin = clamp(G.spin - 0.15, -CONFIG.MAX_SPIN, CONFIG.MAX_SPIN);
+        }
     }
     if (input.keys['ArrowDown'] || input.keys['s'] || input.keys['S']) {
         targetY += moveSpeed;
+        if (G.ball.vx < 0 && Math.abs(G.ball.x - G.p1.x) < 100 * scale) {
+            G.spin = clamp(G.spin + 0.15, -CONFIG.MAX_SPIN, CONFIG.MAX_SPIN);
+        }
+    }
+
+    // 蓄力（空格键）
+    if (input.keys[' ']) {
+        if (!G.powerCharging) {
+            G.powerCharging = true;
+        }
+        G.power = clamp(G.power + CONFIG.POWER_CHARGE_RATE, 0, CONFIG.POWER_MAX);
+        if (G.power >= CONFIG.POWER_THRESHOLD && G.power % 0.1 < 0.02) {
+            playPowerCharge();
+        }
+    } else if (G.powerCharging) {
+        // 释放蓄力
+        if (G.power >= CONFIG.POWER_THRESHOLD) {
+            G.powerActive = true;
+        }
+        G.powerCharging = false;
     }
 
     // 鼠标控制
@@ -615,6 +809,9 @@ function drawBackground() {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
+    // 背景星星
+    drawStars();
+
     // 微妙网格线
     ctx.strokeStyle = 'rgba(255,255,255,0.03)';
     ctx.lineWidth = 1;
@@ -631,6 +828,11 @@ function drawBackground() {
         ctx.lineTo(W, y);
         ctx.stroke();
     }
+
+    // 球台边线
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 2 * scale;
+    ctx.strokeRect(10 * scale, 10 * scale, W - 20 * scale, H - 20 * scale);
 }
 
 function drawNet() {
@@ -962,7 +1164,15 @@ function roundRect(ctx, x, y, w, h, r) {
 
 // ==================== 游戏循环 ====================
 function update() {
+    updateStars();
+
     if (G.state === 'playing') {
+        // 局间过渡
+        if (G.setTransition > 0) {
+            G.setTransition--;
+            return;
+        }
+
         updatePlayer();
         updateAI();
         updateBall();
@@ -974,10 +1184,17 @@ function update() {
         G.shakeY *= 0.85;
         if (G.screenFlash > 0) G.screenFlash--;
 
+        // 发球指示
+        if (G.serveTimer > 0) {
+            G.serveIndicator = G.serveTimer;
+        }
+
         // 广告检查
         if (Date.now() - G.lastAdTime > CONFIG.AD_SHOW_INTERVAL) {
             showInterstitialAd();
         }
+    } else if (G.state === 'menu') {
+        updateParticles();
     }
 }
 
@@ -1146,6 +1363,34 @@ function init() {
 }
 
 init();
+
+// 广告系统
+(function(){
+var sb=document.getElementById("sponsorBtn"),sp=document.getElementById("sponsorPanel"),sc=document.getElementById("sponsorClose");
+if(sb&&sp){sb.onclick=function(){sp.style.display="flex"};if(sc)sc.onclick=function(){sp.style.display="none"}}
+var ia=document.getElementById("interstitialAd"),si=document.getElementById("skipInterstitial");
+if(ia&&si){si.onclick=function(){ia.style.display="none"}}
+window.showInterstitialAd=function(){if(ia)ia.style.display="flex"};
+})();
 </script>
+
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
 </body>
 </html>
