@@ -454,7 +454,6 @@ const CONFIG = {
     MAP_SIZE: 2000,
     FOOD_COUNT: 300,
     PLAYER_INIT_SIZE: 40,
-    PLAYER_MAX_SIZE: 500,
     SPEED_BASE: 5,
     SPEED_DECAY: 0.005,
     VIEWPORT_PADDING: 100,
@@ -508,7 +507,7 @@ let gameMode = null; // 'traditional' | 'king'
 let canvasWidth, canvasHeight;
 let camera = { x: 0, y: 0 };
 let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
-let isMobile = false;
+let lastChosenMode = null; // track which mode button was last clicked for Enter key
 
 // 游戏对象
 let player = null;
@@ -528,7 +527,6 @@ let levelStartTime = 0;
 
 // 王者模式
 let hunterCount = 0;
-let prevHunterThreshold = 0;
 
 // 统计数据
 let stats = {
@@ -553,7 +551,6 @@ function init() {
     loadStats();
     updatePreviewStats();
     setupEventListeners();
-    checkMobile();
     requestAnimationFrame(gameLoop);
 }
 
@@ -589,10 +586,6 @@ function saveStats() {
 function updatePreviewStats() {
     document.getElementById('previewHighscore').textContent = stats.highscore;
     document.getElementById('previewEatCount').textContent = stats.totalEatCount;
-}
-
-function checkMobile() {
-    isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 // ============================================================
@@ -709,7 +702,8 @@ function createAI(typeKey) {
 }
 
 function createHunter() {
-    const size = CONFIG.HUNTER_SIZE_MIN + Math.random() * (CONFIG.HUNTER_SIZE_MAX - CONFIG.HUNTER_SIZE_MIN);
+    const maxSize = player ? Math.min(CONFIG.HUNTER_SIZE_MAX, player.size * 0.85) : CONFIG.HUNTER_SIZE_MAX;
+    const size = CONFIG.HUNTER_SIZE_MIN + Math.random() * (maxSize - CONFIG.HUNTER_SIZE_MIN);
     const margin = 150;
     const x = margin + Math.random() * (CONFIG.MAP_SIZE - margin * 2);
     const y = margin + Math.random() * (CONFIG.MAP_SIZE - margin * 2);
@@ -789,6 +783,9 @@ function togglePause() {
 
 function startGame(mode) {
     initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
     gameMode = mode;
 
     stats.score = 0;
@@ -803,7 +800,6 @@ function startGame(mode) {
     viruses = [];
     boss = null;
     hunterCount = 0;
-    prevHunterThreshold = 0;
 
     if (mode === 'traditional') {
         currentLevel = 0;
@@ -886,7 +882,6 @@ function setupKingMode() {
         foodItems.push(createFood());
     }
     hunterCount = 0;
-    prevHunterThreshold = 0;
 }
 
 function advanceLevel() {
@@ -981,6 +976,7 @@ function retryLevel() {
 
     stats.score = Math.max(0, stats.score - 50);
     stats.eatCount = Math.max(0, stats.eatCount - 2);
+    stats.maxSize = CONFIG.PLAYER_INIT_SIZE;
 
     player = createPlayer('玩家');
     setupLevel(currentLevel);
@@ -1002,6 +998,7 @@ function returnToMenu() {
     particles = [];
     viruses = [];
     boss = null;
+    GameMonetize.cleanup();
 }
 
 function setupHUD() {
@@ -1067,11 +1064,11 @@ function setupEventListeners() {
         togglePause();
     });
 
-    document.getElementById('btnTraditional').addEventListener('click', () => startGame('traditional'));
-    document.getElementById('btnKing').addEventListener('click', () => startGame('king'));
+    document.getElementById('btnTraditional').addEventListener('click', () => { lastChosenMode = 'traditional'; startGame('traditional'); });
+    document.getElementById('btnKing').addEventListener('click', () => { lastChosenMode = 'king'; startGame('king'); });
 
     document.getElementById('nicknameInput').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') startGame('traditional');
+        if (e.key === 'Enter') startGame(lastChosenMode || 'traditional');
     });
 
     document.getElementById('restartBtn').addEventListener('click', () => {
@@ -1454,6 +1451,8 @@ function checkCollisions() {
     for (let i = viruses.length - 1; i >= 0; i--) {
         const v = viruses[i];
         if (v.active && distance(player, v) < player.size + v.size) {
+            // Skip virus damage if player is temporarily invincible (e.g., just ate boss)
+            if (player.invincibleUntil && Date.now() < player.invincibleUntil) continue;
             if (player.size > CONFIG.VIRUS_THRESHOLD) {
                 const lostMass = player.size * CONFIG.VIRUS_DAMAGE_RATIO;
                 player.size -= lostMass;
@@ -1491,7 +1490,8 @@ function checkCollisions() {
         spawnParticles(boss.x, boss.y, boss.color, 30);
         playSound('eat');
         boss = null;
-        // Boss defeated → win
+        // Boss defeated → win: give brief invincibility to prevent death during transition window
+        player.invincibleUntil = Date.now() + 600;
         setTimeout(() => { if (gameState === 'playing' || gameState === 'paused') advanceLevel(); }, 500);
     }
 
@@ -1535,6 +1535,7 @@ function checkCollisions() {
                 if (b.isHunter) hunterCount--;
                 spawnParticles(b.x, b.y, b.color, 5);
                 aiCells.splice(j, 1);
+                j++; // compensate: element slid from j+1 into j, recheck it
             } else if (b.size > a.size * 1.1 && distance(b, a) < b.size - a.size * 0.3) {
                 b.size = Math.sqrt(a.size * a.size + b.size * b.size);
                 b.eatAnimation = 0.5;
@@ -1551,6 +1552,7 @@ function checkCollisions() {
     for (let i = aiCells.length - 1; i >= 0; i--) {
         const ai = aiCells[i];
         if (!player) break;
+        if (player.invincibleUntil && Date.now() < player.invincibleUntil) continue;
         if (ai.size > player.size * 1.1 && distance(ai, player) < ai.size - player.size * 0.3) {
             ai.size = Math.sqrt(ai.size * ai.size + player.size * player.size);
             ai.eatAnimation = 0.8;
@@ -1562,7 +1564,7 @@ function checkCollisions() {
     }
 
     // Boss吃玩家
-    if (boss && player && boss.size > player.size * 1.1 && distance(boss, player) < boss.size - player.size * 0.3) {
+    if (boss && player && !(player.invincibleUntil && Date.now() < player.invincibleUntil) && boss.size > player.size * 1.1 && distance(boss, player) < boss.size - player.size * 0.3) {
         boss.size = Math.sqrt(boss.size * boss.size + player.size * player.size);
         spawnParticles(player.x, player.y, player.color, 15);
         playSound('die');
@@ -1581,17 +1583,18 @@ function checkPlayerDeath() {
 }
 
 function checkLevelComplete() {
+    // Check king mode win first (before early return for traditional-only logic)
+    if (gameMode === 'king' && player && player.size >= CONFIG.KING_TARGET_SIZE) {
+        triggerWin();
+        return;
+    }
+
     if (gameMode !== 'traditional') return;
     const lvl = LEVEL_DATA[currentLevel];
     if (!lvl) return;
 
     if (!lvl.isBoss && levelEatCount >= lvl.targetEats) {
         advanceLevel();
-    }
-
-    // Check king mode win
-    if (gameMode === 'king' && player && player.size >= CONFIG.KING_TARGET_SIZE) {
-        triggerWin();
     }
 }
 
@@ -2173,6 +2176,7 @@ const GameMonetize = {
     _startGameOverWatcher() {
         const checkGameOver = () => {
             if (this._gameOverDetected) return;
+            if (typeof gameState !== 'undefined' && gameState === 'menu') return;
             const restartBtn = document.getElementById('restartBtn');
             if (restartBtn && restartBtn.offsetParent !== null && getComputedStyle(restartBtn).display !== 'none') {
                 this._gameOverDetected = true;
@@ -2229,6 +2233,9 @@ const GameMonetize = {
         if (Date.now() - this._lastInterTime < this.interstitial.cooldownMs) return;
         this._lastInterTime = Date.now(); this._deathCount = 0;
         this.requestRevive(null);
+    },
+    cleanup() {
+        if (this._goInterval) { clearInterval(this._goInterval); this._goInterval = null; }
     },
 };
 GameMonetize.init();
