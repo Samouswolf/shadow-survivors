@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>飞行棋</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 飞行棋 - 4人骰子对战棋盘游戏
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 600, H = 600;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 游戏配置
+// ============================================================
+var CELL_SIZE = 40;
+var BOARD_SIZE = 13;
+var PATH_LENGTH = 52; // 主路径长度
+var HOME_PATH = 6; // 终点路径长度
+
+var COLORS = ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71']; // 红、蓝、黄、绿
+var NAMES = ['红方', '蓝方', '黄方', '绿方'];
+
+// 起点位置（每个玩家的出发点）
+var START_POS = [
+    {x: 0, y: 4}, // 红
+    {x: 4, y: 12}, // 蓝
+    {x: 12, y: 8}, // 黄
+    {x: 8, y: 0} // 绿
+];
+
+// 安全点位置（自己的起点是安全点）
+var SAFE_POS = [0, 13, 26, 39];
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, rolling, moving, finished
+    currentPlayer: 0,
+    diceValue: 0,
+    diceRolling: false,
+    diceTimer: 0,
+    selectedPlane: -1,
+    planes: [], // 4个玩家，每个玩家4架飞机
+    path: [], // 主路径坐标
+    homePaths: [], // 终点路径坐标
+    winner: -1,
+    scores: [0, 0, 0, 0],
+    animating: false,
+    animTimer: 0
+};
+
+// 初始化路径
+function initPaths() {
+    // 简化路径：直接创建52格环形路径
+    G.path = [];
+    var pathCoords = [
+        // 红方出发（右侧）
+        {x:1,y:4},{x:2,y:4},{x:3,y:4},{x:4,y:4},{x:4,y:3},{x:4,y:2},{x:4,y:1},{x:4,y:0},
+        {x:5,y:0},{x:6,y:0},{x:7,y:0},{x:8,y:0},{x:8,y:1},{x:8,y:2},{x:8,y:3},{x:8,y:4},
+        // 蓝方出发（下方）
+        {x:9,y:4},{x:10,y:4},{x:11,y:4},{x:12,y:4},{x:12,y:5},{x:12,y:6},{x:12,y:7},{x:12,y:8},
+        {x:12,y:9},{x:12,y:10},{x:12,y:11},{x:12,y:12},{x:11,y:12},{x:10,y:12},{x:9,y:12},{x:8,y:12},
+        // 黄方出发（左侧）
+        {x:8,y:11},{x:8,y:10},{x:8,y:9},{x:8,y:8},{x:7,y:8},{x:6,y:8},{x:5,y:8},{x:4,y:8},
+        {x:4,y:9},{x:4,y:10},{x:4,y:11},{x:4,y:12},{x:3,y:12},{x:2,y:12},{x:1,y:12},{x:0,y:12},
+        // 绿方出发（上方）
+        {x:0,y:11},{x:0,y:10},{x:0,y:9},{x:0,y:8},{x:0,y:7},{x:0,y:6},{x:0,y:5},{x:0,y:4}
+    ];
+    G.path = pathCoords;
+    
+    // 终点路径（每个玩家6格）
+    G.homePaths = [
+        // 红：从位置0进入
+        [{x:1,y:5},{x:2,y:5},{x:3,y:5},{x:4,y:5},{x:5,y:5},{x:6,y:5}],
+        // 蓝：从位置13进入
+        [{x:11,y:5},{x:11,y:6},{x:11,y:7},{x:11,y:8},{x:11,y:9},{x:11,y:10}],
+        // 黄：从位置26进入
+        [{x:5,y:11},{x:6,y:11},{x:7,y:11},{x:8,y:11},{x:9,y:11},{x:10,y:11}],
+        // 绿：从位置39进入
+        [{x:5,y:1},{x:6,y:1},{x:7,y:1},{x:8,y:1},{x:9,y:1},{x:10,y:1}]
+    ];
+}
+
+// 初始化飞机
+function initPlanes() {
+    G.planes = [];
+    for (var p = 0; p < 4; p++) {
+        var playerPlanes = [];
+        for (var i = 0; i < 4; i++) {
+            playerPlanes.push({
+                state: 'home', // home, path, homePath, finished
+                pathPos: -1,
+                homePos: -1,
+                steps: 0
+            });
+        }
+        G.planes.push(playerPlanes);
+    }
+}
+
+// ============================================================
+// 音效系统
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxRoll() { 
+    for (var i = 0; i < 5; i++) {
+        setTimeout(function() { playTone(200 + Math.random() * 400, 0.05, 0.1, 'square'); }, i * 50);
+    }
+}
+function sfxMove() { playTone(400, 0.1, 0.12, 'triangle'); }
+function sfxTakeoff() { playTone(600, 0.15, 0.15, 'sine'); playTone(800, 0.1, 0.1, 'sine'); }
+function sfxCollision() { playTone(150, 0.2, 0.15, 'sawtooth'); }
+function sfxWin() {
+    [0,100,200,300,400].forEach(function(d,i) {
+        setTimeout(function() { playTone(440 + i * 110, 0.2, 0.15, 'sine'); }, d);
+    });
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+var mouseX = -1, mouseY = -1;
+
+canvas.addEventListener('click', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) / SCALE;
+    mouseY = (e.clientY - rect.top) / SCALE;
+    handleClick();
+});
+
+function handleClick() {
+    initAudio();
+    
+    if (G.state === 'menu') {
+        // 点击开始
+        if (mouseX > W/2 - 80 && mouseX < W/2 + 80 && mouseY > H/2 + 50 && mouseY < H/2 + 90) {
+            startGame();
+        }
+    } else if (G.state === 'rolling') {
+        // 点击骰子
+        if (mouseX > W/2 - 40 && mouseX < W/2 + 40 && mouseY > H - 80 && mouseY < H - 40) {
+            rollDice();
+        }
+    } else if (G.state === 'moving') {
+        // 选择飞机
+        selectPlane();
+    }
+}
+
+function startGame() {
+    G.state = 'rolling';
+    G.currentPlayer = 0;
+    initPaths();
+    initPlanes();
+    G.winner = -1;
+    G.scores = [0, 0, 0, 0];
+}
+
+function rollDice() {
+    if (G.diceRolling) return;
+    G.diceRolling = true;
+    G.diceTimer = 0;
+    sfxRoll();
+}
+
+function selectPlane() {
+    var player = G.currentPlayer;
+    var planes = G.planes[player];
+    var validPlanes = [];
+    
+    // 找出可以移动的飞机
+    for (var i = 0; i < 4; i++) {
+        var plane = planes[i];
+        if (plane.state === 'finished') continue;
+        
+        // 在家中，需要6才能起飞
+        if (plane.state === 'home') {
+            if (G.diceValue === 6) validPlanes.push(i);
+        } else {
+            // 在路径上或终点路径上，都可以移动
+            validPlanes.push(i);
+        }
+    }
+    
+    if (validPlanes.length === 0) {
+        // 没有可移动的飞机，换下一个玩家
+        nextPlayer();
+        return;
+    }
+    
+    // 检测点击位置
+    for (var i = 0; i < validPlanes.length; i++) {
+        var pi = validPlanes[i];
+        var plane = planes[pi];
+        var pos = getPlaneScreenPos(player, pi);
+        if (Math.abs(mouseX - pos.x) < 20 && Math.abs(mouseY - pos.y) < 20) {
+            G.selectedPlane = pi;
+            movePlane();
+            return;
+        }
+    }
+}
+
+function getPlaneScreenPos(player, planeIdx) {
+    var plane = G.planes[player][planeIdx];
+    var baseX = 30, baseY = 30;
+    
+    if (plane.state === 'home') {
+        // 在家中
+        var homePos = [
+            [{x:0,y:0},{x:1,y:0},{x:0,y:1},{x:1,y:1}], // 红
+            [{x:11,y:11},{x:12,y:11},{x:11,y:12},{x:12,y:12}], // 蓝
+            [{x:11,y:0},{x:12,y:0},{x:11,y:1},{x:12,y:1}], // 黄（修正）
+            [{x:0,y:11},{x:1,y:11},{x:0,y:12},{x:1,y:12}] // 绿
+        ];
+        var hp = homePos[player][planeIdx];
+        return {x: baseX + hp.x * CELL_SIZE + CELL_SIZE/2, y: baseY + hp.y * CELL_SIZE + CELL_SIZE/2};
+    } else if (plane.state === 'path') {
+        var p = G.path[plane.pathPos];
+        return {x: baseX + p.x * CELL_SIZE + CELL_SIZE/2, y: baseY + p.y * CELL_SIZE + CELL_SIZE/2};
+    } else if (plane.state === 'homePath') {
+        var hp = G.homePaths[player][plane.homePos];
+        return {x: baseX + hp.x * CELL_SIZE + CELL_SIZE/2, y: baseY + hp.y * CELL_SIZE + CELL_SIZE/2};
+    } else {
+        // finished - 在终点
+        return {x: W/2, y: H/2};
+    }
+}
+
+function movePlane() {
+    var player = G.currentPlayer;
+    var plane = G.planes[player][G.selectedPlane];
+    
+    if (plane.state === 'home' && G.diceValue === 6) {
+        // 起飞
+        plane.state = 'path';
+        plane.pathPos = player * 13; // 每个玩家的起点
+        plane.steps = 0;
+        sfxTakeoff();
+    } else if (plane.state === 'path') {
+        // 在主路径上移动
+        var newPos = plane.pathPos + G.diceValue;
+        plane.steps += G.diceValue;
+        
+        // 检查是否进入终点路径
+        var entryPoint = player * 13; // 每个玩家的终点入口
+        var stepsToEntry = 52 - plane.steps % 52;
+        
+        if (plane.steps >= 50 && plane.steps <= 56) {
+            // 进入终点路径
+            var homeSteps = plane.steps - 50;
+            if (homeSteps <= 5) {
+                plane.state = 'homePath';
+                plane.homePos = homeSteps;
+                plane.pathPos = -1;
+                sfxMove();
+            } else if (homeSteps === 6) {
+                // 到达终点
+                plane.state = 'finished';
+                G.scores[player]++;
+                sfxWin();
+                checkWinner();
+            } else {
+                // 超过终点，回退
+                plane.homePos = 5 - (homeSteps - 6);
+                plane.state = 'homePath';
+                sfxMove();
+            }
+        } else {
+            // 继续在主路径上
+            plane.pathPos = (plane.pathPos + G.diceValue) % 52;
+            sfxMove();
+            checkCollision(player, plane.pathPos);
+        }
+    } else if (plane.state === 'homePath') {
+        // 在终点路径上移动
+        var newHomePos = plane.homePos + G.diceValue;
+        if (newHomePos === 5) {
+            plane.state = 'finished';
+            G.scores[player]++;
+            sfxWin();
+            checkWinner();
+        } else if (newHomePos < 5) {
+            plane.homePos = newHomePos;
+            sfxMove();
+        } else {
+            // 超过终点，回退
+            plane.homePos = 5 - (newHomePos - 5);
+            sfxMove();
+        }
+    }
+    
+    // 如果掷了6，可以再掷一次
+    if (G.diceValue === 6 && G.winner === -1) {
+        G.state = 'rolling';
+        G.selectedPlane = -1;
+    } else {
+        nextPlayer();
+    }
+}
+
+function checkCollision(player, pathPos) {
+    // 检查是否撞到其他玩家的飞机
+    for (var p = 0; p < 4; p++) {
+        if (p === player) continue;
+        for (var i = 0; i < 4; i++) {
+            var plane = G.planes[p][i];
+            if (plane.state === 'path' && plane.pathPos === pathPos) {
+                // 撞到了，送回家
+                plane.state = 'home';
+                plane.pathPos = -1;
+                plane.steps = 0;
+                sfxCollision();
+            }
+        }
+    }
+}
+
+function checkWinner() {
+    for (var p = 0; p < 4; p++) {
+        if (G.scores[p] === 4) {
+            G.winner = p;
+            G.state = 'finished';
+            showInterstitial();
+            return;
+        }
+    }
+}
+
+function nextPlayer() {
+    G.currentPlayer = (G.currentPlayer + 1) % 4;
+    G.state = 'rolling';
+    G.selectedPlane = -1;
+    G.diceValue = 0;
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else {
+        drawBoard();
+        drawPlanes();
+        drawDice();
+        drawUI();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('飞行棋', W/2, H/2 - 60);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('4人骰子对战 · 棋盘移动', W/2, H/2);
+    
+    // 开始按钮
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('开始游戏', W/2, H/2 + 75);
+}
+
+function drawBoard() {
+    var baseX = 30, baseY = 30;
+    
+    // 绘制棋盘背景
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(baseX - 5, baseY - 5, BOARD_SIZE * CELL_SIZE + 10, BOARD_SIZE * CELL_SIZE + 10);
+    
+    // 绘制主路径格子
+    for (var i = 0; i < G.path.length; i++) {
+        var p = G.path[i];
+        var x = baseX + p.x * CELL_SIZE;
+        var y = baseY + p.y * CELL_SIZE;
+        
+        // 安全点用特殊颜色
+        var isSafe = SAFE_POS.indexOf(i) !== -1;
+        ctx.fillStyle = isSafe ? '#f39c12' : '#34495e';
+        ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+        
+        // 格子边框
+        ctx.strokeStyle = '#7f8c8d';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+        
+        // 格子编号（调试用）
+        // ctx.fillStyle = '#fff';
+        // ctx.font = '10px Microsoft YaHei';
+        // ctx.textAlign = 'center';
+        // ctx.fillText(i, x + CELL_SIZE/2, y + CELL_SIZE/2);
+    }
+    
+    // 绘制终点路径
+    for (var p = 0; p < 4; p++) {
+        for (var i = 0; i < G.homePaths[p].length; i++) {
+            var hp = G.homePaths[p][i];
+            var x = baseX + hp.x * CELL_SIZE;
+            var y = baseY + hp.y * CELL_SIZE;
+            
+            ctx.fillStyle = COLORS[p];
+            ctx.globalAlpha = 0.3 + i * 0.1;
+            ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+            ctx.globalAlpha = 1;
+            
+            ctx.strokeStyle = COLORS[p];
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+        }
+    }
+    
+    // 绘制家中区域
+    var homeAreas = [
+        {x: 0, y: 0, color: COLORS[0]}, // 红
+        {x: 11, y: 11, color: COLORS[1]}, // 蓝
+        {x: 11, y: 0, color: COLORS[2]}, // 黄
+        {x: 0, y: 11, color: COLORS[3]} // 绿
+    ];
+    
+    for (var i = 0; i < 4; i++) {
+        var ha = homeAreas[i];
+        ctx.fillStyle = ha.color;
+        ctx.globalAlpha = 0.2;
+        ctx.fillRect(baseX + ha.x * CELL_SIZE, baseY + ha.y * CELL_SIZE, 2 * CELL_SIZE, 2 * CELL_SIZE);
+        ctx.globalAlpha = 1;
+        
+        ctx.strokeStyle = ha.color;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(baseX + ha.x * CELL_SIZE, baseY + ha.y * CELL_SIZE, 2 * CELL_SIZE, 2 * CELL_SIZE);
+        
+        // 玩家名称
+        ctx.fillStyle = ha.color;
+        ctx.font = 'bold 14px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(NAMES[i], baseX + ha.x * CELL_SIZE + CELL_SIZE, baseY + ha.y * CELL_SIZE + CELL_SIZE + 25);
+    }
+    
+    // 绘制终点（中心）
+    ctx.fillStyle = '#f1c40f';
+    ctx.beginPath();
+    ctx.arc(W/2, H/2, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('终点', W/2, H/2 + 5);
+}
+
+function drawPlanes() {
+    for (var p = 0; p < 4; p++) {
+        for (var i = 0; i < 4; i++) {
+            var plane = G.planes[p][i];
+            if (plane.state === 'finished') continue;
+            
+            var pos = getPlaneScreenPos(p, i);
+            
+            // 绘制飞机
+            ctx.fillStyle = COLORS[p];
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, 15, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 飞机编号
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.fillText(i + 1, pos.x, pos.y + 4);
+            
+            // 当前玩家的飞机高亮
+            if (p === G.currentPlayer && G.state === 'moving') {
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 18, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+    }
+}
+
+function drawDice() {
+    var x = W/2 - 40, y = H - 80;
+    
+    // 骰子背景
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x, y, 80, 40);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, 80, 40);
+    
+    // 骰子数值
+    if (G.diceRolling) {
+        // 滚动动画
+        G.diceTimer++;
+        var tempValue = Math.floor(Math.random() * 6) + 1;
+        ctx.fillStyle = '#e74c3c';
+        ctx.font = 'bold 24px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(tempValue, W/2, y + 28);
+        
+        if (G.diceTimer > 20) {
+            G.diceRolling = false;
+            G.diceValue = Math.floor(Math.random() * 6) + 1;
+            G.state = 'moving';
+        }
+    } else {
+        ctx.fillStyle = G.diceValue === 6 ? '#e74c3c' : '#333';
+        ctx.font = 'bold 24px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(G.diceValue || '?', W/2, y + 28);
+    }
+    
+    // 提示文字
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    if (G.state === 'rolling') {
+        ctx.fillText('点击骰子掷骰', W/2, H - 20);
+    } else if (G.state === 'moving') {
+        ctx.fillText('选择飞机移动', W/2, H - 20);
+    }
+}
+
+function drawUI() {
+    // 当前玩家指示
+    ctx.fillStyle = COLORS[G.currentPlayer];
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText(NAMES[G.currentPlayer] + ' 的回合', 10, 20);
+    
+    // 分数
+    ctx.font = '14px Microsoft YaHei';
+    for (var p = 0; p < 4; p++) {
+        ctx.fillStyle = COLORS[p];
+        ctx.fillText(NAMES[p] + ': ' + G.scores[p] + '/4', 10 + p * 100, 40);
+    }
+    
+    // 胜利提示
+    if (G.winner !== -1) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, W, H);
+        
+        ctx.fillStyle = COLORS[G.winner];
+        ctx.font = 'bold 48px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(NAMES[G.winner] + ' 获胜!', W/2, H/2 - 20);
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px Microsoft YaHei';
+        ctx.fillText('点击重新开始', W/2, H/2 + 30);
+    }
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

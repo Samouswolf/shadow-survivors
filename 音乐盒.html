@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>音乐盒</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 音乐盒 - 点击演奏旋律，音符可视化
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 800, H = 600;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 音阶配置
+// ============================================================
+// C大调音阶：C D E F G A B C（一个八度）
+var NOTES = [
+    {name: 'C', freq: 261.63, color: '#e74c3c'},
+    {name: 'D', freq: 293.66, color: '#e67e22'},
+    {name: 'E', freq: 329.63, color: '#f1c40f'},
+    {name: 'F', freq: 349.23, color: '#2ecc71'},
+    {name: 'G', freq: 392.00, color: '#3498db'},
+    {name: 'A', freq: 440.00, color: '#9b59b6'},
+    {name: 'B', freq: 493.88, color: '#1abc9c'},
+    {name: 'C\'', freq: 523.25, color: '#e74c3c'}
+];
+
+var COL = {
+    bg: '#0a0a1a',
+    pianoBg: '#2c3e50',
+    pianoKey: '#ecf0f1',
+    pianoKeyActive: '#fff',
+    pianoBorder: '#7f8c8d',
+    text: '#fff'
+};
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing
+    activeNotes: [],
+    particles: [],
+    ripples: [],
+    score: 0,
+    notesPlayed: 0,
+    melody: [],
+    melodyTimer: 0,
+    autoPlay: false,
+    autoPlayTimer: 0,
+    currentMelodyNote: 0
+};
+
+// 预设旋律
+var PRESET_MELODIES = [
+    // 小星星
+    {name: '小星星', notes: [0,0,4,4,5,5,4,-1,3,3,2,2,1,1,0,-1,4,4,3,3,2,2,1,-1,4,4,3,3,2,2,1,-1,0,0,4,4,5,5,4,-1,3,3,2,2,1,1,0]},
+    // 两只老虎
+    {name: '两只老虎', notes: [1,1,2,2,3,3,1,-1,1,1,2,2,3,3,1,-1,3,3,4,4,5,5,-1,3,3,4,4,5,5,-1,5,6,5,4,3,3,1,-1,5,6,5,4,3,3,1,-1,1,1,3,3,1,1,0]},
+    // 欢乐颂
+    {name: '欢乐颂', notes: [3,3,4,5,5,4,3,2,1,1,2,3,3,2,2,-1,3,3,4,5,5,4,3,2,1,1,2,3,2,1,1]}
+];
+
+var currentMelodyIdx = 0;
+
+// ============================================================
+// 音效系统（Web Audio API）
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function playNote(freq, dur, vol) {
+    if (!audioCtx) return;
+    var now = audioCtx.currentTime;
+    
+    // 主音
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(vol || 0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + dur);
+    
+    // 泛音（更丰富的音色）
+    var osc2 = audioCtx.createOscillator();
+    var gain2 = audioCtx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(freq * 2, now);
+    gain2.gain.setValueAtTime(vol * 0.15 || 0.05, now);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + dur * 0.8);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(now);
+    osc2.stop(now + dur);
+}
+
+function playNoteByIndex(idx, dur) {
+    if (idx < 0 || idx >= NOTES.length) return;
+    playNote(NOTES[idx].freq, dur || 0.5, 0.3);
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / SCALE;
+    var y = (e.clientY - rect.top) / SCALE;
+    
+    if (G.state === 'menu') {
+        // 开始按钮
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+        // 选择旋律
+        for (var i = 0; i < PRESET_MELODIES.length; i++) {
+            var btnY = H/2 - 60 + i * 35;
+            if (x > W/2 - 100 && x < W/2 + 100 && y > btnY && y < btnY + 30) {
+                currentMelodyIdx = i;
+            }
+        }
+    } else if (G.state === 'playing') {
+        handleNoteClick(x, y);
+    }
+});
+
+function startGame() {
+    G.state = 'playing';
+    G.score = 0;
+    G.notesPlayed = 0;
+    G.activeNotes = [];
+    G.particles = [];
+    G.ripples = [];
+    G.autoPlay = false;
+    G.autoPlayTimer = 0;
+    G.currentMelodyNote = 0;
+}
+
+function handleNoteClick(x, y) {
+    var pianoY = H - 150;
+    var keyWidth = 80;
+    var keyHeight = 120;
+    var startX = (W - NOTES.length * keyWidth) / 2;
+    
+    for (var i = 0; i < NOTES.length; i++) {
+        var keyX = startX + i * keyWidth;
+        if (x >= keyX && x <= keyX + keyWidth && y >= pianoY && y <= pianoY + keyHeight) {
+            triggerNote(i);
+            return;
+        }
+    }
+    
+    // 自动播放按钮
+    if (x > W - 120 && x < W - 20 && y > 20 && y < 50) {
+        G.autoPlay = !G.autoPlay;
+        if (G.autoPlay) {
+            G.currentMelodyNote = 0;
+            G.autoPlayTimer = 0;
+        }
+    }
+    
+    // 返回菜单
+    if (x > 20 && x < 120 && y > 20 && y < 50) {
+        G.state = 'menu';
+    }
+}
+
+function triggerNote(idx) {
+    if (idx < 0 || idx >= NOTES.length) return;
+    
+    var note = NOTES[idx];
+    playNote(note.freq, 0.5, 0.3);
+    
+    // 添加活跃音符
+    G.activeNotes.push({
+        idx: idx,
+        y: H - 150,
+        vy: -3,
+        life: 60,
+        color: note.color,
+        name: note.name
+    });
+    
+    // 添加涟漪
+    var keyWidth = 80;
+    var startX = (W - NOTES.length * keyWidth) / 2;
+    G.ripples.push({
+        x: startX + idx * keyWidth + keyWidth/2,
+        y: H - 150 + 60,
+        r: 10,
+        maxR: 100,
+        color: note.color,
+        life: 30
+    });
+    
+    // 添加粒子
+    for (var i = 0; i < 10; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 2 + Math.random() * 4;
+        G.particles.push({
+            x: startX + idx * keyWidth + keyWidth/2,
+            y: H - 150,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 2,
+            color: note.color,
+            life: 40 + Math.random() * 20
+        });
+    }
+    
+    G.notesPlayed++;
+    G.score += 10;
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 游戏逻辑
+// ============================================================
+function update() {
+    // 更新活跃音符
+    for (var i = G.activeNotes.length - 1; i >= 0; i--) {
+        var note = G.activeNotes[i];
+        note.y += note.vy;
+        note.life--;
+        if (note.life <= 0 || note.y < 0) {
+            G.activeNotes.splice(i, 1);
+        }
+    }
+    
+    // 更新粒子
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1; // 重力
+        p.life--;
+        if (p.life <= 0) {
+            G.particles.splice(i, 1);
+        }
+    }
+    
+    // 更新涟漪
+    for (var i = G.ripples.length - 1; i >= 0; i--) {
+        var r = G.ripples[i];
+        r.r += 3;
+        r.life--;
+        if (r.life <= 0 || r.r > r.maxR) {
+            G.ripples.splice(i, 1);
+        }
+    }
+    
+    // 自动播放旋律
+    if (G.state === 'playing' && G.autoPlay) {
+        G.autoPlayTimer++;
+        if (G.autoPlayTimer >= 15) { // 每15帧播放一个音符
+            G.autoPlayTimer = 0;
+            var melody = PRESET_MELODIES[currentMelodyIdx].notes;
+            if (G.currentMelodyNote < melody.length) {
+                var noteIdx = melody[G.currentMelodyNote];
+                if (noteIdx >= 0) {
+                    triggerNote(noteIdx);
+                }
+                G.currentMelodyNote++;
+            } else {
+                // 旋律结束，重新开始
+                G.currentMelodyNote = 0;
+            }
+        }
+    }
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else {
+        drawGame();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('音乐盒', W/2, H/2 - 120);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('点击琴键演奏旋律', W/2, H/2 - 80);
+    
+    // 旋律选择
+    ctx.font = '16px Microsoft YaHei';
+    for (var i = 0; i < PRESET_MELODIES.length; i++) {
+        var btnY = H/2 - 60 + i * 35;
+        ctx.fillStyle = i === currentMelodyIdx ? '#3498db' : '#34495e';
+        ctx.fillRect(W/2 - 100, btnY, 200, 30);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(PRESET_MELODIES[i].name, W/2, btnY + 20);
+    }
+    
+    // 开始按钮
+    ctx.fillStyle = '#2ecc71';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('开始演奏', W/2, H/2 + 75);
+}
+
+function drawGame() {
+    update();
+    
+    // 绘制涟漪
+    for (var i = 0; i < G.ripples.length; i++) {
+        var r = G.ripples[i];
+        ctx.globalAlpha = r.life / 30;
+        ctx.strokeStyle = r.color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    
+    // 绘制粒子
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life / 60;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    
+    // 绘制活跃音符（上升的音符符号）
+    for (var i = 0; i < G.activeNotes.length; i++) {
+        var note = G.activeNotes[i];
+        ctx.globalAlpha = note.life / 60;
+        ctx.fillStyle = note.color;
+        ctx.font = 'bold 32px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('♪', (W - NOTES.length * 80) / 2 + note.idx * 80 + 40, note.y);
+    }
+    ctx.globalAlpha = 1;
+    
+    // 绘制钢琴
+    drawPiano();
+    
+    // 绘制UI
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('音符: ' + G.notesPlayed, 20, 30);
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillText('得分: ' + G.score, 20, 55);
+    
+    // 返回按钮
+    ctx.fillStyle = '#34495e';
+    ctx.fillRect(20, 20, 100, 30);
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('返回菜单', 70, 40);
+    
+    // 自动播放按钮
+    ctx.fillStyle = G.autoPlay ? '#2ecc71' : '#34495e';
+    ctx.fillRect(W - 120, 20, 100, 30);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(G.autoPlay ? '停止播放' : '自动播放', W - 70, 40);
+    
+    // 当前旋律名称
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('当前旋律: ' + PRESET_MELODIES[currentMelodyIdx].name, W/2, 30);
+}
+
+function drawPiano() {
+    var pianoY = H - 150;
+    var keyWidth = 80;
+    var keyHeight = 120;
+    var startX = (W - NOTES.length * keyWidth) / 2;
+    
+    // 钢琴背景
+    ctx.fillStyle = COL.pianoBg;
+    ctx.fillRect(startX - 10, pianoY - 10, NOTES.length * keyWidth + 20, keyHeight + 20);
+    
+    // 绘制琴键
+    for (var i = 0; i < NOTES.length; i++) {
+        var note = NOTES[i];
+        var x = startX + i * keyWidth;
+        
+        // 检查是否活跃
+        var isActive = false;
+        for (var j = 0; j < G.activeNotes.length; j++) {
+            if (G.activeNotes[j].idx === i) {
+                isActive = true;
+                break;
+            }
+        }
+        
+        // 琴键主体
+        ctx.fillStyle = isActive ? note.color : COL.pianoKey;
+        ctx.fillRect(x, pianoY, keyWidth, keyHeight);
+        
+        // 琴键边框
+        ctx.strokeStyle = COL.pianoBorder;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, pianoY, keyWidth, keyHeight);
+        
+        // 音符名称
+        ctx.fillStyle = isActive ? '#fff' : '#333';
+        ctx.font = 'bold 24px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(note.name, x + keyWidth/2, pianoY + keyHeight - 20);
+        
+        // 高亮效果
+        if (isActive) {
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fillRect(x, pianoY, keyWidth, keyHeight/3);
+        }
+    }
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

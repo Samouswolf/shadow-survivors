@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>简单跑酷</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:'Microsoft YaHei',sans-serif;touch-action:none}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 简单跑酷 - 跑酷躲避障碍，收集金币
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 800, H = 400;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 游戏配置
+// ============================================================
+var GROUND_Y = 320;
+var PLAYER_SIZE = 40;
+var GRAVITY = 0.8;
+var JUMP_FORCE = -15;
+var GAME_SPEED = 6;
+
+var COL = {
+    bg: '#0a0a1a',
+    ground: '#34495e',
+    player: '#3498db',
+    obstacle: '#e74c3c',
+    coin: '#f1c40f',
+    text: '#fff',
+    score: '#f1c40f'
+};
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing, gameOver
+    player: {
+        x: 100,
+        y: GROUND_Y - PLAYER_SIZE,
+        vy: 0,
+        jumping: false,
+        grounded: true
+    },
+    obstacles: [],
+    coins: [],
+    particles: [],
+    score: 0,
+    distance: 0,
+    speed: GAME_SPEED,
+    spawnTimer: 0,
+    coinTimer: 0,
+    highScore: 0,
+    highDistance: 0
+};
+
+// ============================================================
+// 音效系统
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxJump() { playTone(400, 0.1, 0.12, 'triangle'); }
+function sfxCoin() { playTone(800, 0.1, 0.1, 'sine'); playTone(1000, 0.08, 0.08, 'sine'); }
+function sfxHit() { playTone(100, 0.3, 0.2, 'sawtooth'); }
+
+// ============================================================
+// 输入处理
+// ============================================================
+var keys = {};
+document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (G.state === 'playing' && (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w')) {
+        jump();
+    }
+});
+document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / SCALE;
+    var y = (e.clientY - rect.top) / SCALE;
+    
+    if (G.state === 'menu') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    } else if (G.state === 'playing') {
+        jump();
+    } else if (G.state === 'gameOver') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    }
+});
+
+function jump() {
+    if (G.player.grounded) {
+        G.player.vy = JUMP_FORCE;
+        G.player.jumping = true;
+        G.player.grounded = false;
+        sfxJump();
+    }
+}
+
+function startGame() {
+    G.state = 'playing';
+    G.player.x = 100;
+    G.player.y = GROUND_Y - PLAYER_SIZE;
+    G.player.vy = 0;
+    G.player.jumping = false;
+    G.player.grounded = true;
+    G.obstacles = [];
+    G.coins = [];
+    G.particles = [];
+    G.score = 0;
+    G.distance = 0;
+    G.speed = GAME_SPEED;
+    G.spawnTimer = 0;
+    G.coinTimer = 0;
+}
+
+function spawnObstacle() {
+    var type = Math.floor(Math.random() * 3);
+    var height, width;
+    
+    if (type === 0) {
+        // 小障碍
+        height = 30;
+        width = 30;
+    } else if (type === 1) {
+        // 中障碍
+        height = 50;
+        width = 40;
+    } else {
+        // 大障碍
+        height = 70;
+        width = 50;
+    }
+    
+    G.obstacles.push({
+        x: W,
+        y: GROUND_Y - height,
+        width: width,
+        height: height,
+        type: type
+    });
+}
+
+function spawnCoin() {
+    var y = GROUND_Y - 60 - Math.random() * 100;
+    
+    G.coins.push({
+        x: W,
+        y: y,
+        size: 20,
+        collected: false,
+        rotation: 0
+    });
+}
+
+function spawnParticles(x, y, color) {
+    for (var i = 0; i < 10; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 2 + Math.random() * 4;
+        G.particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            color: color,
+            life: 30
+        });
+    }
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 游戏逻辑
+// ============================================================
+function update() {
+    if (G.state !== 'playing') return;
+    
+    // 更新玩家
+    G.player.vy += GRAVITY;
+    G.player.y += G.player.vy;
+    
+    // 地面碰撞
+    if (G.player.y >= GROUND_Y - PLAYER_SIZE) {
+        G.player.y = GROUND_Y - PLAYER_SIZE;
+        G.player.vy = 0;
+        G.player.grounded = true;
+        G.player.jumping = false;
+    }
+    
+    // 更新距离和速度
+    G.distance += G.speed;
+    G.speed = GAME_SPEED + Math.floor(G.distance / 1000) * 0.5;
+    
+    // 生成障碍物
+    G.spawnTimer++;
+    if (G.spawnTimer >= 100 - Math.floor(G.distance / 500)) {
+        G.spawnTimer = 0;
+        spawnObstacle();
+    }
+    
+    // 生成金币
+    G.coinTimer++;
+    if (G.coinTimer >= 80) {
+        G.coinTimer = 0;
+        if (Math.random() > 0.3) {
+            spawnCoin();
+        }
+    }
+    
+    // 更新障碍物
+    for (var i = G.obstacles.length - 1; i >= 0; i--) {
+        var obs = G.obstacles[i];
+        obs.x -= G.speed;
+        
+        // 碰撞检测
+        if (G.player.x + PLAYER_SIZE > obs.x && G.player.x < obs.x + obs.width &&
+            G.player.y + PLAYER_SIZE > obs.y) {
+            G.state = 'gameOver';
+            sfxHit();
+            spawnParticles(G.player.x + PLAYER_SIZE/2, G.player.y + PLAYER_SIZE/2, COL.obstacle);
+            if (G.distance > G.highDistance) G.highDistance = G.distance;
+            if (G.score > G.highScore) G.highScore = G.score;
+            showInterstitial();
+            return;
+        }
+        
+        // 移除屏幕外的障碍物
+        if (obs.x < -obs.width) {
+            G.obstacles.splice(i, 1);
+            G.score += 10;
+        }
+    }
+    
+    // 更新金币
+    for (var i = G.coins.length - 1; i >= 0; i--) {
+        var coin = G.coins[i];
+        coin.x -= G.speed;
+        coin.rotation += 0.1;
+        
+        // 收集检测
+        if (!coin.collected) {
+            var dx = (G.player.x + PLAYER_SIZE/2) - coin.x;
+            var dy = (G.player.y + PLAYER_SIZE/2) - coin.y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < PLAYER_SIZE/2 + coin.size/2) {
+                coin.collected = true;
+                G.score += 50;
+                sfxCoin();
+                spawnParticles(coin.x, coin.y, COL.coin);
+            }
+        }
+        
+        // 移除屏幕外的金币
+        if (coin.x < -coin.size) {
+            G.coins.splice(i, 1);
+        }
+    }
+    
+    // 更新粒子
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1;
+        p.life--;
+        if (p.life <= 0) {
+            G.particles.splice(i, 1);
+        }
+    }
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    
+    update();
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else if (G.state === 'gameOver') {
+        drawGameOver();
+    } else {
+        drawGame();
+    }
+}
+
+function drawMenu() {
+    // 绘制地面
+    ctx.fillStyle = COL.ground;
+    ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('简单跑酷', W/2, H/2 - 60);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('跳跃躲避障碍 · 收集金币', W/2, H/2);
+    
+    ctx.font = '16px Microsoft YaHei';
+    ctx.fillText('点击或按空格键跳跃', W/2, H/2 + 30);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('开始游戏', W/2, H/2 + 75);
+    
+    if (G.highScore > 0) {
+        ctx.fillStyle = COL.score;
+        ctx.font = '18px Microsoft YaHei';
+        ctx.fillText('最高分: ' + G.highScore + ' | 最远: ' + G.highDistance + 'm', W/2, H/2 + 110);
+    }
+}
+
+function drawGameOver() {
+    drawGame();
+    
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', W/2, H/2 - 40);
+    
+    ctx.font = '24px Microsoft YaHei';
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score, W/2, H/2);
+    
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('距离: ' + G.distance + 'm', W/2, H/2 + 30);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('重新开始', W/2, H/2 + 75);
+}
+
+function drawGame() {
+    // 绘制地面
+    ctx.fillStyle = COL.ground;
+    ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+    
+    // 绘制地面线条
+    ctx.strokeStyle = '#7f8c8d';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y);
+    ctx.lineTo(W, GROUND_Y);
+    ctx.stroke();
+    
+    // 绘制障碍物
+    for (var i = 0; i < G.obstacles.length; i++) {
+        var obs = G.obstacles[i];
+        ctx.fillStyle = COL.obstacle;
+        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+        
+        // 障碍物边框
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
+    }
+    
+    // 绘制金币
+    for (var i = 0; i < G.coins.length; i++) {
+        var coin = G.coins[i];
+        if (coin.collected) continue;
+        
+        ctx.fillStyle = COL.coin;
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.size/2, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 金币光泽
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(coin.x - 3, coin.y - 3, coin.size/4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    // 绘制玩家
+    ctx.fillStyle = COL.player;
+    ctx.fillRect(G.player.x, G.player.y, PLAYER_SIZE, PLAYER_SIZE);
+    
+    // 玩家光泽
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(G.player.x, G.player.y, PLAYER_SIZE, PLAYER_SIZE/3);
+    
+    // 玩家边框
+    ctx.strokeStyle = '#2980b9';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(G.player.x, G.player.y, PLAYER_SIZE, PLAYER_SIZE);
+    
+    // 绘制粒子
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life / 30;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    
+    // 绘制UI
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 24px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('得分: ' + G.score, 20, 30);
+    
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Microsoft YaHei';
+    ctx.fillText('距离: ' + G.distance + 'm', 20, 55);
+    
+    ctx.fillStyle = COL.score;
+    ctx.textAlign = 'right';
+    ctx.fillText('速度: ' + G.speed.toFixed(1), W - 20, 30);
+    
+    // 提示
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('点击或按空格键跳跃', W/2, H - 20);
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

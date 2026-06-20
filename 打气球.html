@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>打气球</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 打气球 - 点击气球得分，计时挑战
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 800, H = 600;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 游戏配置
+// ============================================================
+var BALLOON_TYPES = [
+    {color: '#e74c3c', size: 40, speed: 2, points: 10, name: '普通'}, // 红色普通
+    {color: '#3498db', size: 50, speed: 1.5, points: 20, name: '蓝色'}, // 蓝色中等
+    {color: '#f1c40f', size: 60, speed: 1, points: 30, name: '金色'}, // 金色大型
+    {color: '#2ecc71', size: 30, speed: 3, points: 50, name: '绿色'}, // 绿色小型快速
+    {color: '#9b59b6', size: 70, speed: 0.8, points: 100, name: '紫色'}, // 紫色巨型
+    {color: '#e67e22', size: 35, speed: 2.5, points: -20, name: '炸弹'} // 橙色炸弹（扣分）
+];
+
+var COL = {
+    bg: '#0a0a1a',
+    text: '#fff',
+    score: '#f1c40f',
+    timer: '#e74c3c'
+};
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing, gameOver
+    balloons: [],
+    particles: [],
+    score: 0,
+    timer: 60,
+    combo: 0,
+    comboTimer: 0,
+    balloonsHit: 0,
+    highScore: 0,
+    spawnTimer: 0,
+    spawnRate: 60 // 每60帧生成一个气球
+};
+
+// ============================================================
+// 音效系统
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxPop() { playTone(600, 0.1, 0.15, 'sine'); }
+function sfxBomb() { playTone(100, 0.3, 0.2, 'sawtooth'); }
+function sfxCombo() { playTone(800, 0.12, 0.1, 'sine'); playTone(1000, 0.1, 0.08, 'sine'); }
+
+// ============================================================
+// 输入处理
+// ============================================================
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / SCALE;
+    var y = (e.clientY - rect.top) / SCALE;
+    
+    if (G.state === 'menu') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    } else if (G.state === 'playing') {
+        handleBalloonClick(x, y);
+    } else if (G.state === 'gameOver') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    }
+});
+
+function startGame() {
+    G.state = 'playing';
+    G.score = 0;
+    G.timer = 60;
+    G.combo = 0;
+    G.comboTimer = 0;
+    G.balloonsHit = 0;
+    G.balloons = [];
+    G.particles = [];
+    G.spawnTimer = 0;
+    G.spawnRate = 60;
+}
+
+function handleBalloonClick(x, y) {
+    for (var i = G.balloons.length - 1; i >= 0; i--) {
+        var b = G.balloons[i];
+        var dx = x - b.x;
+        var dy = y - b.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist <= b.size) {
+            // 点击到气球
+            var type = BALLOON_TYPES[b.type];
+            
+            if (type.points < 0) {
+                // 炸弹气球
+                G.score += type.points;
+                G.combo = 0;
+                sfxBomb();
+                spawnExplosion(b.x, b.y, type.color);
+            } else {
+                // 正常气球
+                G.score += type.points * (1 + G.combo * 0.1);
+                G.combo++;
+                G.comboTimer = 30;
+                G.balloonsHit++;
+                sfxPop();
+                if (G.combo > 1) sfxCombo();
+                spawnParticles(b.x, b.y, type.color);
+            }
+            
+            G.balloons.splice(i, 1);
+            return;
+        }
+    }
+}
+
+function spawnBalloon() {
+    var typeIdx = Math.floor(Math.random() * BALLOON_TYPES.length);
+    // 炸弹气球概率较低
+    if (typeIdx === 5 && Math.random() > 0.15) {
+        typeIdx = Math.floor(Math.random() * 5);
+    }
+    
+    var type = BALLOON_TYPES[typeIdx];
+    
+    G.balloons.push({
+        x: Math.random() * (W - type.size * 2) + type.size,
+        y: H + type.size,
+        vx: (Math.random() - 0.5) * 2,
+        vy: -type.speed,
+        size: type.size,
+        type: typeIdx,
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: 0.05 + Math.random() * 0.05
+    });
+}
+
+function spawnParticles(x, y, color) {
+    for (var i = 0; i < 15; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 3 + Math.random() * 5;
+        G.particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            color: color,
+            life: 40 + Math.random() * 20,
+            size: 3 + Math.random() * 3
+        });
+    }
+}
+
+function spawnExplosion(x, y, color) {
+    for (var i = 0; i < 30; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 5 + Math.random() * 8;
+        G.particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            color: color,
+            life: 50 + Math.random() * 30,
+            size: 5 + Math.random() * 5
+        });
+    }
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 游戏逻辑
+// ============================================================
+function update() {
+    if (G.state !== 'playing') return;
+    
+    // 更新计时器
+    G.timer -= 1/60;
+    if (G.timer <= 0) {
+        G.state = 'gameOver';
+        if (G.score > G.highScore) G.highScore = G.score;
+        showInterstitial();
+        return;
+    }
+    
+    // 更新连击计时器
+    if (G.comboTimer > 0) {
+        G.comboTimer--;
+        if (G.comboTimer === 0) G.combo = 0;
+    }
+    
+    // 生成气球
+    G.spawnTimer++;
+    if (G.spawnTimer >= G.spawnRate) {
+        G.spawnTimer = 0;
+        spawnBalloon();
+        
+        // 随时间加快生成速度
+        if (G.spawnRate > 30) {
+            G.spawnRate -= 1;
+        }
+    }
+    
+    // 更新气球
+    for (var i = G.balloons.length - 1; i >= 0; i--) {
+        var b = G.balloons[i];
+        b.x += b.vx;
+        b.y += b.vy;
+        b.wobble += b.wobbleSpeed;
+        
+        // 气球飘出屏幕
+        if (b.y < -b.size) {
+            G.balloons.splice(i, 1);
+        }
+        
+        // 左右边界
+        if (b.x <= b.size || b.x >= W - b.size) {
+            b.vx *= -1;
+        }
+    }
+    
+    // 更新粒子
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1; // 重力
+        p.life--;
+        if (p.life <= 0) {
+            G.particles.splice(i, 1);
+        }
+    }
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    
+    update();
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else if (G.state === 'gameOver') {
+        drawGameOver();
+    } else {
+        drawGame();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('打气球', W/2, H/2 - 60);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('点击气球得分 · 计时挑战', W/2, H/2);
+    
+    // 气球类型说明
+    ctx.font = '14px Microsoft YaHei';
+    for (var i = 0; i < BALLOON_TYPES.length; i++) {
+        var type = BALLOON_TYPES[i];
+        ctx.fillStyle = type.color;
+        ctx.beginPath();
+        ctx.arc(W/2 - 120, H/2 + 20 + i * 25, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#aaa';
+        ctx.textAlign = 'left';
+        ctx.fillText(type.name + ': ' + (type.points > 0 ? '+' : '') + type.points + '分', W/2 - 100, H/2 + 25 + i * 25);
+    }
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50 + BALLOON_TYPES.length * 25, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('开始游戏', W/2, H/2 + 75 + BALLOON_TYPES.length * 25);
+    
+    if (G.highScore > 0) {
+        ctx.fillStyle = COL.score;
+        ctx.font = '18px Microsoft YaHei';
+        ctx.fillText('最高分: ' + G.highScore, W/2, H/2 + 110 + BALLOON_TYPES.length * 25);
+    }
+}
+
+function drawGameOver() {
+    drawGame();
+    
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', W/2, H/2 - 40);
+    
+    ctx.font = '24px Microsoft YaHei';
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score, W/2, H/2);
+    
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px Microsoft YaHei';
+    ctx.fillText('击中气球: ' + G.balloonsHit, W/2, H/2 + 30);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('重新开始', W/2, H/2 + 75);
+}
+
+function drawGame() {
+    // 绘制气球
+    for (var i = 0; i < G.balloons.length; i++) {
+        var b = G.balloons[i];
+        var type = BALLOON_TYPES[b.type];
+        
+        // 气球主体（椭圆）
+        var wobbleX = Math.sin(b.wobble) * 5;
+        var wobbleY = Math.cos(b.wobble) * 3;
+        
+        ctx.fillStyle = type.color;
+        ctx.beginPath();
+        ctx.ellipse(b.x + wobbleX, b.y + wobbleY, b.size, b.size * 1.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 气球光泽
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(b.x + wobbleX - b.size * 0.3, b.y + wobbleY - b.size * 0.4, b.size * 0.3, b.size * 0.4, -0.5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 气球绳子
+        ctx.strokeStyle = '#7f8c8d';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(b.x + wobbleX, b.y + wobbleY + b.size * 1.2);
+        ctx.lineTo(b.x + wobbleX + Math.sin(b.wobble) * 10, b.y + wobbleY + b.size * 1.2 + 30);
+        ctx.stroke();
+        
+        // 炸弹气球标记
+        if (type.points < 0) {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('💣', b.x + wobbleX, b.y + wobbleY);
+        }
+    }
+    
+    // 绘制粒子
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life / 60;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    
+    // 绘制UI
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 24px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('得分: ' + G.score, 20, 30);
+    
+    ctx.fillStyle = COL.timer;
+    ctx.textAlign = 'right';
+    ctx.fillText('时间: ' + Math.ceil(G.timer) + '秒', W - 20, 30);
+    
+    // 连击提示
+    if (G.combo > 1) {
+        ctx.fillStyle = '#f84';
+        ctx.font = 'bold 32px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(G.combo + '连击!', W/2, 60);
+    }
+    
+    // 气球数量
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('气球: ' + G.balloons.length, 20, 55);
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>消消乐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 消消乐 - 三消游戏，连锁反应加分
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 600, H = 600;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 游戏配置
+// ============================================================
+var TILE_SIZE = 50;
+var GRID_COLS = 8;
+var GRID_ROWS = 8;
+var TILE_TYPES = 6;
+
+var COLORS = ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71', '#9b59b6', '#e67e22'];
+var SHAPES = ['●', '◆', '★', '■', '▲', '♥'];
+
+var COL = {
+    bg: '#1a1a2e',
+    gridBg: '#34495e',
+    selected: '#fff',
+    text: '#fff',
+    score: '#f1c40f'
+};
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing, animating, levelComplete, gameOver
+    grid: [],
+    selected: null,
+    score: 0,
+    level: 1,
+    targetScore: 1000,
+    moves: 30,
+    combo: 0,
+    particles: [],
+    animating: false,
+    animTimer: 0,
+    falling: false,
+    checking: false,
+    highScore: 0
+};
+
+// ============================================================
+// 音效系统
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxSelect() { playTone(400, 0.08, 0.1, 'triangle'); }
+function sfxMatch() { playTone(600, 0.12, 0.15, 'sine'); }
+function sfxCombo() { playTone(800, 0.15, 0.12, 'sine'); playTone(1000, 0.1, 0.1, 'sine'); }
+function sfxFall() { playTone(200, 0.05, 0.08, 'triangle'); }
+function sfxLevel() {
+    [0,100,200,300].forEach(function(d,i) {
+        setTimeout(function() { playTone(440 + i * 110, 0.2, 0.15, 'sine'); }, d);
+    });
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / SCALE;
+    var y = (e.clientY - rect.top) / SCALE;
+    
+    if (G.state === 'menu') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    } else if (G.state === 'playing') {
+        handleTileClick(x, y);
+    } else if (G.state === 'levelComplete') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            nextLevel();
+        }
+    } else if (G.state === 'gameOver') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    }
+});
+
+function startGame() {
+    G.state = 'playing';
+    G.score = 0;
+    G.level = 1;
+    G.targetScore = 1000;
+    G.moves = 30;
+    G.combo = 0;
+    G.selected = null;
+    G.animating = false;
+    
+    initGrid();
+}
+
+function nextLevel() {
+    G.level++;
+    G.targetScore = G.level * 1000;
+    G.moves = 30 + G.level * 5;
+    G.selected = null;
+    G.animating = false;
+    G.state = 'playing';
+    
+    initGrid();
+}
+
+function initGrid() {
+    G.grid = [];
+    for (var r = 0; r < GRID_ROWS; r++) {
+        G.grid[r] = [];
+        for (var c = 0; c < GRID_COLS; c++) {
+            G.grid[r][c] = Math.floor(Math.random() * TILE_TYPES);
+        }
+    }
+    
+    // 确保初始没有匹配
+    while (findMatches().length > 0) {
+        for (var r = 0; r < GRID_ROWS; r++) {
+            for (var c = 0; c < GRID_COLS; c++) {
+                G.grid[r][c] = Math.floor(Math.random() * TILE_TYPES);
+            }
+        }
+    }
+}
+
+function handleTileClick(x, y) {
+    if (G.animating) return;
+    
+    var gridX = (W - GRID_COLS * TILE_SIZE) / 2;
+    var gridY = 100;
+    
+    var col = Math.floor((x - gridX) / TILE_SIZE);
+    var row = Math.floor((y - gridY) / TILE_SIZE);
+    
+    if (row < 0 || row >= GRID_ROWS || col < 0 || col >= GRID_COLS) return;
+    
+    if (G.selected === null) {
+        G.selected = {r: row, c: col};
+        sfxSelect();
+    } else {
+        // 检查是否相邻
+        var dr = Math.abs(G.selected.r - row);
+        var dc = Math.abs(G.selected.c - col);
+        
+        if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+            // 交换
+            swapTiles(G.selected.r, G.selected.c, row, col);
+            G.selected = null;
+        } else {
+            // 选择新的
+            G.selected = {r: row, c: col};
+            sfxSelect();
+        }
+    }
+}
+
+function swapTiles(r1, c1, r2, c2) {
+    var temp = G.grid[r1][c1];
+    G.grid[r1][c1] = G.grid[r2][c2];
+    G.grid[r2][c2] = temp;
+    
+    // 检查是否有匹配
+    var matches = findMatches();
+    if (matches.length > 0) {
+        G.moves--;
+        G.animating = true;
+        G.animTimer = 0;
+        G.combo = 0;
+    } else {
+        // 没有匹配，换回去
+        temp = G.grid[r1][c1];
+        G.grid[r1][c1] = G.grid[r2][c2];
+        G.grid[r2][c2] = temp;
+    }
+}
+
+function findMatches() {
+    var matches = [];
+    
+    // 检查横向匹配
+    for (var r = 0; r < GRID_ROWS; r++) {
+        for (var c = 0; c < GRID_COLS - 2; c++) {
+            var type = G.grid[r][c];
+            if (type !== -1 && type === G.grid[r][c+1] && type === G.grid[r][c+2]) {
+                // 找到匹配，扩展
+                var len = 3;
+                while (c + len < GRID_COLS && G.grid[r][c+len] === type) {
+                    len++;
+                }
+                for (var i = 0; i < len; i++) {
+                    matches.push({r: r, c: c + i});
+                }
+            }
+        }
+    }
+    
+    // 检查纵向匹配
+    for (var c = 0; c < GRID_COLS; c++) {
+        for (var r = 0; r < GRID_ROWS - 2; r++) {
+            var type = G.grid[r][c];
+            if (type !== -1 && type === G.grid[r+1][c] && type === G.grid[r+2][c]) {
+                var len = 3;
+                while (r + len < GRID_ROWS && G.grid[r+len][c] === type) {
+                    len++;
+                }
+                for (var i = 0; i < len; i++) {
+                    matches.push({r: r + i, c: c});
+                }
+            }
+        }
+    }
+    
+    return matches;
+}
+
+function removeMatches(matches) {
+    var gridX = (W - GRID_COLS * TILE_SIZE) / 2;
+    var gridY = 100;
+    
+    for (var i = 0; i < matches.length; i++) {
+        var m = matches[i];
+        var type = G.grid[m.r][m.c];
+        G.grid[m.r][m.c] = -1;
+        
+        // 添加粒子
+        var x = gridX + m.c * TILE_SIZE + TILE_SIZE/2;
+        var y = gridY + m.r * TILE_SIZE + TILE_SIZE/2;
+        for (var j = 0; j < 5; j++) {
+            var angle = Math.random() * Math.PI * 2;
+            var speed = 2 + Math.random() * 3;
+            G.particles.push({
+                x: x,
+                y: y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                color: COLORS[type],
+                life: 30
+            });
+        }
+    }
+    
+    // 计分
+    G.combo++;
+    var points = matches.length * 10 * G.combo;
+    G.score += points;
+    sfxMatch();
+    if (G.combo > 1) sfxCombo();
+}
+
+function dropTiles() {
+    var dropped = false;
+    
+    for (var c = 0; c < GRID_COLS; c++) {
+        // 从底部向上检查
+        for (var r = GRID_ROWS - 1; r >= 0; r--) {
+            if (G.grid[r][c] === -1) {
+                // 找到上面的方块
+                for (var r2 = r - 1; r2 >= 0; r2--) {
+                    if (G.grid[r2][c] !== -1) {
+                        G.grid[r][c] = G.grid[r2][c];
+                        G.grid[r2][c] = -1;
+                        dropped = true;
+                        sfxFall();
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // 填充顶部空位
+        for (var r = 0; r < GRID_ROWS; r++) {
+            if (G.grid[r][c] === -1) {
+                G.grid[r][c] = Math.floor(Math.random() * TILE_TYPES);
+                dropped = true;
+            }
+        }
+    }
+    
+    return dropped;
+}
+
+function checkGameState() {
+    if (G.score >= G.targetScore) {
+        G.state = 'levelComplete';
+        sfxLevel();
+        if (G.score > G.highScore) G.highScore = G.score;
+        showInterstitial();
+    } else if (G.moves <= 0) {
+        G.state = 'gameOver';
+        if (G.score > G.highScore) G.highScore = G.score;
+        showInterstitial();
+    }
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 游戏逻辑
+// ============================================================
+function update() {
+    // 更新粒子
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1;
+        p.life--;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+    
+    // 动画状态处理
+    if (G.animating) {
+        G.animTimer++;
+        
+        if (G.animTimer === 10) {
+            // 消除匹配
+            var matches = findMatches();
+            if (matches.length > 0) {
+                removeMatches(matches);
+            }
+        } else if (G.animTimer === 20) {
+            // 下落
+            dropTiles();
+        } else if (G.animTimer === 30) {
+            // 检查新的匹配
+            var matches = findMatches();
+            if (matches.length > 0) {
+                G.animTimer = 10; // 继续消除
+            } else {
+                G.animating = false;
+                G.animTimer = 0;
+                G.combo = 0;
+                checkGameState();
+            }
+        }
+    }
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    
+    update();
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else if (G.state === 'levelComplete') {
+        drawLevelComplete();
+    } else if (G.state === 'gameOver') {
+        drawGameOver();
+    } else {
+        drawGame();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('消消乐', W/2, H/2 - 60);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('三消游戏 · 连锁加分', W/2, H/2);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('开始游戏', W/2, H/2 + 75);
+    
+    if (G.highScore > 0) {
+        ctx.fillStyle = COL.score;
+        ctx.font = '18px Microsoft YaHei';
+        ctx.fillText('最高分: ' + G.highScore, W/2, H/2 + 110);
+    }
+}
+
+function drawLevelComplete() {
+    drawGame();
+    
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+    
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('关卡完成!', W/2, H/2 - 40);
+    
+    ctx.font = '24px Microsoft YaHei';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('第 ' + G.level + ' 关', W/2, H/2);
+    
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score, W/2, H/2 + 30);
+    
+    ctx.fillStyle = '#2ecc71';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('下一关', W/2, H/2 + 75);
+}
+
+function drawGameOver() {
+    drawGame();
+    
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', W/2, H/2 - 40);
+    
+    ctx.font = '24px Microsoft YaHei';
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score, W/2, H/2);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('重新开始', W/2, H/2 + 75);
+}
+
+function drawGame() {
+    var gridX = (W - GRID_COLS * TILE_SIZE) / 2;
+    var gridY = 100;
+    
+    // 绘制网格背景
+    ctx.fillStyle = COL.gridBg;
+    ctx.fillRect(gridX - 10, gridY - 10, GRID_COLS * TILE_SIZE + 20, GRID_ROWS * TILE_SIZE + 20);
+    
+    // 绘制方块
+    for (var r = 0; r < GRID_ROWS; r++) {
+        for (var c = 0; c < GRID_COLS; c++) {
+            var type = G.grid[r][c];
+            if (type === -1) continue;
+            
+            var x = gridX + c * TILE_SIZE;
+            var y = gridY + r * TILE_SIZE;
+            
+            // 方块背景
+            ctx.fillStyle = COLORS[type];
+            ctx.fillRect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+            
+            // 方块形状
+            ctx.fillStyle = '#fff';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(SHAPES[type], x + TILE_SIZE/2, y + TILE_SIZE/2);
+            
+            // 选中高亮
+            if (G.selected && G.selected.r === r && G.selected.c === c) {
+                ctx.strokeStyle = COL.selected;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+            }
+        }
+    }
+    
+    // 绘制粒子
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life / 30;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    
+    // 绘制UI
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('关卡: ' + G.level, 20, 30);
+    
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score + '/' + G.targetScore, 20, 55);
+    
+    ctx.fillStyle = '#aaa';
+    ctx.textAlign = 'right';
+    ctx.fillText('步数: ' + G.moves, W - 20, 30);
+    
+    // 连击提示
+    if (G.combo > 1) {
+        ctx.fillStyle = '#f84';
+        ctx.font = 'bold 32px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(G.combo + '连击!', W/2, 80);
+    }
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

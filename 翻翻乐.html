@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>翻翻乐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 翻翻乐 - 翻牌配对记忆游戏
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 600, H = 600;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 游戏配置
+// ============================================================
+var CARD_SIZE = 80;
+var CARD_GAP = 10;
+var GRID_COLS = 4;
+var GRID_ROWS = 4;
+
+// 卡牌图案（emoji风格）
+var SYMBOLS = ['🌟', '❤️', '🌈', '🎵', '🌸', '🍀', '🔥', '💎'];
+
+var COL = {
+    bg: '#1a1a2e',
+    cardBack: '#34495e',
+    cardFront: '#fff',
+    cardMatch: '#2ecc71',
+    cardBorder: '#7f8c8d',
+    text: '#fff',
+    timer: '#f84',
+    score: '#4af'
+};
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing, finished
+    cards: [],
+    flippedCards: [],
+    matchedPairs: 0,
+    totalPairs: GRID_COLS * GRID_ROWS / 2,
+    score: 0,
+    timer: 0,
+    startTime: 0,
+    moves: 0,
+    animating: false,
+    flipTimer: 0,
+    highScore: 0,
+    bestTime: 999
+};
+
+// ============================================================
+// 音效系统
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxFlip() { playTone(400, 0.08, 0.1, 'triangle'); }
+function sfxMatch() { playTone(600, 0.15, 0.15, 'sine'); playTone(800, 0.1, 0.1, 'sine'); }
+function sfxNoMatch() { playTone(200, 0.15, 0.12, 'sawtooth'); }
+function sfxWin() {
+    [0,100,200,300].forEach(function(d,i) {
+        setTimeout(function() { playTone(440 + i * 110, 0.2, 0.15, 'sine'); }, d);
+    });
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / SCALE;
+    var y = (e.clientY - rect.top) / SCALE;
+    
+    if (G.state === 'menu') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    } else if (G.state === 'playing' && !G.animating) {
+        handleCardClick(x, y);
+    } else if (G.state === 'finished') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 80 && y < H/2 + 120) {
+            startGame();
+        }
+    }
+});
+
+function startGame() {
+    G.state = 'playing';
+    G.cards = [];
+    G.flippedCards = [];
+    G.matchedPairs = 0;
+    G.score = 0;
+    G.moves = 0;
+    G.animating = false;
+    G.startTime = Date.now();
+    
+    // 创建卡牌数组（每个符号两张）
+    var symbols = SYMBOLS.slice(0, G.totalPairs);
+    var cardSymbols = [];
+    for (var i = 0; i < symbols.length; i++) {
+        cardSymbols.push(symbols[i]);
+        cardSymbols.push(symbols[i]);
+    }
+    
+    // 随机排列
+    shuffleArray(cardSymbols);
+    
+    // 创建卡牌对象
+    var startX = (W - (GRID_COLS * CARD_SIZE + (GRID_COLS - 1) * CARD_GAP)) / 2;
+    var startY = 80;
+    
+    for (var row = 0; row < GRID_ROWS; row++) {
+        for (var col = 0; col < GRID_COLS; col++) {
+            var idx = row * GRID_COLS + col;
+            G.cards.push({
+                x: startX + col * (CARD_SIZE + CARD_GAP),
+                y: startY + row * (CARD_SIZE + CARD_GAP),
+                symbol: cardSymbols[idx],
+                flipped: false,
+                matched: false,
+                flipProgress: 0
+            });
+        }
+    }
+}
+
+function shuffleArray(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var temp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = temp;
+    }
+}
+
+function handleCardClick(x, y) {
+    for (var i = 0; i < G.cards.length; i++) {
+        var card = G.cards[i];
+        if (card.matched || card.flipped) continue;
+        
+        if (x >= card.x && x <= card.x + CARD_SIZE &&
+            y >= card.y && y <= card.y + CARD_SIZE) {
+            
+            flipCard(i);
+            return;
+        }
+    }
+}
+
+function flipCard(idx) {
+    var card = G.cards[idx];
+    card.flipped = true;
+    card.flipProgress = 0;
+    G.flippedCards.push(idx);
+    G.moves++;
+    sfxFlip();
+    
+    if (G.flippedCards.length === 2) {
+        G.animating = true;
+        G.flipTimer = 0;
+    }
+}
+
+function checkMatch() {
+    var idx1 = G.flippedCards[0];
+    var idx2 = G.flippedCards[1];
+    var card1 = G.cards[idx1];
+    var card2 = G.cards[idx2];
+    
+    if (card1.symbol === card2.symbol) {
+        // 匹配成功
+        card1.matched = true;
+        card2.matched = true;
+        G.matchedPairs++;
+        G.score += 100;
+        sfxMatch();
+        
+        if (G.matchedPairs === G.totalPairs) {
+            // 游戏完成
+            G.state = 'finished';
+            G.timer = Math.floor((Date.now() - G.startTime) / 1000);
+            if (G.timer < G.bestTime) G.bestTime = G.timer;
+            if (G.score > G.highScore) G.highScore = G.score;
+            sfxWin();
+            showInterstitial();
+        }
+    } else {
+        // 不匹配，翻回去
+        card1.flipped = false;
+        card2.flipped = false;
+        sfxNoMatch();
+    }
+    
+    G.flippedCards = [];
+    G.animating = false;
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else if (G.state === 'finished') {
+        drawFinished();
+    } else {
+        drawGame();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('翻翻乐', W/2, H/2 - 60);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('翻牌配对 · 记忆挑战', W/2, H/2);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('开始游戏', W/2, H/2 + 75);
+    
+    if (G.highScore > 0) {
+        ctx.fillStyle = COL.score;
+        ctx.font = '18px Microsoft YaHei';
+        ctx.fillText('最高分: ' + G.highScore + ' | 最快: ' + G.bestTime + '秒', W/2, H/2 + 110);
+    }
+}
+
+function drawFinished() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('恭喜完成!', W/2, H/2 - 80);
+    
+    ctx.font = '24px Microsoft YaHei';
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score, W/2, H/2 - 30);
+    
+    ctx.fillStyle = COL.timer;
+    ctx.fillText('用时: ' + G.timer + '秒', W/2, H/2);
+    
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px Microsoft YaHei';
+    ctx.fillText('翻牌次数: ' + G.moves, W/2, H/2 + 30);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 80, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('再来一次', W/2, H/2 + 105);
+}
+
+function drawGame() {
+    // 更新计时器
+    if (G.state === 'playing') {
+        G.timer = Math.floor((Date.now() - G.startTime) / 1000);
+    }
+    
+    // 绘制卡牌
+    for (var i = 0; i < G.cards.length; i++) {
+        var card = G.cards[i];
+        
+        // 翻牌动画
+        if (card.flipped && card.flipProgress < 1) {
+            card.flipProgress += 0.1;
+        } else if (!card.flipped && !card.matched && card.flipProgress > 0) {
+            card.flipProgress -= 0.1;
+        }
+        
+        drawCard(card);
+    }
+    
+    // 检查匹配动画
+    if (G.animating) {
+        G.flipTimer++;
+        if (G.flipTimer > 30) {
+            checkMatch();
+        }
+    }
+    
+    // 绘制UI
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('配对: ' + G.matchedPairs + '/' + G.totalPairs, 20, 30);
+    
+    ctx.fillStyle = COL.timer;
+    ctx.textAlign = 'center';
+    ctx.fillText('时间: ' + G.timer + '秒', W/2, 30);
+    
+    ctx.fillStyle = COL.score;
+    ctx.textAlign = 'right';
+    ctx.fillText('得分: ' + G.score, W - 20, 30);
+    
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('翻牌: ' + G.moves, 20, 55);
+}
+
+function drawCard(card) {
+    var x = card.x, y = card.y;
+    var w = CARD_SIZE, h = CARD_SIZE;
+    
+    // 卡牌阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(x + 3, y + 3, w, h);
+    
+    // 卡牌主体
+    if (card.matched) {
+        ctx.fillStyle = COL.cardMatch;
+    } else if (card.flipProgress > 0.5) {
+        ctx.fillStyle = COL.cardFront;
+    } else {
+        ctx.fillStyle = COL.cardBack;
+    }
+    
+    // 翻牌效果（缩放）
+    var scaleX = Math.abs(Math.cos(card.flipProgress * Math.PI));
+    ctx.save();
+    ctx.translate(x + w/2, y + h/2);
+    ctx.scale(scaleX, 1);
+    ctx.fillRect(-w/2, -h/2, w, h);
+    ctx.restore();
+    
+    // 卡牌边框
+    ctx.strokeStyle = card.matched ? '#27ae60' : COL.cardBorder;
+    ctx.lineWidth = 2;
+    ctx.save();
+    ctx.translate(x + w/2, y + h/2);
+    ctx.scale(scaleX, 1);
+    ctx.strokeRect(-w/2, -h/2, w, h);
+    ctx.restore();
+    
+    // 绘制符号（正面）
+    if (card.flipProgress > 0.5 || card.matched) {
+        ctx.fillStyle = '#333';
+        ctx.font = '36px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(card.symbol, x + w/2, y + h/2);
+    }
+    
+    // 背面图案
+    if (card.flipProgress < 0.5 && !card.matched) {
+        ctx.fillStyle = '#7f8c8d';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('?', x + w/2, y + h/2);
+    }
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

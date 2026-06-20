@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>接龙</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 接龙 - 经典纸牌接龙游戏
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 800, H = 600;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 游戏配置
+// ============================================================
+var CARD_W = 70;
+var CARD_H = 100;
+var CARD_GAP = 25;
+
+var SUITS = ['♠', '♥', '♦', '♣'];
+var SUIT_COLORS = ['#333', '#e74c3c', '#e74c3c', '#333'];
+var VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+var COL = {
+    bg: '#1a1a2e',
+    cardBack: '#34495e',
+    cardFront: '#ecf0f1',
+    cardBorder: '#7f8c8d',
+    text: '#fff',
+    score: '#f1c40f'
+};
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing, win
+    deck: [],
+    tableau: [], // 7列牌堆
+    foundation: [], // 4个目标堆（每堆一个花色）
+    stock: [], // 发牌堆
+    waste: [], // 翻开的牌
+    selected: null,
+    score: 0,
+    moves: 0,
+    highScore: 0
+};
+
+// ============================================================
+// 音效系统
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxCard() { playTone(400, 0.08, 0.1, 'triangle'); }
+function sfxMove() { playTone(500, 0.1, 0.12, 'sine'); }
+function sfxWin() {
+    [0,100,200,300].forEach(function(d,i) {
+        setTimeout(function() { playTone(440 + i * 110, 0.2, 0.15, 'sine'); }, d);
+    });
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / SCALE;
+    var y = (e.clientY - rect.top) / SCALE;
+    
+    if (G.state === 'menu') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    } else if (G.state === 'playing') {
+        handleCardClick(x, y);
+    } else if (G.state === 'win') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    }
+});
+
+function startGame() {
+    G.state = 'playing';
+    G.score = 0;
+    G.moves = 0;
+    G.selected = null;
+    
+    // 初始化牌组
+    G.deck = [];
+    for (var s = 0; s < 4; s++) {
+        for (var v = 0; v < 13; v++) {
+            G.deck.push({suit: s, value: v, faceUp: false});
+        }
+    }
+    
+    // 洗牌
+    shuffleDeck();
+    
+    // 发牌到tableau
+    G.tableau = [];
+    for (var col = 0; col < 7; col++) {
+        G.tableau[col] = [];
+        for (var row = 0; row <= col; row++) {
+            var card = G.deck.pop();
+            card.faceUp = (row === col);
+            G.tableau[col].push(card);
+        }
+    }
+    
+    // 剩余牌到stock
+    G.stock = G.deck.slice();
+    G.deck = [];
+    
+    // 初始化foundation
+    G.foundation = [];
+    for (var i = 0; i < 4; i++) {
+        G.foundation[i] = [];
+    }
+    
+    // 初始化waste
+    G.waste = [];
+}
+
+function shuffleDeck() {
+    for (var i = G.deck.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var temp = G.deck[i];
+        G.deck[i] = G.deck[j];
+        G.deck[j] = temp;
+    }
+}
+
+function handleCardClick(x, y) {
+    // 点击stock
+    var stockX = 20, stockY = 20;
+    if (x >= stockX && x <= stockX + CARD_W && y >= stockY && y <= stockY + CARD_H) {
+        if (G.stock.length > 0) {
+            var card = G.stock.pop();
+            card.faceUp = true;
+            G.waste.push(card);
+            sfxCard();
+        } else if (G.waste.length > 0) {
+            // 重置stock
+            while (G.waste.length > 0) {
+                var card = G.waste.pop();
+                card.faceUp = false;
+                G.stock.push(card);
+            }
+            sfxCard();
+        }
+        return;
+    }
+    
+    // 点击waste
+    var wasteX = 100, wasteY = 20;
+    if (G.waste.length > 0) {
+        if (x >= wasteX && x <= wasteX + CARD_W && y >= wasteY && y <= wasteY + CARD_H) {
+            if (G.selected === null) {
+                G.selected = {source: 'waste', idx: G.waste.length - 1};
+                sfxCard();
+            } else {
+                G.selected = null;
+            }
+            return;
+        }
+    }
+    
+    // 点击foundation
+    for (var i = 0; i < 4; i++) {
+        var fX = 350 + i * (CARD_W + 10);
+        var fY = 20;
+        if (x >= fX && x <= fX + CARD_W && y >= fY && y <= fY + CARD_H) {
+            if (G.selected !== null) {
+                tryMoveToFoundation(i);
+            }
+            return;
+        }
+    }
+    
+    // 点击tableau
+    var tableauX = 20;
+    var tableauY = 150;
+    
+    for (var col = 0; col < 7; col++) {
+        var colX = tableauX + col * (CARD_W + 10);
+        var pile = G.tableau[col];
+        
+        if (x >= colX && x <= colX + CARD_W) {
+            // 检查点击的是哪张牌
+            for (var row = pile.length - 1; row >= 0; row--) {
+                var cardY = tableauY + row * CARD_GAP;
+                var cardH = (row === pile.length - 1) ? CARD_H : CARD_GAP;
+                
+                if (y >= cardY && y <= cardY + cardH) {
+                    var card = pile[row];
+                    
+                    if (!card.faceUp) {
+                        // 翻开最底下的牌
+                        if (row === pile.length - 1) {
+                            card.faceUp = true;
+                            sfxCard();
+                        }
+                        return;
+                    }
+                    
+                    if (G.selected === null) {
+                        // 选择牌
+                        G.selected = {source: 'tableau', col: col, row: row};
+                        sfxCard();
+                    } else {
+                        // 尝试移动
+                        tryMoveToTableau(col);
+                    }
+                    return;
+                }
+            }
+            
+            // 点击空列
+            if (pile.length === 0 && G.selected !== null) {
+                tryMoveToTableau(col);
+            }
+        }
+    }
+}
+
+function tryMoveToFoundation(fIdx) {
+    if (G.selected === null) return;
+    
+    var card = getSelectedCard();
+    if (!card) return;
+    
+    var foundation = G.foundation[fIdx];
+    
+    // 检查是否可以移动
+    if (foundation.length === 0) {
+        // 必须是A
+        if (card.value !== 0) {
+            G.selected = null;
+            return;
+        }
+    } else {
+        var topCard = foundation[foundation.length - 1];
+        // 必须同花色且大1
+        if (card.suit !== topCard.suit || card.value !== topCard.value + 1) {
+            G.selected = null;
+            return;
+        }
+    }
+    
+    // 移动
+    removeSelectedCard();
+    foundation.push(card);
+    G.score += 10;
+    G.moves++;
+    G.selected = null;
+    sfxMove();
+    
+    checkWin();
+}
+
+function tryMoveToTableau(col) {
+    if (G.selected === null) return;
+    
+    var targetPile = G.tableau[col];
+    var card = getSelectedCard();
+    if (!card) return;
+    
+    // 检查是否可以移动
+    if (targetPile.length === 0) {
+        // 必须是K
+        if (card.value !== 12) {
+            G.selected = null;
+            return;
+        }
+    } else {
+        var topCard = targetPile[targetPile.length - 1];
+        // 必须不同颜色且小1
+        var cardColor = SUIT_COLORS[card.suit];
+        var topColor = SUIT_COLORS[topCard.suit];
+        if (cardColor === topColor || card.value !== topCard.value - 1) {
+            G.selected = null;
+            return;
+        }
+    }
+    
+    // 移动（可能移动多张牌）
+    var cards = getSelectedCards();
+    var selectedCol = G.selected ? G.selected.col : -1;  // 保存col值
+    removeSelectedCards();
+    for (var i = 0; i < cards.length; i++) {
+        targetPile.push(cards[i]);
+    }
+    G.score += 5;
+    G.moves++;
+    G.selected = null;
+    sfxMove();
+    
+    // 翻开新的顶牌
+    flipTopCard(selectedCol);
+}
+
+function getSelectedCard() {
+    if (G.selected.source === 'waste') {
+        return G.waste[G.selected.idx];
+    } else if (G.selected.source === 'tableau') {
+        return G.tableau[G.selected.col][G.selected.row];
+    }
+    return null;
+}
+
+function getSelectedCards() {
+    if (G.selected.source === 'waste') {
+        return [G.waste[G.selected.idx]];
+    } else if (G.selected.source === 'tableau') {
+        var pile = G.tableau[G.selected.col];
+        return pile.slice(G.selected.row);
+    }
+    return [];
+}
+
+function removeSelectedCard() {
+    if (G.selected.source === 'waste') {
+        G.waste.pop();
+    } else if (G.selected.source === 'tableau') {
+        G.tableau[G.selected.col].pop();
+        flipTopCard(G.selected.col);
+    }
+}
+
+function removeSelectedCards() {
+    if (G.selected.source === 'waste') {
+        G.waste.pop();
+    } else if (G.selected.source === 'tableau') {
+        var pile = G.tableau[G.selected.col];
+        pile.splice(G.selected.row, pile.length - G.selected.row);
+        flipTopCard(G.selected.col);
+    }
+}
+
+function flipTopCard(col) {
+    if (col >= 0 && col < 7) {
+        var pile = G.tableau[col];
+        if (pile.length > 0 && !pile[pile.length - 1].faceUp) {
+            pile[pile.length - 1].faceUp = true;
+            sfxCard();
+        }
+    }
+}
+
+function checkWin() {
+    var total = 0;
+    for (var i = 0; i < 4; i++) {
+        total += G.foundation[i].length;
+    }
+    
+    if (total === 52) {
+        G.state = 'win';
+        sfxWin();
+        if (G.score > G.highScore) G.highScore = G.score;
+        showInterstitial();
+    }
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else if (G.state === 'win') {
+        drawWin();
+    } else {
+        drawGame();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('接龙', W/2, H/2 - 60);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('经典纸牌接龙 · 策略挑战', W/2, H/2);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('开始游戏', W/2, H/2 + 75);
+    
+    if (G.highScore > 0) {
+        ctx.fillStyle = COL.score;
+        ctx.font = '18px Microsoft YaHei';
+        ctx.fillText('最高分: ' + G.highScore, W/2, H/2 + 110);
+    }
+}
+
+function drawWin() {
+    drawGame();
+    
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+    
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('恭喜完成!', W/2, H/2 - 40);
+    
+    ctx.font = '24px Microsoft YaHei';
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score, W/2, H/2);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('再来一次', W/2, H/2 + 75);
+}
+
+function drawGame() {
+    // 绘制stock
+    var stockX = 20, stockY = 20;
+    if (G.stock.length > 0) {
+        drawCardBack(stockX, stockY);
+    } else {
+        // 空stock显示重置图标
+        ctx.fillStyle = '#34495e';
+        ctx.fillRect(stockX, stockY, CARD_W, CARD_H);
+        ctx.strokeStyle = '#7f8c8d';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(stockX, stockY, CARD_W, CARD_H);
+        ctx.fillStyle = '#7f8c8d';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('↻', stockX + CARD_W/2, stockY + CARD_H/2);
+    }
+    
+    // 绘制waste
+    var wasteX = 100, wasteY = 20;
+    if (G.waste.length > 0) {
+        var card = G.waste[G.waste.length - 1];
+        drawCard(card, wasteX, wasteY, G.selected && G.selected.source === 'waste');
+    }
+    
+    // 绘制foundation
+    for (var i = 0; i < 4; i++) {
+        var fX = 350 + i * (CARD_W + 10);
+        var fY = 20;
+        var foundation = G.foundation[i];
+        
+        if (foundation.length > 0) {
+            var card = foundation[foundation.length - 1];
+            drawCard(card, fX, fY, false);
+        } else {
+            // 空foundation显示花色
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(fX, fY, CARD_W, CARD_H);
+            ctx.strokeStyle = SUIT_COLORS[i];
+            ctx.lineWidth = 2;
+            ctx.strokeRect(fX, fY, CARD_W, CARD_H);
+            ctx.fillStyle = SUIT_COLORS[i];
+            ctx.font = '32px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(SUITS[i], fX + CARD_W/2, fY + CARD_H/2);
+        }
+    }
+    
+    // 绘制tableau
+    var tableauX = 20;
+    var tableauY = 150;
+    
+    for (var col = 0; col < 7; col++) {
+        var colX = tableauX + col * (CARD_W + 10);
+        var pile = G.tableau[col];
+        
+        if (pile.length === 0) {
+            // 空列
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(colX, tableauY, CARD_W, CARD_H);
+            ctx.strokeStyle = '#7f8c8d';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(colX, tableauY, CARD_W, CARD_H);
+        } else {
+            for (var row = 0; row < pile.length; row++) {
+                var cardY = tableauY + row * CARD_GAP;
+                var card = pile[row];
+                
+                if (card.faceUp) {
+                    var isSelected = G.selected && G.selected.source === 'tableau' && 
+                                     G.selected.col === col && G.selected.row === row;
+                    drawCard(card, colX, cardY, isSelected);
+                } else {
+                    drawCardBack(colX, cardY);
+                }
+            }
+        }
+    }
+    
+    // 绘制UI
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('得分: ' + G.score, 20, H - 30);
+    
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Microsoft YaHei';
+    ctx.fillText('步数: ' + G.moves, 150, H - 30);
+}
+
+function drawCard(card, x, y, selected) {
+    // 卡牌背景
+    ctx.fillStyle = COL.cardFront;
+    ctx.fillRect(x, y, CARD_W, CARD_H);
+    
+    // 选中高亮
+    if (selected) {
+        ctx.fillStyle = 'rgba(52,152,219,0.3)';
+        ctx.fillRect(x, y, CARD_W, CARD_H);
+    }
+    
+    // 卡牌边框
+    ctx.strokeStyle = COL.cardBorder;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, CARD_W, CARD_H);
+    
+    // 花色和数值
+    ctx.fillStyle = SUIT_COLORS[card.suit];
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(VALUES[card.value], x + 5, y + 5);
+    ctx.fillText(SUITS[card.suit], x + 5, y + 22);
+    
+    // 中心花色
+    ctx.font = '32px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(SUITS[card.suit], x + CARD_W/2, y + CARD_H/2);
+    
+    // 底部数值
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(VALUES[card.value], x + CARD_W - 5, y + CARD_H - 5);
+}
+
+function drawCardBack(x, y) {
+    ctx.fillStyle = COL.cardBack;
+    ctx.fillRect(x, y, CARD_W, CARD_H);
+    
+    ctx.strokeStyle = '#7f8c8d';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, CARD_W, CARD_H);
+    
+    // 背面图案
+    ctx.fillStyle = '#7f8c8d';
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('♠', x + CARD_W/2, y + CARD_H/2);
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

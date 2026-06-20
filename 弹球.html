@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>弹球</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:'Microsoft YaHei',sans-serif}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>支持开发者</h2>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">扫码支持</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝</div><div class="qr-hint">扫码支持</div></div>
+</div>
+<button class="sponsor-close" onclick="toggleSponsor()">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>感谢游玩！</p><button class="skip-btn" onclick="closeInterstitial()">继续</button></div>
+</div>
+<div class="ad-banner-container"><span class="ad-label">AD</span></div>
+<script>
+// ============================================================
+// 弹球 - 控制球拍反弹球，物理引擎，计分
+// ============================================================
+
+var canvas = document.getElementById('C');
+var ctx = canvas.getContext('2d');
+var W = 800, H = 600;
+var SCALE = 1;
+
+function resize() {
+    var maxW = window.innerWidth - 20;
+    var maxH = window.innerHeight - 110;
+    SCALE = Math.min(maxW / W, maxH / H);
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    canvas.style.width = (W * SCALE) + 'px';
+    canvas.style.height = (H * SCALE) + 'px';
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// 游戏配置
+// ============================================================
+var CFG = {
+    PADDLE_W: 120,
+    PADDLE_H: 15,
+    PADDLE_Y: 550,
+    PADDLE_SPEED: 10,
+    BALL_R: 10,
+    BALL_SPEED: 6,
+    MAX_BALLS: 5,
+    LIVES: 3
+};
+
+var COL = {
+    bg: '#0a0a1a',
+    paddle: '#4af',
+    ball: '#fff',
+    ballTrail: 'rgba(255,255,255,0.3)',
+    text: '#fff',
+    score: '#f84',
+    life: '#4f8'
+};
+
+// ============================================================
+// 游戏状态
+// ============================================================
+var G = {
+    state: 'menu', // menu, playing, paused, gameOver
+    score: 0,
+    lives: CFG.LIVES,
+    paddle: { x: W/2 - CFG.PADDLE_W/2 },
+    balls: [],
+    particles: [],
+    combo: 0,
+    comboTimer: 0,
+    highScore: 0,
+    speedMultiplier: 1
+};
+
+// ============================================================
+// 音效系统
+// ============================================================
+var audioCtx = null;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTone(freq, dur, vol, type) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxPaddle() { playTone(220, 0.1, 0.12, 'triangle'); }
+function sfxWall() { playTone(180, 0.06, 0.08, 'sine'); }
+function sfxLose() { playTone(120, 0.3, 0.2, 'sawtooth'); }
+function sfxCombo() { playTone(660, 0.12, 0.15, 'sine'); playTone(880, 0.15, 0.1, 'sine'); }
+
+// ============================================================
+// 输入处理
+// ============================================================
+var keys = {};
+var mouseX = -1;
+var useMouse = false;
+
+document.addEventListener('keydown', function(e) { keys[e.key] = true; });
+document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+
+canvas.addEventListener('mousemove', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) / SCALE;
+    useMouse = true;
+});
+
+canvas.addEventListener('click', function(e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / SCALE;
+    var y = (e.clientY - rect.top) / SCALE;
+    
+    if (G.state === 'menu') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    } else if (G.state === 'gameOver') {
+        if (x > W/2 - 80 && x < W/2 + 80 && y > H/2 + 50 && y < H/2 + 90) {
+            startGame();
+        }
+    }
+});
+
+function startGame() {
+    G.state = 'playing';
+    G.score = 0;
+    G.lives = CFG.LIVES;
+    G.paddle.x = W/2 - CFG.PADDLE_W/2;
+    G.balls = [];
+    G.particles = [];
+    G.combo = 0;
+    G.comboTimer = 0;
+    G.speedMultiplier = 1;
+    spawnBall();
+}
+
+function spawnBall() {
+    if (G.balls.length >= CFG.MAX_BALLS) return;
+    
+    var angle = Math.PI / 4 + Math.random() * Math.PI / 2; // 45-135度向上
+    G.balls.push({
+        x: W/2,
+        y: CFG.PADDLE_Y - 50,
+        vx: Math.cos(angle) * CFG.BALL_SPEED * G.speedMultiplier,
+        vy: -Math.sin(angle) * CFG.BALL_SPEED * G.speedMultiplier,
+        trail: []
+    });
+}
+
+// ============================================================
+// 游戏逻辑
+// ============================================================
+function update() {
+    if (G.state !== 'playing') return;
+    
+    // 更新球拍位置
+    if (keys['ArrowLeft'] || keys['a']) {
+        G.paddle.x -= CFG.PADDLE_SPEED;
+    }
+    if (keys['ArrowRight'] || keys['d']) {
+        G.paddle.x += CFG.PADDLE_SPEED;
+    }
+    if (useMouse) {
+        G.paddle.x = mouseX - CFG.PADDLE_W/2;
+    }
+    G.paddle.x = Math.max(0, Math.min(W - CFG.PADDLE_W, G.paddle.x));
+    
+    // 更新连击计时器
+    if (G.comboTimer > 0) {
+        G.comboTimer--;
+        if (G.comboTimer === 0) G.combo = 0;
+    }
+    
+    // 更新球
+    for (var i = G.balls.length - 1; i >= 0; i--) {
+        var ball = G.balls[i];
+        
+        // 记录轨迹
+        ball.trail.push({x: ball.x, y: ball.y});
+        if (ball.trail.length > 10) ball.trail.shift();
+        
+        // 移动
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+        
+        // 边界碰撞
+        if (ball.x <= CFG.BALL_R || ball.x >= W - CFG.BALL_R) {
+            ball.vx *= -1;
+            ball.x = Math.max(CFG.BALL_R, Math.min(W - CFG.BALL_R, ball.x));
+            sfxWall();
+            spawnParticles(ball.x, ball.y, COL.ballTrail);
+        }
+        if (ball.y <= CFG.BALL_R) {
+            ball.vy *= -1;
+            ball.y = CFG.BALL_R;
+            sfxWall();
+            spawnParticles(ball.x, ball.y, COL.ballTrail);
+        }
+        
+        // 球拍碰撞
+        if (ball.y + CFG.BALL_R >= CFG.PADDLE_Y && 
+            ball.y - CFG.BALL_R <= CFG.PADDLE_Y + CFG.PADDLE_H &&
+            ball.x >= G.paddle.x && ball.x <= G.paddle.x + CFG.PADDLE_W) {
+            
+            // 根据碰撞位置调整反弹角度
+            var hitPos = (ball.x - G.paddle.x) / CFG.PADDLE_W; // 0-1
+            var angle = Math.PI / 6 + hitPos * Math.PI * 2 / 3; // 30-150度
+            
+            var speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+            ball.vx = Math.cos(angle) * speed;
+            ball.vy = -Math.sin(angle) * speed;
+            ball.y = CFG.PADDLE_Y - CFG.BALL_R;
+            
+            // 加分
+            G.combo++;
+            G.comboTimer = 60;
+            G.score += 10 * G.combo;
+            sfxPaddle();
+            if (G.combo > 1) sfxCombo();
+            spawnParticles(ball.x, ball.y, COL.paddle);
+            
+            // 每1000分增加难度
+            if (G.score >= 1000 && G.balls.length < 2) {
+                G.speedMultiplier = 1.2;
+                spawnBall();
+            }
+            if (G.score >= 2000 && G.balls.length < 3) {
+                G.speedMultiplier = 1.4;
+                spawnBall();
+            }
+        }
+        
+        // 球掉落
+        if (ball.y > H) {
+            G.balls.splice(i, 1);
+            sfxLose();
+            
+            if (G.balls.length === 0) {
+                G.lives--;
+                G.combo = 0;
+                if (G.lives <= 0) {
+                    G.state = 'gameOver';
+                    if (G.score > G.highScore) G.highScore = G.score;
+                    showInterstitial();
+                } else {
+                    spawnBall();
+                }
+            }
+        }
+    }
+    
+    // 更新粒子
+    for (var i = G.particles.length - 1; i >= 0; i--) {
+        var p = G.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+
+function spawnParticles(x, y, color) {
+    for (var i = 0; i < 8; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 2 + Math.random() * 3;
+        G.particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            color: color,
+            life: 20 + Math.random() * 20
+        });
+    }
+}
+
+// ============================================================
+// 广告系统
+// ============================================================
+function toggleSponsor() {
+    var panel = document.getElementById('sponsorPanel');
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    panel.style.pointerEvents = panel.style.display === 'flex' ? 'auto' : 'none';
+}
+
+function showInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'flex';
+    ad.style.pointerEvents = 'auto';
+}
+
+function closeInterstitial() {
+    var ad = document.getElementById('interstitialAd');
+    ad.style.display = 'none';
+    ad.style.pointerEvents = 'none';
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function draw() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    
+    if (G.state === 'menu') {
+        drawMenu();
+    } else if (G.state === 'gameOver') {
+        drawGameOver();
+    } else {
+        drawGame();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('弹球', W/2, H/2 - 60);
+    
+    ctx.font = '20px Microsoft YaHei';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('控制球拍反弹球 · 连击加分', W/2, H/2);
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('开始游戏', W/2, H/2 + 75);
+    
+    if (G.highScore > 0) {
+        ctx.fillStyle = COL.score;
+        ctx.font = '18px Microsoft YaHei';
+        ctx.fillText('最高分: ' + G.highScore, W/2, H/2 + 110);
+    }
+}
+
+function drawGameOver() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', W/2, H/2 - 60);
+    
+    ctx.font = '24px Microsoft YaHei';
+    ctx.fillStyle = COL.score;
+    ctx.fillText('得分: ' + G.score, W/2, H/2);
+    
+    if (G.score >= G.highScore) {
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillText('新纪录!', W/2, H/2 + 30);
+    }
+    
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(W/2 - 80, H/2 + 50, 160, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Microsoft YaHei';
+    ctx.fillText('重新开始', W/2, H/2 + 75);
+}
+
+function drawGame() {
+    // 绘制粒子
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life / 40;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    
+    // 绘制球拍
+    ctx.fillStyle = COL.paddle;
+    ctx.fillRect(G.paddle.x, CFG.PADDLE_Y, CFG.PADDLE_W, CFG.PADDLE_H);
+    
+    // 绘制球拍光泽
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(G.paddle.x, CFG.PADDLE_Y, CFG.PADDLE_W, 3);
+    
+    // 绘制球
+    for (var i = 0; i < G.balls.length; i++) {
+        var ball = G.balls[i];
+        
+        // 绘制轨迹
+        for (var j = 0; j < ball.trail.length; j++) {
+            var t = ball.trail[j];
+            ctx.globalAlpha = j / ball.trail.length * 0.3;
+            ctx.fillStyle = COL.ballTrail;
+            ctx.beginPath();
+            ctx.arc(t.x, t.y, CFG.BALL_R * (j / ball.trail.length), 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        
+        // 绘制球
+        ctx.fillStyle = COL.ball;
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, CFG.BALL_R, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 球的光泽
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(ball.x - 3, ball.y - 3, CFG.BALL_R * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    // 绘制UI
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 24px Microsoft YaHei';
+    ctx.textAlign = 'left';
+    ctx.fillText('得分: ' + G.score, 20, 30);
+    
+    ctx.fillStyle = COL.life;
+    ctx.fillText('生命: ' + G.lives, 20, 60);
+    
+    // 连击显示
+    if (G.combo > 1) {
+        ctx.fillStyle = COL.score;
+        ctx.font = 'bold 32px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText(G.combo + '连击!', W/2, 100);
+    }
+    
+    // 球数提示
+    if (G.balls.length > 1) {
+        ctx.fillStyle = '#aaa';
+        ctx.font = '14px Microsoft YaHei';
+        ctx.textAlign = 'right';
+        ctx.fillText('球数: ' + G.balls.length, W - 20, 30);
+    }
+}
+
+// ============================================================
+// 游戏循环
+// ============================================================
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
