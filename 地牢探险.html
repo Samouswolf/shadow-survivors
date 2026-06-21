@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>地牢探险 - Roguelike</title>
+<style>
+:root{--bg:#0a0a0c;--panel:#12121a;--border:#2a1a2a;--gold:#c9a050;--red:#c0392b;--blue:#2980b9;--green:#27ae60;--text:#c8c0b8;--dim:#5a5048}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","PingFang SC",sans-serif;overflow:hidden;height:100dvh;width:100vw;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#game-wrapper{display:flex;flex-direction:column;height:100dvh;max-width:800px;margin:0 auto;position:relative}
+#top-bar{display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;min-height:36px}
+#top-bar .stat{font-size:12px;white-space:nowrap}
+#top-bar .stat-bar{flex:1;min-width:40px;height:10px;background:#1a1a2a;border-radius:5px;overflow:hidden;border:1px solid var(--border)}
+#top-bar .stat-bar .fill{height:100%;transition:width .3s}
+#top-bar .hp-fill{background:linear-gradient(90deg,#8b0000,#e74c3c)}
+#top-bar .mp-fill{background:linear-gradient(90deg,#1a3a6a,#3498db)}
+#top-bar .xp-fill{background:linear-gradient(90deg,#4a3a0a,#f1c40f)}
+#canvas-wrap{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#gameCanvas{display:block;image-rendering:pixelated;max-width:100%;max-height:100%}
+#minimap{position:absolute;bottom:4px;right:4px;border:1px solid var(--border);border-radius:4px;background:rgba(10,10,16,.85);z-index:2}
+#floor-indicator{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:14px;font-weight:bold;color:var(--gold);text-shadow:0 0 8px rgba(201,160,80,.5);pointer-events:none;z-index:2}
+#log-panel{height:52px;background:var(--panel);border-top:1px solid var(--border);padding:4px 8px;font-size:11px;overflow-y:auto;flex-shrink:0;color:#888}
+#log-panel .log-entry{margin:1px 0;animation:fadeIn .3s}
+#log-panel .log-combat{color:#e74c3c}
+#log-panel .log-item{color:#f1c40f}
+#log-panel .log-info{color:#3498db}
+#log-panel .log-level{color:#2ecc71}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+/* 底部按钮栏 */
+#action-bar{display:flex;gap:6px;padding:4px 8px;background:var(--panel);border-top:1px solid var(--border);flex-shrink:0;justify-content:center;flex-wrap:wrap}
+#action-bar button{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;transition:.2s;font-family:inherit}
+#action-bar button:active{background:#2a1a2a;transform:scale(.95)}
+#action-bar button.highlight{border-color:var(--gold);color:var(--gold)}
+/* 方向键(D-Pad) */
+#dpad{display:none;position:absolute;bottom:8px;left:8px;z-index:3;width:120px;height:120px}
+#dpad button{position:absolute;width:36px;height:36px;background:rgba(20,20,30,.8);border:1px solid var(--border);color:var(--text);border-radius:6px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#dpad .up{top:0;left:50%;transform:translateX(-50%)}
+#dpad .down{bottom:0;left:50%;transform:translateX(-50%)}
+#dpad .left{left:0;top:50%;transform:translateY(-50%)}
+#dpad .right{right:0;top:50%;transform:translateY(-50%)}
+#dpad .center{left:50%;top:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;font-size:10px}
+/* 弹窗 */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:center;justify-content:center;flex-direction:column}
+.modal-overlay.active{display:flex}
+.modal-box{background:var(--panel);border:2px solid var(--border);border-radius:12px;padding:20px;max-width:380px;width:90%;max-height:80vh;overflow-y:auto;text-align:center}
+.modal-box h2{color:var(--gold);font-size:20px;margin-bottom:12px}
+.modal-box h3{color:var(--text);font-size:15px;margin:8px 0}
+.modal-box .btn{display:inline-block;padding:10px 24px;margin:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;cursor:pointer;transition:.2s;font-family:inherit}
+.modal-box .btn:hover{background:#2a1a2a}
+.modal-box .btn.gold{border-color:var(--gold);color:var(--gold)}
+.modal-box .btn.red{border-color:var(--red);color:var(--red)}
+.modal-box .btn.blue{border-color:var(--blue);color:var(--blue)}
+.modal-box .stat-row{display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,.05)}
+.modal-box .equip-slot{display:flex;align-items:center;justify-content:space-between;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;margin:4px 0;cursor:pointer;transition:.2s}
+.modal-box .equip-slot:hover{background:#1a1a2a}
+.modal-box .equip-slot .slot-name{color:var(--dim);font-size:11px}
+.modal-box .equip-slot .item-name{color:var(--gold);font-size:13px}
+.inv-item{display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin:3px 0;font-size:12px;cursor:pointer}
+.inv-item:hover{background:#1a1a2a}
+.inv-item .item-stat{color:var(--dim);font-size:10px}
+/* 战斗UI */
+#combat-overlay{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:100;display:none;flex-direction:column;align-items:center;justify-content:center}
+#combat-overlay.active{display:flex}
+#combat-box{background:var(--panel);border:2px solid #3a1020;border-radius:12px;padding:16px;max-width:400px;width:90%;text-align:center}
+#combat-box .enemy-name{color:#e74c3c;font-size:20px;font-weight:bold;margin-bottom:8px}
+#combat-box .enemy-hp-bar{width:100%;height:14px;background:#1a0a0a;border-radius:7px;overflow:hidden;border:1px solid #3a1020;margin:8px 0}
+#combat-box .enemy-hp-fill{height:100%;background:linear-gradient(90deg,#8b0000,#e74c3c);transition:width .3s}
+#combat-box .player-hp-bar{width:100%;height:10px;background:#1a1a2a;border-radius:5px;overflow:hidden;border:1px solid var(--border);margin:4px 0}
+#combat-box .player-hp-fill{height:100%;background:linear-gradient(90deg,#8b0000,#e74c3c);transition:width .3s}
+#combat-box .combat-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:12px}
+#combat-box .combat-actions button{flex:1;min-width:80px;padding:10px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;cursor:pointer;transition:.2s;font-family:inherit}
+#combat-box .combat-actions button:active{transform:scale(.95)}
+#combat-box .combat-actions button.skill-btn{border-color:#3498db;color:#3498db}
+#combat-box .combat-log{font-size:11px;color:#888;margin-top:8px;min-height:32px}
+/* 标题画面 */
+#title-screen{position:fixed;inset:0;background:radial-gradient(ellipse at center,#0a0a14 0%,#000 100%);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+#title-screen h1{font-size:36px;color:var(--gold);text-shadow:0 0 20px rgba(201,160,80,.5),0 0 40px rgba(201,160,80,.3);letter-spacing:4px}
+#title-screen .subtitle{color:#666;font-size:13px;margin-top:-10px}
+#title-screen .class-select{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+#title-screen .class-card{background:var(--panel);border:2px solid var(--border);border-radius:12px;padding:16px;width:120px;cursor:pointer;transition:.3s;text-align:center}
+#title-screen .class-card:hover{border-color:var(--gold);transform:translateY(-2px)}
+#title-screen .class-card.selected{border-color:var(--gold);box-shadow:0 0 16px rgba(201,160,80,.3)}
+#title-screen .class-icon{font-size:40px;margin-bottom:8px}
+#title-screen .class-name{color:var(--text);font-size:16px;font-weight:bold}
+#title-screen .class-desc{color:#666;font-size:10px;margin-top:4px}
+#title-screen .class-stat{font-size:10px;color:var(--dim);margin-top:4px}
+#title-screen .start-btn{padding:12px 40px;border:2px solid var(--gold);border-radius:25px;background:transparent;color:var(--gold);font-size:18px;cursor:pointer;transition:.3s;font-family:inherit;letter-spacing:2px}
+#title-screen .start-btn:hover{background:rgba(201,160,80,.15);box-shadow:0 0 20px rgba(201,160,80,.3)}
+/* 响应式 */
+@media(max-width:600px){
+  #top-bar{padding:2px 4px;gap:4px;min-height:28px}
+  #top-bar .stat{font-size:10px}
+  #top-bar .stat-bar{height:8px;min-width:30px}
+  #log-panel{height:40px;font-size:10px}
+  #action-bar{padding:2px 4px;gap:4px}
+  #action-bar button{padding:4px 10px;font-size:11px}
+  #dpad{display:block}
+  #title-screen h1{font-size:26px}
+  #title-screen .class-card{width:100px;padding:12px}
+  #title-screen .class-icon{font-size:32px}
+}
+@media(min-width:601px){
+  #dpad{display:none}
+}
+/* 广告组件 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<div id="game-wrapper">
+  <div id="top-bar">
+    <span class="stat">❤️<span id="hpText">100</span></span>
+    <div class="stat-bar"><div class="fill hp-fill" id="hpBar" style="width:100%"></div></div>
+    <span class="stat">💎<span id="mpText">50</span></span>
+    <div class="stat-bar"><div class="fill mp-fill" id="mpBar" style="width:100%"></div></div>
+    <span class="stat">⭐<span id="levelText">Lv1</span></span>
+    <div class="stat-bar" style="flex:.5"><div class="fill xp-fill" id="xpBar" style="width:0%"></div></div>
+    <span class="stat">💰<span id="goldText">0</span></span>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="gameCanvas"></canvas>
+    <canvas id="minimap" width="80" height="60"></canvas>
+    <div id="floor-indicator">地下 1 层</div>
+    <div id="dpad">
+      <button class="up" data-dir="up">▲</button>
+      <button class="down" data-dir="down">▼</button>
+      <button class="left" data-dir="left">◀</button>
+      <button class="right" data-dir="right">▶</button>
+      <button class="center" data-dir="wait">⏳</button>
+    </div>
+  </div>
+  <div id="log-panel"></div>
+  <div id="action-bar">
+    <button id="btnInventory">🎒 背包</button>
+    <button id="btnStatus">📊 状态</button>
+    <button id="btnWait">⏳ 等待</button>
+    <button id="btnRestart" class="highlight">🔄 重来</button>
+  </div>
+</div>
+
+<!-- 战斗弹窗 -->
+<div id="combat-overlay">
+  <div id="combat-box">
+    <div class="enemy-name" id="enemyName">骷髅兵</div>
+    <div class="enemy-hp-bar"><div class="enemy-hp-fill" id="enemyHpBar" style="width:100%"></div></div>
+    <div style="font-size:11px;color:#888">敌人 ❤️<span id="enemyHpText">30</span>/<span id="enemyHpMax">30</span></div>
+    <div class="player-hp-bar"><div class="player-hp-fill" id="combatPlayerHpBar" style="width:100%"></div></div>
+    <div style="font-size:10px;color:#888">你 ❤️<span id="combatPlayerHpText">100</span> 💎<span id="combatPlayerMpText">50</span></div>
+    <div class="combat-actions">
+      <button id="combatAttack">⚔️ 攻击</button>
+      <button id="combatSkill" class="skill-btn">✨ 技能</button>
+      <button id="combatItem">🧪 物品</button>
+      <button id="combatFlee">🏃 逃跑</button>
+    </div>
+    <div class="combat-log" id="combatLog"></div>
+  </div>
+</div>
+
+<!-- 弹窗容器 -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<!-- 标题画面 -->
+<div id="title-screen">
+  <h1>🏰 地牢探险</h1>
+  <div class="subtitle">Roguelike · 暗黑地牢 · 回合制</div>
+  <div class="class-select">
+    <div class="class-card" data-class="warrior" onclick="selectClass('warrior')">
+      <div class="class-icon">⚔️</div>
+      <div class="class-name">战士</div>
+      <div class="class-desc">近战坦克</div>
+      <div class="class-stat">❤️120 💎30</div>
+    </div>
+    <div class="class-card" data-class="mage" onclick="selectClass('mage')">
+      <div class="class-icon">🔮</div>
+      <div class="class-name">法师</div>
+      <div class="class-desc">远程魔法</div>
+      <div class="class-stat">❤️70 💎80</div>
+    </div>
+    <div class="class-card" data-class="archer" onclick="selectClass('archer')">
+      <div class="class-icon">🏹</div>
+      <div class="class-name">弓箭手</div>
+      <div class="class-desc">远程暴击</div>
+      <div class="class-stat">❤️90 💎50</div>
+    </div>
+  </div>
+  <button class="start-btn" onclick="startGame()">⚔️ 进入地牢</button>
+</div>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+// ============ 游戏常量 ============
+const TILE_WALL=0,TILE_FLOOR=1,TILE_STAIRS=2,TILE_CHEST=3,TILE_POTION_HP=4,TILE_POTION_MP=5,TILE_DOOR=6;
+const TILES={0:{ch:'#',c:'#333',d:'墙'},1:{ch:'.',c:'#1a1a22',d:'地'},2:{ch:'▼',c:'#ffd700',d:'楼梯'},3:{ch:'📦',c:'#c9a050',d:'宝箱'},4:{ch:'🧪',c:'#e74c3c',d:'红药'},5:{ch:'💧',c:'#3498db',d:'蓝药'},6:{ch:'+',c:'#5a3a2a',d:'门'}};
+const CLASSES={
+  warrior:{name:'战士',icon:'⚔️',hp:120,mp:30,atk:12,def:6,skills:[{name:'猛击',cost:10,dmg:2.2,desc:'2.2倍伤害'},{name:'盾墙',cost:15,desc:'本回合防御+10',buff:'def+10'}]},
+  mage:{name:'法师',icon:'🔮',hp:70,mp:80,atk:16,def:3,skills:[{name:'火球术',cost:15,dmg:2.5,desc:'2.5倍伤害'},{name:'闪电链',cost:20,dmg:1.8,desc:'1.8倍伤害+麻痹',stun:true}]},
+  archer:{name:'弓箭手',icon:'🏹',hp:90,mp:50,atk:14,def:4,skills:[{name:'强力射击',cost:10,dmg:2.0,desc:'2倍伤害'},{name:'多重射击',cost:18,dmg:1.3,desc:'1.3倍伤害×2次',multi:2}]}
+};
+
+// ============ 装备定义 ============
+const WEAPONS=[
+  {name:'生锈短剑',tier:1,atk:3,icon:'🗡️'},{name:'铁剑',tier:2,atk:6,icon:'⚔️'},{name:'宽刃剑',tier:3,atk:10,icon:'🗡️'},
+  {name:'秘银长剑',tier:4,atk:15,icon:'✨'},{name:'龙牙剑',tier:5,atk:22,icon:'🐉'},{name:'暗影收割者',tier:6,atk:30,icon:'💀'}
+];
+const ARMORS=[
+  {name:'布衣',tier:1,def:2,icon:'👕'},{name:'皮甲',tier:2,def:4,icon:'🛡️'},{name:'锁子甲',tier:3,def:7,icon:'⛓️'},
+  {name:'板甲',tier:4,def:11,icon:'🛡️'},{name:'秘银甲',tier:5,def:16,icon:'✨'},{name:'龙鳞甲',tier:6,def:22,icon:'🐉'}
+];
+const ACCESSORIES=[
+  {name:'铜戒指',tier:1,hp:10,icon:'💍'},{name:'魔法戒指',tier:2,mp:15,icon:'💎'},{name:'力量护符',tier:3,atk:4,icon:'🔴'},
+  {name:'防御护符',tier:4,def:4,icon:'🔵'},{name:'生命宝石',tier:5,hp:30,mp:20,icon:'💚'},{name:'暗影之心',tier:6,atk:8,def:4,hp:20,icon:'🖤'}
+];
+
+// ============ 敌人定义 ============
+const ENEMY_TYPES={
+  slime:{name:'史莱姆',icon:'🟢',hp:20,atk:4,def:1,xp:15,gold:5,tier:1},
+  rat:{name:'巨鼠',icon:'🐀',hp:15,atk:5,def:1,xp:12,gold:3,tier:1},
+  skeleton:{name:'骷髅兵',icon:'💀',hp:30,atk:7,def:3,xp:25,gold:10,tier:2},
+  zombie:{name:'僵尸',icon:'🧟',hp:40,atk:6,def:4,xp:22,gold:8,tier:2},
+  ghost:{name:'幽灵',icon:'👻',hp:25,atk:9,def:2,xp:30,gold:12,tier:3},
+  demon:{name:'恶魔',icon:'👿',hp:50,atk:12,def:5,xp:40,gold:20,tier:3},
+  wraith:{name:'怨灵',icon:'💫',hp:45,atk:14,def:4,xp:45,gold:18,tier:4},
+  golem:{name:'石魔像',icon:'🗿',hp:70,atk:10,def:8,xp:35,gold:15,tier:4},
+  boss:{name:'地牢领主',icon:'👑',hp:150,atk:18,def:8,xp:100,gold:100,tier:5}
+};
+
+// ============ 游戏状态 ============
+let player,gameState,mapData,enemies,items,dungeonFloor,combatActive,selectedClass,animFrame;
+
+function createPlayer(cls){
+  const c=CLASSES[cls];
+  return {
+    cls,icon:c.icon,name:c.name,x:0,y:0,hp:c.hp,maxHp:c.hp,mp:c.mp,maxMp:c.mp,
+    baseAtk:c.atk,baseDef:c.def,atk:c.atk,def:c.def,
+    level:1,xp:0,xpToNext:30,gold:0,
+    weapon:null,armor:null,accessory:null,
+    inventory:[],skills:c.skills.map(s=>({...s})),
+    floor:1,combatDef:0,combatAtk:0 // combat buffs
+  };
+}
+
+function initGameState(){
+  return {explored:new Set(),turn:0,gameOver:false,gameWon:false,enemyTurn:false};
+}
+
+// ============ 地牢生成 ============
+function generateDungeon(floor){
+  const w=40,h=30;
+  const map=Array.from({length:h},()=>new Uint8Array(w));
+  const rooms=[];
+
+  // 填满墙壁
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)map[y][x]=TILE_WALL;
+
+  // 生成房间
+  const roomCount=5+Math.floor(Math.random()*4)+Math.floor(floor/2);
+  const maxAttempts=200;
+  for(let i=0;i<maxAttempts&&rooms.length<roomCount;i++){
+    const rw=4+Math.floor(Math.random()*6);
+    const rh=4+Math.floor(Math.random()*5);
+    const rx=2+Math.floor(Math.random()*(w-rw-3));
+    const ry=2+Math.floor(Math.random()*(h-rh-3));
+    let overlap=false;
+    for(const r of rooms){
+      if(rx<r.x+r.w+2&&rx+rw+2>r.x&&ry<r.y+r.h+2&&ry+rh+2>r.y){overlap=true;break;}
+    }
+    if(!overlap){
+      rooms.push({x:rx,y:ry,w:rw,h:rh,centerX:Math.floor(rx+rw/2),centerY:Math.floor(ry+rh/2)});
+      for(let y=ry;y<ry+rh;y++)for(let x=rx;x<rx+rw;x++)map[y][x]=TILE_FLOOR;
+    }
+  }
+  if(rooms.length<3){
+    // fallback: force at least 3 rooms
+    for(let i=rooms.length;i<3;i++){
+      const rx=5+i*10,ry=5+i*6,rw=5,rh=4;
+      rooms.push({x:rx,y:ry,w:rw,h:rh,centerX:rx+2,centerY:ry+2});
+      for(let y=ry;y<ry+rh;y++)for(let x=rx;x<rx+rw;x++)map[y][x]=TILE_FLOOR;
+    }
+  }
+
+  // 连接房间（最近邻）
+  const connected=new Set([0]);
+  const edges=[];
+  for(let i=1;i<rooms.length;i++){
+    let best=null,bestDist=Infinity;
+    for(const ci of connected){
+      const d=Math.abs(rooms[i].centerX-rooms[ci].centerX)+Math.abs(rooms[i].centerY-rooms[ci].centerY);
+      if(d<bestDist){bestDist=d;best=ci;}
+    }
+    if(best!==null){
+      edges.push([best,i]);
+      connected.add(i);
+    }
+  }
+  // 额外连接确保连通性
+  if(rooms.length>3){
+    edges.push([0,rooms.length-1]);
+  }
+
+  for(const [a,b] of edges){
+    let cx=rooms[a].centerX,cy=rooms[a].centerY;
+    const tx=rooms[b].centerX,ty=rooms[b].centerY;
+    // 随机选择水平优先还是垂直优先
+    if(Math.random()<0.5){
+      while(cx!==tx){map[cy][cx]=TILE_FLOOR;cx+=cx<tx?1:-1;}
+      while(cy!==ty){map[cy][cx]=TILE_FLOOR;cy+=cy<ty?1:-1;}
+    }else{
+      while(cy!==ty){map[cy][cx]=TILE_FLOOR;cy+=cy<ty?1:-1;}
+      while(cx!==tx){map[cy][cx]=TILE_FLOOR;cx+=cx<tx?1:-1;}
+    }
+  }
+
+  // 放置楼梯（最后一个房间）
+  const stairRoom=rooms[rooms.length-1];
+  map[stairRoom.centerY][stairRoom.centerX]=TILE_STAIRS;
+
+  // 放置宝箱(随机房间)
+  const chestCount=2+Math.floor(Math.random()*3);
+  for(let i=0;i<chestCount;i++){
+    const r=rooms[Math.floor(Math.random()*(rooms.length-1))];
+    const cx=r.x+1+Math.floor(Math.random()*(r.w-2));
+    const cy=r.y+1+Math.floor(Math.random()*(r.h-2));
+    if(map[cy][cx]===TILE_FLOOR)map[cy][cx]=TILE_CHEST;
+  }
+
+  // 放置药水
+  const potionCount=3+Math.floor(Math.random()*4);
+  for(let i=0;i<potionCount;i++){
+    const r=rooms[Math.floor(Math.random()*rooms.length)];
+    const cx=r.x+1+Math.floor(Math.random()*(r.w-2));
+    const cy=r.y+1+Math.floor(Math.random()*(r.h-2));
+    if(map[cy][cx]===TILE_FLOOR)map[cy][cx]=Math.random()<0.5?TILE_POTION_HP:TILE_POTION_MP;
+  }
+
+  // 生成敌人
+  const enemyList=[];
+  const enemyCount=3+floor+Math.floor(Math.random()*4);
+  for(let i=0;i<enemyCount;i++){
+    const r=rooms[Math.floor(Math.random()*(rooms.length-1))];
+    const ex=r.x+1+Math.floor(Math.random()*(r.w-2));
+    const ey=r.y+1+Math.floor(Math.random()*(r.h-2));
+    if(map[ey][ex]===TILE_FLOOR){
+      enemyList.push({x:ex,y:ey,...createEnemy(floor)});
+    }
+  }
+
+  // Boss(第5层)
+  if(floor>=5){
+    const bossRoom=rooms[Math.floor(Math.random()*(rooms.length-1))];
+    const bx=bossRoom.x+1+Math.floor(Math.random()*(bossRoom.w-2));
+    const by=bossRoom.y+1+Math.floor(Math.random()*(bossRoom.h-2));
+    if(map[by][bx]===TILE_FLOOR){
+      const b=createEnemy(5,true);
+      enemyList.push({x:bx,y:by,...b});
+    }
+  }
+
+  return {map,rooms,enemyList};
+}
+
+function createEnemy(floor,isBoss=false){
+  if(isBoss){
+    const b=ENEMY_TYPES.boss;
+    return {type:'boss',name:b.name,icon:b.icon,hp:b.hp+floor*20,maxHp:b.hp+floor*20,atk:b.atk+floor*2,def:b.def+floor,xp:b.xp,gold:b.gold+floor*30};
+  }
+  const pool=[];
+  if(floor<=2){pool.push('slime','slime','rat','rat','skeleton');}
+  else if(floor<=3){pool.push('skeleton','skeleton','zombie','zombie','ghost');}
+  else if(floor<=4){pool.push('ghost','demon','demon','wraith','golem');}
+  else{pool.push('demon','wraith','wraith','golem','golem');}
+  const type=pool[Math.floor(Math.random()*pool.length)];
+  const e=ENEMY_TYPES[type];
+  const scale=1+(floor-1)*0.15;
+  return {type,name:e.name,icon:e.icon,hp:Math.floor(e.hp*scale),maxHp:Math.floor(e.hp*scale),atk:Math.floor(e.atk*scale),def:Math.floor(e.def*scale),xp:Math.floor(e.xp*scale),gold:Math.floor(e.gold*scale)};
+}
+
+function generateLoot(floor){
+  const tier=Math.min(6,Math.floor((floor+1)/2)+Math.floor(Math.random()*2));
+  const type=Math.random();
+  if(type<0.4){
+    const w=WEAPONS.filter(w=>w.tier===tier);
+    return w.length?{...w[Math.floor(Math.random()*w.length)],slot:'weapon'}:null;
+  }else if(type<0.75){
+    const a=ARMORS.filter(a=>a.tier===tier);
+    return a.length?{...a[Math.floor(Math.random()*a.length)],slot:'armor'}:null;
+  }else{
+    const acc=ACCESSORIES.filter(a=>a.tier===tier);
+    return acc.length?{...acc[Math.floor(Math.random()*acc.length)],slot:'accessory'}:null;
+  }
+}
+
+// ============ 玩家操作 ============
+function movePlayer(dx,dy){
+  if(combatActive||gameState.gameOver||gameState.gameWon)return;
+  const nx=player.x+dx,ny=player.y+dy;
+  if(nx<0||ny<0||nx>=mapData.map[0].length||ny>=mapData.map.length)return;
+  const tile=mapData.map[ny][nx];
+  if(tile===TILE_WALL)return;
+
+  player.x=nx;player.y=ny;
+  gameState.explored.add(`${nx},${ny}`);
+  // Explore surrounding tiles
+  for(let dy2=-2;dy2<=2;dy2++)for(let dx2=-2;dx2<=2;dx2++){
+    const ex=nx+dx2,ey=ny+dy2;
+    if(ex>=0&&ey>=0&&ex<mapData.map[0].length&&ey<mapData.map.length)gameState.explored.add(`${ex},${ey}`);
+  }
+
+  // Check tile interaction
+  if(tile===TILE_STAIRS){descendFloor();return;}
+  if(tile===TILE_CHEST){openChest(nx,ny);}
+  if(tile===TILE_POTION_HP){pickupPotion('hp',nx,ny);}
+  if(tile===TILE_POTION_MP){pickupPotion('mp',nx,ny);}
+
+  // Check enemy collision
+  for(let i=enemies.length-1;i>=0;i--){
+    if(enemies[i].x===nx&&enemies[i].y===ny){
+      startCombat(enemies[i]);
+      return;
+    }
+  }
+
+  gameState.turn++;
+  enemyTurn();
+  updateUI();
+  renderAll();
+}
+
+function descendFloor(){
+  dungeonFloor++;
+  player.floor=dungeonFloor;
+  addLog(`⚡ 你下到了地下 ${dungeonFloor} 层！`,'log-level');
+  // 回复少量
+  player.hp=Math.min(player.maxHp,player.hp+Math.floor(player.maxHp*0.3));
+  player.mp=Math.min(player.maxMp,player.mp+Math.floor(player.maxMp*0.3));
+  generateFloor();
+  updateUI();
+  renderAll();
+}
+
+function openChest(x,y){
+  const loot=generateLoot(dungeonFloor);
+  if(loot){
+    player.inventory.push(loot);
+    addLog(`📦 打开宝箱，获得 ${loot.icon}${loot.name}！`,'log-item');
+    showModal(`<h2>📦 宝箱</h2><p>获得了 <b style="color:var(--gold)">${loot.icon} ${loot.name}</b></p><p style="font-size:11px;color:#888">${getItemDesc(loot)}</p><button class="btn gold" onclick="closeModal();equipFromInventory(${player.inventory.length-1})">装备</button><button class="btn" onclick="closeModal()">放入背包</button>`);
+  }else{
+    const gold=5+Math.floor(Math.random()*15)*dungeonFloor;
+    player.gold+=gold;
+    addLog(`📦 打开宝箱，获得 ${gold} 💰`,'log-item');
+  }
+  mapData.map[y][x]=TILE_FLOOR;
+}
+
+function pickupPotion(type,x,y){
+  if(type==='hp'){
+    const heal=Math.floor(player.maxHp*0.3);
+    player.hp=Math.min(player.maxHp,player.hp+heal);
+    addLog(`🧪 喝下生命药水，恢复 ${heal} ❤️`,'log-item');
+  }else{
+    const mana=Math.floor(player.maxMp*0.3);
+    player.mp=Math.min(player.maxMp,player.mp+mana);
+    addLog(`💧 喝下魔法药水，恢复 ${mana} 💎`,'log-item');
+  }
+  mapData.map[y][x]=TILE_FLOOR;
+}
+
+function enemyTurn(){
+  for(const enemy of enemies){
+    const dist=Math.abs(enemy.x-player.x)+Math.abs(enemy.y-player.y);
+    if(dist<=8&&dist>1){
+      // 简单AI：向玩家移动
+      const dx=Math.sign(player.x-enemy.x);
+      const dy=Math.sign(player.y-enemy.y);
+      const nx=enemy.x+(Math.random()<0.7?dx:0);
+      const ny=enemy.y+(Math.random()<0.7?dy:0);
+      if(nx>=0&&ny>=0&&nx<mapData.map[0].length&&ny<mapData.map.length&&mapData.map[ny][nx]!==TILE_WALL){
+        // 检查是否与玩家碰撞
+        if(nx===player.x&&ny===player.y){
+          enemy.x=nx;enemy.y=ny;
+          startCombat(enemy);
+          return;
+        }
+        // 检查是否与其他敌人重叠
+        let blocked=false;
+        for(const e2 of enemies){
+          if(e2!==enemy&&e2.x===nx&&e2.y===ny){blocked=true;break;}
+        }
+        if(!blocked){enemy.x=nx;enemy.y=ny;}
+      }
+    }
+    // 爬行类敌人随机移动
+    if(dist>8&&Math.random()<0.2){
+      const dirs=[[0,1],[0,-1],[1,0],[-1,0]];
+      const [dx,dy]=dirs[Math.floor(Math.random()*4)];
+      const nx=enemy.x+dx,ny=enemy.y+dy;
+      if(nx>=0&&ny>=0&&nx<mapData.map[0].length&&ny<mapData.map.length&&mapData.map[ny][nx]!==TILE_WALL){
+        if(nx===player.x&&ny===player.y){enemy.x=nx;enemy.y=ny;startCombat(enemy);return;}
+        let blocked=false;
+        for(const e2 of enemies){if(e2!==enemy&&e2.x===nx&&e2.y===ny){blocked=true;break;}}
+        if(!blocked){enemy.x=nx;enemy.y=ny;}
+      }
+    }
+  }
+}
+
+// ============ 战斗系统 ============
+let currentEnemy=null;
+function startCombat(enemy){
+  combatActive=true;
+  currentEnemy=enemy;
+  player.combatDef=0;
+  player.combatAtk=0;
+  document.getElementById('combat-overlay').classList.add('active');
+  document.getElementById('enemyName').textContent=enemy.icon+' '+enemy.name;
+  document.getElementById('combatLog').textContent='⚔️ 战斗开始！';
+  updateCombatUI();
+}
+
+function endCombat(){
+  combatActive=false;
+  currentEnemy=null;
+  player.combatDef=0;
+  player.combatAtk=0;
+  document.getElementById('combat-overlay').classList.remove('active');
+  updateUI();
+  renderAll();
+}
+
+function playerAttack(){
+  if(!combatActive||!currentEnemy)return;
+  const pAtk=player.atk+(player.combatAtk||0);
+  const crit=player.cls==='archer'&&Math.random()<0.25;
+  let dmg=Math.max(1,pAtk+Math.floor(Math.random()*5)-currentEnemy.def);
+  if(crit){dmg=Math.floor(dmg*1.8);addCombatLog(`🎯 暴击！造成 ${dmg} 伤害！`);}
+  else{addCombatLog(`⚔️ 你攻击了 ${currentEnemy.name}，造成 ${dmg} 伤害`);}
+  currentEnemy.hp-=dmg;
+  if(currentEnemy.hp<=0){enemyDefeated();return;}
+  enemyAttackPlayer();
+}
+
+function useSkill(idx){
+  if(!combatActive||!currentEnemy)return;
+  const skill=player.skills[idx];
+  if(player.mp<skill.cost){addCombatLog('💎 魔法值不足！');return;}
+  player.mp-=skill.cost;
+  if(skill.buff){
+    player.combatDef+=10;
+    addCombatLog(`🛡️ 盾墙！防御+10，持续本回合`);
+    enemyAttackPlayer();
+    return;
+  }
+  if(skill.stun){
+    const dmg=Math.max(1,Math.floor((player.atk+(player.combatAtk||0))*skill.dmg+Math.floor(Math.random()*8)-currentEnemy.def));
+    currentEnemy.hp-=dmg;
+    addCombatLog(`⚡ 闪电链！造成 ${dmg} 伤害，敌人麻痹！`);
+    if(currentEnemy.hp<=0){enemyDefeated();return;}
+    addCombatLog('💫 敌人麻痹，跳过回合！');
+    updateCombatUI();
+    return;
+  }
+  if(skill.multi){
+    let totalDmg=0;
+    for(let i=0;i<skill.multi;i++){
+      const dmg=Math.max(1,Math.floor((player.atk+(player.combatAtk||0))*skill.dmg+Math.floor(Math.random()*5)-currentEnemy.def));
+      totalDmg+=dmg;
+      currentEnemy.hp-=dmg;
+      if(currentEnemy.hp<=0)break;
+    }
+    addCombatLog(`🏹 多重射击！${skill.multi}连击，共 ${totalDmg} 伤害`);
+    if(currentEnemy.hp<=0){enemyDefeated();return;}
+  }else{
+    const dmg=Math.max(1,Math.floor((player.atk+(player.combatAtk||0))*skill.dmg+Math.floor(Math.random()*6)-currentEnemy.def));
+    currentEnemy.hp-=dmg;
+    addCombatLog(`✨ ${skill.name}！造成 ${dmg} 伤害`);
+    if(currentEnemy.hp<=0){enemyDefeated();return;}
+  }
+  enemyAttackPlayer();
+}
+
+function enemyAttackPlayer(){
+  if(!currentEnemy)return;
+  const eDmg=Math.max(1,currentEnemy.atk+Math.floor(Math.random()*4)-(player.def+player.combatDef));
+  player.hp-=eDmg;
+  addCombatLog(`${currentEnemy.name} 攻击你，造成 ${eDmg} 伤害`);
+  if(player.hp<=0){playerDeath();return;}
+  player.combatDef=0;
+  updateCombatUI();
+}
+
+function enemyDefeated(){
+  const e=currentEnemy;
+  addCombatLog(`💀 ${e.name} 被击败！`);
+  player.xp+=e.xp;
+  player.gold+=e.gold;
+  addLog(`💀 击败 ${e.icon}${e.name}！+${e.xp}XP +${e.gold}💰`,'log-combat');
+  // 掉落
+  if(Math.random()<0.35){
+    const loot=generateLoot(dungeonFloor);
+    if(loot){player.inventory.push(loot);addLog(`🎁 ${e.name}掉落：${loot.icon}${loot.name}`,'log-item');}
+  }
+  // 移除敌人
+  const idx=enemies.indexOf(e);
+  if(idx>=0)enemies.splice(idx,1);
+  currentEnemy=null;
+  checkLevelUp();
+  endCombat();
+}
+
+function playerDeath(){
+  addCombatLog('💔 你倒下了...');
+  player.hp=0;
+  gameState.gameOver=true;
+  currentEnemy=null;
+  endCombat();
+  showModal(`<h2>💀 你死了</h2><p style="color:#888">在地牢第 ${dungeonFloor} 层倒下了</p><p>击杀敌人获得 ${player.xp}XP</p><button class="btn gold" onclick="closeModal();restartGame()">🔄 重新开始</button>`);
+  setTimeout(()=>{if(typeof showInterstitialAd==='function')showInterstitialAd();},500);
+}
+
+function tryFlee(){
+  if(!combatActive||!currentEnemy)return;
+  const fleeChance=(currentEnemy.type==='boss'||currentEnemy.type==='boss')?0.2:0.5+player.level*0.05;
+  if(Math.random()<fleeChance){
+    addCombatLog('🏃 成功逃跑！');
+    player.x=Math.max(0,player.x-1);
+    currentEnemy=null;
+    endCombat();
+  }else{
+    addCombatLog('❌ 逃跑失败！');
+    enemyAttackPlayer();
+  }
+}
+
+function useCombatItem(){
+  if(!combatActive)return;
+  const potions=player.inventory.filter(i=>i.name==='生命药水'||i.name==='魔法药水');
+  if(potions.length===0){addCombatLog('没有可用的药水！');return;}
+  const p=potions[0];
+  if(p.name==='生命药水'){player.hp=Math.min(player.maxHp,player.hp+25);addCombatLog('🧪 使用生命药水，恢复25HP');}
+  else{player.mp=Math.min(player.maxMp,player.mp+20);addCombatLog('💧 使用魔法药水，恢复20MP');}
+  const idx=player.inventory.indexOf(p);
+  if(idx>=0)player.inventory.splice(idx,1);
+  updateCombatUI();
+}
+
+function addCombatLog(msg){
+  document.getElementById('combatLog').textContent=msg;
+}
+
+function updateCombatUI(){
+  if(!currentEnemy)return;
+  document.getElementById('enemyHpBar').style.width=Math.max(0,currentEnemy.hp/currentEnemy.maxHp*100)+'%';
+  document.getElementById('enemyHpText').textContent=Math.max(0,currentEnemy.hp);
+  document.getElementById('enemyHpMax').textContent=currentEnemy.maxHp;
+  document.getElementById('combatPlayerHpBar').style.width=Math.max(0,player.hp/player.maxHp*100)+'%';
+  document.getElementById('combatPlayerHpText').textContent=Math.max(0,player.hp);
+  document.getElementById('combatPlayerMpText').textContent=player.mp;
+}
+
+// ============ 升级系统 ============
+function checkLevelUp(){
+  while(player.xp>=player.xpToNext){
+    player.xp-=player.xpToNext;
+    player.level++;
+    player.xpToNext=Math.floor(player.xpToNext*1.5);
+    player.maxHp+=8+Math.floor(Math.random()*5);
+    player.hp=player.maxHp;
+    player.maxMp+=4+Math.floor(Math.random()*3);
+    player.mp=player.maxMp;
+    player.baseAtk+=1;
+    player.baseDef+=1;
+    recalcStats();
+    addLog(`⭐ 升级！Lv${player.level}！全属性提升`,'log-level');
+  }
+}
+
+function recalcStats(){
+  player.atk=player.baseAtk+(player.weapon?player.weapon.atk:0)+(player.accessory&&player.accessory.atk?player.accessory.atk:0);
+  player.def=player.baseDef+(player.armor?player.armor.def:0)+(player.accessory&&player.accessory.def?player.accessory.def:0);
+  if(player.accessory&&player.accessory.hp)player.maxHp+=player.accessory.hp;
+  if(player.accessory&&player.accessory.mp)player.maxMp+=player.accessory.mp;
+}
+
+// ============ 背包 ============
+function equipFromInventory(idx){
+  const item=player.inventory[idx];
+  if(!item||!item.slot)return;
+  const old=player[item.slot];
+  if(old)player.inventory.push(old);
+  player[item.slot]=item;
+  player.inventory.splice(idx,1);
+  recalcStats();
+  addLog(`✅ 装备了 ${item.icon}${item.name}`,'log-item');
+  closeModal();
+  updateUI();
+}
+
+function getItemDesc(item){
+  const parts=[];
+  if(item.atk)parts.push(`攻击+${item.atk}`);
+  if(item.def)parts.push(`防御+${item.def}`);
+  if(item.hp)parts.push(`生命+${item.hp}`);
+  if(item.mp)parts.push(`魔法+${item.mp}`);
+  return parts.join(' ');
+}
+
+function showInventory(){
+  let html=`<h2>🎒 背包</h2>`;
+  html+=`<div style="text-align:left;margin-bottom:10px">`;
+  html+=`<div class="equip-slot"><span class="slot-name">⚔️ 武器</span><span class="item-name">${player.weapon?player.weapon.icon+' '+player.weapon.name:'空'}</span></div>`;
+  html+=`<div class="equip-slot"><span class="slot-name">🛡️ 护甲</span><span class="item-name">${player.armor?player.armor.icon+' '+player.armor.name:'空'}</span></div>`;
+  html+=`<div class="equip-slot"><span class="slot-name">💍 饰品</span><span class="item-name">${player.accessory?player.accessory.icon+' '+player.accessory.name:'空'}</span></div>`;
+  html+=`</div>`;
+  if(player.inventory.length===0){html+=`<p style="color:#888">背包空空如也</p>`;}
+  else{
+    player.inventory.forEach((item,i)=>{
+      const slotLabel=item.slot==='weapon'?'⚔️':item.slot==='armor'?'🛡️':'💍';
+      html+=`<div class="inv-item" onclick="equipFromInventory(${i})"><span>${item.icon} ${item.name}</span><span class="item-stat">${slotLabel} ${getItemDesc(item)}</span></div>`;
+    });
+  }
+  html+=`<button class="btn" onclick="closeModal()">关闭</button>`;
+  showModal(html);
+}
+
+function showStatus(){
+  let html=`<h2>📊 ${player.icon} ${player.name} Lv${player.level}</h2>`;
+  html+=`<div class="stat-row"><span>❤️ 生命</span><span>${player.hp}/${player.maxHp}</span></div>`;
+  html+=`<div class="stat-row"><span>💎 魔法</span><span>${player.mp}/${player.maxMp}</span></div>`;
+  html+=`<div class="stat-row"><span>⚔️ 攻击</span><span>${player.atk}</span></div>`;
+  html+=`<div class="stat-row"><span>🛡️ 防御</span><span>${player.def}</span></div>`;
+  html+=`<div class="stat-row"><span>⭐ 经验</span><span>${player.xp}/${player.xpToNext}</span></div>`;
+  html+=`<div class="stat-row"><span>💰 金币</span><span>${player.gold}</span></div>`;
+  html+=`<div class="stat-row"><span>🏰 层数</span><span>地下${dungeonFloor}层</span></div>`;
+  html+=`<div class="stat-row"><span>🔪 击杀</span><span>${player.xp}XP累计</span></div>`;
+  html+=`<h3>技能</h3>`;
+  player.skills.forEach(s=>{
+    html+=`<div class="stat-row"><span>${s.name}</span><span>💎${s.cost} ${s.desc}</span></div>`;
+  });
+  html+=`<button class="btn" onclick="closeModal()">关闭</button>`;
+  showModal(html);
+}
+
+// ============ 弹窗系统 ============
+function showModal(html){
+  document.getElementById('modalBox').innerHTML=html;
+  document.getElementById('modalOverlay').classList.add('active');
+}
+function closeModal(){
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+// ============ 日志 ============
+function addLog(msg,cls=''){
+  const panel=document.getElementById('log-panel');
+  const entry=document.createElement('div');
+  entry.className='log-entry '+(cls||'');
+  entry.textContent=msg;
+  panel.appendChild(entry);
+  panel.scrollTop=panel.scrollHeight;
+  // 限制日志数量
+  while(panel.children.length>30)panel.removeChild(panel.firstChild);
+}
+
+// ============ 渲染 ============
+function renderAll(){
+  const canvas=document.getElementById('gameCanvas');
+  const ctx=canvas.getContext('2d');
+  const w=canvas.width,h=canvas.height;
+  if(w<=0||h<=0)return;
+
+  const TILE=Math.floor(Math.min(w/15,h/11));
+  const vw=Math.floor(w/TILE),vh=Math.floor(h/TILE);
+  const ox=Math.max(0,Math.min(mapData.map[0].length-vw,player.x-Math.floor(vw/2)));
+  const oy=Math.max(0,Math.min(mapData.map.length-vh,player.y-Math.floor(vh/2)));
+
+  ctx.fillStyle='#0a0a0c';
+  ctx.fillRect(0,0,w,h);
+
+  // 绘制地图
+  for(let ty=0;ty<vh;ty++){
+    for(let tx=0;tx<vw;tx++){
+      const mx=ox+tx,my=oy+ty;
+      if(mx<0||my<0||mx>=mapData.map[0].length||my>=mapData.map.length)continue;
+      const explored=gameState.explored.has(`${mx},${my}`);
+      const tile=mapData.map[my][mx];
+      const px=tx*TILE,py=ty*TILE;
+
+      if(!explored){ctx.fillStyle='#050508';ctx.fillRect(px,py,TILE,TILE);continue;}
+
+      const t=TILES[tile];
+      ctx.fillStyle=t.c;
+      ctx.fillRect(px,py,TILE,TILE);
+
+      // 网格线
+      ctx.strokeStyle='rgba(255,255,255,.03)';
+      ctx.strokeRect(px,py,TILE,TILE);
+
+      if(tile===TILE_STAIRS){
+        ctx.fillStyle='#ffd700';
+        ctx.font=`${Math.floor(TILE*0.7)}px sans-serif`;
+        ctx.textAlign='center';
+        ctx.fillText('▼',px+TILE/2,py+TILE*0.75);
+      }else if(tile===TILE_CHEST){
+        ctx.fillStyle='#c9a050';
+        ctx.font=`${Math.floor(TILE*0.65)}px sans-serif`;
+        ctx.textAlign='center';
+        ctx.fillText('📦',px+TILE/2,py+TILE*0.75);
+      }else if(tile===TILE_POTION_HP){
+        ctx.fillStyle='#e74c3c';
+        ctx.font=`${Math.floor(TILE*0.6)}px sans-serif`;
+        ctx.textAlign='center';
+        ctx.fillText('🧪',px+TILE/2,py+TILE*0.75);
+      }else if(tile===TILE_POTION_MP){
+        ctx.fillStyle='#3498db';
+        ctx.font=`${Math.floor(TILE*0.6)}px sans-serif`;
+        ctx.textAlign='center';
+        ctx.fillText('💧',px+TILE/2,py+TILE*0.75);
+      }
+    }
+  }
+
+  // 绘制物品(地面物品)
+  // (药水和宝箱已在地图tile中绘制)
+
+  // 绘制敌人
+  for(const enemy of enemies){
+    const sx=enemy.x-ox,sy=enemy.y-oy;
+    if(sx>=0&&sy>=0&&sx<vw&&sy<vh){
+      if(!gameState.explored.has(`${enemy.x},${enemy.y}`))continue;
+      ctx.fillStyle='#e74c3c';
+      ctx.font=`${Math.floor(TILE*0.7)}px sans-serif`;
+      ctx.textAlign='center';
+      ctx.fillText(enemy.icon,sx*TILE+TILE/2,sy*TILE+TILE*0.8);
+      // 敌人血条
+      const hpPct=enemy.hp/enemy.maxHp;
+      ctx.fillStyle='#1a0000';
+      ctx.fillRect(sx*TILE+2,sy*TILE+2,TILE-4,3);
+      ctx.fillStyle=hpPct>0.5?'#2ecc71':hpPct>0.25?'#f39c12':'#e74c3c';
+      ctx.fillRect(sx*TILE+2,sy*TILE+2,(TILE-4)*hpPct,3);
+    }
+  }
+
+  // 绘制玩家
+  const px=player.x-ox,py=player.y-oy;
+  if(px>=0&&py>=0&&px<vw&&py<vh){
+    // 光晕
+    ctx.fillStyle='rgba(255,215,0,.2)';
+    ctx.beginPath();
+    ctx.arc(px*TILE+TILE/2,py*TILE+TILE/2,TILE*0.55,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle='#ffd700';
+    ctx.font=`${Math.floor(TILE*0.75)}px sans-serif`;
+    ctx.textAlign='center';
+    ctx.fillText(player.icon,px*TILE+TILE/2,py*TILE+TILE*0.8);
+  }
+
+  // 绘制小地图
+  drawMinimap();
+}
+
+function drawMinimap(){
+  const mm=document.getElementById('minimap');
+  const mctx=mm.getContext('2d');
+  const mw=mm.width,mh=mm.height;
+  const scaleX=mw/mapData.map[0].length,scaleY=mh/mapData.map.length;
+  mctx.fillStyle='rgba(5,5,10,.9)';
+  mctx.fillRect(0,0,mw,mh);
+
+  for(let y=0;y<mapData.map.length;y++){
+    for(let x=0;x<mapData.map[0].length;x++){
+      if(!gameState.explored.has(`${x},${y}`))continue;
+      const tile=mapData.map[y][x];
+      if(tile===TILE_WALL){mctx.fillStyle='#1a1a2a';}
+      else if(tile===TILE_STAIRS){mctx.fillStyle='#ffd700';}
+      else if(tile===TILE_CHEST){mctx.fillStyle='#c9a050';}
+      else{mctx.fillStyle='#2a2a3a';}
+      mctx.fillRect(x*scaleX,y*scaleY,Math.ceil(scaleX),Math.ceil(scaleY));
+    }
+  }
+  // 玩家位置
+  mctx.fillStyle='#ffd700';
+  mctx.fillRect(player.x*scaleX-1,player.y*scaleY-1,3,3);
+  // 敌人位置
+  for(const e of enemies){
+    if(gameState.explored.has(`${e.x},${e.y}`)){
+      mctx.fillStyle='#e74c3c';
+      mctx.fillRect(e.x*scaleX,e.y*scaleY,1.5,1.5);
+    }
+  }
+  // 楼梯
+  for(let y=0;y<mapData.map.length;y++){
+    for(let x=0;x<mapData.map[0].length;x++){
+      if(mapData.map[y][x]===TILE_STAIRS&&gameState.explored.has(`${x},${y}`)){
+        mctx.fillStyle='#ffd700';
+        mctx.fillRect(x*scaleX-1,y*scaleY-1,3,3);
+      }
+    }
+  }
+}
+
+function resizeCanvas(){
+  const wrap=document.getElementById('canvas-wrap');
+  const canvas=document.getElementById('gameCanvas');
+  const w=wrap.clientWidth;
+  const h=wrap.clientHeight;
+  canvas.width=w;
+  canvas.height=h;
+  renderAll();
+}
+
+// ============ UI更新 ============
+function updateUI(){
+  document.getElementById('hpText').textContent=Math.max(0,player.hp);
+  document.getElementById('mpText').textContent=player.mp;
+  document.getElementById('levelText').textContent='Lv'+player.level;
+  document.getElementById('goldText').textContent=player.gold;
+  document.getElementById('hpBar').style.width=Math.max(0,player.hp/player.maxHp*100)+'%';
+  document.getElementById('mpBar').style.width=Math.max(0,player.mp/player.maxMp*100)+'%';
+  document.getElementById('xpBar').style.width=Math.max(0,player.xp/player.xpToNext*100)+'%';
+  document.getElementById('floor-indicator').textContent=`地下 ${dungeonFloor} 层`;
+  // 楼层颜色
+  const fi=document.getElementById('floor-indicator');
+  if(dungeonFloor>=5)fi.style.color='#e74c3c';
+  else if(dungeonFloor>=3)fi.style.color='#f39c12';
+  else fi.style.color='#c9a050';
+}
+
+// ============ 游戏流程 ============
+function generateFloor(){
+  const data=generateDungeon(dungeonFloor);
+  mapData=data;
+  enemies=data.enemyList;
+  // 放置玩家在第一个房间
+  if(data.rooms.length>0){
+    player.x=data.rooms[0].centerX;
+    player.y=data.rooms[0].centerY;
+  }
+  gameState.explored.clear();
+  // 探索起始区域
+  for(let dy=-3;dy<=3;dy++)for(let dx=-3;dx<=3;dx++){
+    const ex=player.x+dx,ey=player.y+dy;
+    if(ex>=0&&ey>=0&&ex<mapData.map[0].length&&ey<mapData.map.length)gameState.explored.add(`${ex},${ey}`);
+  }
+  updateUI();
+  renderAll();
+  resizeCanvas();
+}
+
+function selectClass(cls){
+  selectedClass=cls;
+  document.querySelectorAll('.class-card').forEach(c=>c.classList.remove('selected'));
+  document.querySelector(`.class-card[data-class="${cls}"]`).classList.add('selected');
+}
+
+function startGame(){
+  if(!selectedClass)return;
+  document.getElementById('title-screen').style.display='none';
+  player=createPlayer(selectedClass);
+  gameState=initGameState();
+  dungeonFloor=1;
+  player.floor=1;
+  addLog('🏰 踏入地牢...黑暗笼罩着你','log-info');
+  addLog('💡 WASD/方向键移动，碰到敌人进入战斗','log-info');
+  generateFloor();
+  updateUI();
+  renderAll();
+}
+
+function restartGame(){
+  player=null;
+  gameState=null;
+  combatActive=false;
+  currentEnemy=null;
+  enemies=[];
+  mapData=null;
+  selectedClass=null;
+  document.getElementById('log-panel').innerHTML='';
+  document.getElementById('title-screen').style.display='flex';
+  document.querySelectorAll('.class-card').forEach(c=>c.classList.remove('selected'));
+  document.getElementById('combat-overlay').classList.remove('active');
+  closeModal();
+}
+
+function waitTurn(){
+  if(combatActive||gameState.gameOver||gameState.gameWon)return;
+  gameState.turn++;
+  player.mp=Math.min(player.maxMp,player.mp+1);
+  enemyTurn();
+  updateUI();
+  renderAll();
+}
+
+// ============ 事件绑定 ============
+document.addEventListener('keydown',e=>{
+  if(combatActive||gameState?.gameOver||gameState?.gameWon)return;
+  if(!player)return;
+  switch(e.key){
+    case 'w':case 'W':case 'ArrowUp':e.preventDefault();movePlayer(0,-1);break;
+    case 's':case 'S':case 'ArrowDown':e.preventDefault();movePlayer(0,1);break;
+    case 'a':case 'A':case 'ArrowLeft':e.preventDefault();movePlayer(-1,0);break;
+    case 'd':case 'D':case 'ArrowRight':e.preventDefault();movePlayer(1,0);break;
+    case ' ':e.preventDefault();waitTurn();break;
+    case 'i':case 'I':showInventory();break;
+    case 'c':case 'C':showStatus();break;
+  }
+});
+
+// D-Pad
+document.querySelectorAll('#dpad button').forEach(btn=>{
+  btn.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    const dir=btn.dataset.dir;
+    if(dir==='up')movePlayer(0,-1);
+    else if(dir==='down')movePlayer(0,1);
+    else if(dir==='left')movePlayer(-1,0);
+    else if(dir==='right')movePlayer(1,0);
+    else if(dir==='wait')waitTurn();
+  });
+});
+
+// 触摸滑动支持
+let touchStartX=0,touchStartY=0;
+document.getElementById('canvas-wrap').addEventListener('touchstart',e=>{
+  touchStartX=e.touches[0].clientX;
+  touchStartY=e.touches[0].clientY;
+});
+document.getElementById('canvas-wrap').addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-touchStartX;
+  const dy=e.changedTouches[0].clientY-touchStartY;
+  const threshold=30;
+  if(Math.abs(dx)<threshold&&Math.abs(dy)<threshold){return;}
+  if(Math.abs(dx)>Math.abs(dy)){movePlayer(dx>0?1:-1,0);}
+  else{movePlayer(0,dy>0?1:-1);}
+});
+
+// 按钮
+document.getElementById('btnInventory').addEventListener('click',showInventory);
+document.getElementById('btnStatus').addEventListener('click',showStatus);
+document.getElementById('btnWait').addEventListener('click',waitTurn);
+document.getElementById('btnRestart').addEventListener('click',restartGame);
+
+// 战斗按钮
+document.getElementById('combatAttack').addEventListener('click',playerAttack);
+document.getElementById('combatSkill').addEventListener('click',()=>{
+  if(!combatActive||!currentEnemy)return;
+  let html=`<h2>✨ 选择技能</h2>`;
+  player.skills.forEach((s,i)=>{
+    html+=`<button class="btn blue" onclick="useSkill(${i});closeModal()" style="display:block;width:100%;margin:4px 0">${s.name} (💎${s.cost}) - ${s.desc}</button>`;
+  });
+  html+=`<button class="btn" onclick="closeModal()">取消</button>`;
+  showModal(html);
+});
+document.getElementById('combatItem').addEventListener('click',useCombatItem);
+document.getElementById('combatFlee').addEventListener('click',tryFlee);
+
+// 弹窗点击关闭
+document.getElementById('modalOverlay').addEventListener('click',function(e){
+  if(e.target===this)closeModal();
+});
+
+// 窗口大小调整
+window.addEventListener('resize',resizeCanvas);
+
+// 初始canvas大小
+resizeCanvas();
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+
+// 检查Boss击杀
+const origEndCombat=endCombat;
+endCombat=function(){
+  if(currentEnemy&&currentEnemy.type==='boss'){
+    gameState.gameWon=true;
+    addLog('👑 地牢领主被击败！你征服了地牢！','log-level');
+    showModal(`<h2>👑 胜利！</h2><p style="color:var(--gold)">你击败了地牢领主，征服了暗黑地牢！</p><p style="color:#888">最终等级：Lv${player.level} | 金币：${player.gold}</p><button class="btn gold" onclick="closeModal();restartGame()">🔄 再来一局</button>`);
+    setTimeout(()=>{if(typeof showInterstitialAd==='function')showInterstitialAd();},800);
+    document.getElementById('combat-overlay').classList.remove('active');
+    combatActive=false;
+    currentEnemy=null;
+    player.combatDef=0;
+    player.combatAtk=0;
+    updateUI();
+    renderAll();
+    return;
+  }
+  origEndCombat();
+};
+
+// 楼层超过5层后继续生成更深层
+const origDescend=descendFloor;
+descendFloor=function(){
+  origDescend();
+  if(dungeonFloor>5&&!gameState.gameWon){
+    // 更深层仍有Boss概率
+    if(dungeonFloor%3===0){
+      addLog('⚠️ 深处传来可怕的咆哮...','log-combat');
+    }
+  }
+};
+
+console.log('🏰 地牢探险 Roguelike 已就绪');
+console.log('WASD/方向键 移动 | 空格 等待 | I 背包 | C 状态');
+console.log('地牢层数：无限 | Boss在地下层5');
+</script>
+</body>
+</html>

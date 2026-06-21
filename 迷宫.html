@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>迷宫探险</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;overflow:hidden;touch-action:none;font-family:"Microsoft YaHei",sans-serif;user-select:none;-webkit-user-select:none}
+canvas{display:block;position:fixed;top:0;left:0;width:100%;height:100%}
+
+/* 菜单覆盖层 */
+#menuOverlay{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:rgba(5,5,15,0.92)}
+#menuOverlay h1{font-size:clamp(28px,6vw,48px);color:#fff;text-shadow:0 0 20px rgba(120,100,255,0.6);letter-spacing:4px}
+#menuOverlay .subtitle{color:#888;font-size:14px;margin-top:-8px}
+.size-btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.size-btns button{padding:12px 24px;border:1px solid rgba(120,100,255,0.3);border-radius:12px;background:rgba(120,100,255,0.08);color:#ccc;font:16px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s;min-width:90px}
+.size-btns button:hover,.size-btns button.active{background:rgba(120,100,255,0.2);border-color:rgba(120,100,255,0.6);color:#fff}
+.size-btns .best{display:block;font-size:11px;color:#888;margin-top:2px}
+#startBtn{padding:14px 48px;border:none;border-radius:14px;background:linear-gradient(135deg,#6c5ce7,#a855f7);color:#fff;font:bold 20px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s;letter-spacing:2px}
+#startBtn:hover{transform:scale(1.05);box-shadow:0 0 30px rgba(120,100,255,0.4)}
+#startBtn:active{transform:scale(0.97)}
+
+/* HUD */
+#hud{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:8px 12px;pointer-events:none}
+#hud>*{pointer-events:auto}
+.hud-item{background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:6px 14px;color:#ddd;font:13px "Microsoft YaHei",sans-serif;display:flex;align-items:center;gap:6px}
+.hud-item .icon{font-size:16px}
+.hud-item .val{color:#a78bfa;font-weight:bold}
+#timerDisplay .val{color:#fbbf24}
+#bestDisplay .val{color:#34d399}
+
+/* 完成弹窗 */
+#completeOverlay{position:fixed;inset:0;z-index:15;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(5,5,15,0.94)}
+#completeOverlay h2{font-size:clamp(24px,5vw,38px);color:#ffd700;text-shadow:0 0 20px rgba(255,215,0,0.5)}
+#completeOverlay .time{font-size:36px;color:#fff;font-weight:bold}
+#completeOverlay .record{font-size:14px;color:#34d399;display:none}
+#completeOverlay .record.show{display:block}
+#completeOverlay button{padding:12px 40px;border:none;border-radius:12px;background:linear-gradient(135deg,#6c5ce7,#a855f7);color:#fff;font:bold 18px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+#completeOverlay button:hover{transform:scale(1.05)}
+#completeOverlay button:active{transform:scale(0.97)}
+
+/* 触摸方向键 */
+#touchControls{position:fixed;bottom:110px;left:50%;transform:translateX(-50%);z-index:5;display:none;grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px 60px;gap:4px}
+#touchControls .tbtn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:12px;font-size:22px;color:#ccc;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.15s;-webkit-tap-highlight-color:transparent}
+#touchControls .tbtn:active{background:rgba(120,100,255,0.3);border-color:rgba(120,100,255,0.5)}
+#touchControls .tbtn.up{grid-column:2;grid-row:1}
+#touchControls .tbtn.left{grid-column:1;grid-row:2}
+#touchControls .tbtn.center{grid-column:2;grid-row:2;font-size:13px;color:#666}
+#touchControls .tbtn.right{grid-column:3;grid-row:2}
+#touchControls .tbtn.down{grid-column:2;grid-row:3}
+
+/* 小地图切换按钮 */
+#minimapToggle{position:fixed;top:8px;right:60px;z-index:6;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#ddd;padding:6px 10px;font:13px "Microsoft YaHei",sans-serif;cursor:pointer;display:none}
+
+/* 移动端适配 */
+@media(max-width:768px){
+  #touchControls{display:grid}
+  #minimapToggle{display:block}
+  #hud{flex-wrap:wrap;gap:4px;justify-content:center}
+  .hud-item{padding:4px 10px;font-size:11px}
+}
+
+/* 广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<!-- 菜单 -->
+<div id="menuOverlay">
+  <h1>🏰 迷宫探险</h1>
+  <div class="subtitle">在迷雾中寻找出口</div>
+  <div class="size-btns">
+    <button data-size="15" class="active">🔹 小迷宫<span class="best" id="best15">--:--</span></button>
+    <button data-size="25">🔸 中迷宫<span class="best" id="best25">--:--</span></button>
+    <button data-size="35">🔺 大迷宫<span class="best" id="best35">--:--</span></button>
+  </div>
+  <button id="startBtn">开始探险</button>
+  <div style="color:#666;font-size:12px;text-align:center;max-width:280px;line-height:1.6">
+    🎮 方向键/WASD 移动<br>
+    📱 手机端使用底部方向按钮<br>
+    🗺️ 按 M 切换小地图<br>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud" style="display:none">
+  <div class="hud-item"><span class="icon">🏃</span>步数:<span class="val" id="stepsDisplay">0</span></div>
+  <div class="hud-item" id="timerDisplay"><span class="icon">⏱</span>时间:<span class="val" id="timeDisplay">00:00</span></div>
+  <div class="hud-item" id="bestDisplay"><span class="icon">🏆</span>最佳:<span class="val" id="bestTimeDisplay">--:--</span></div>
+  <button id="menuBtn" class="hud-item" style="cursor:pointer">🏠 菜单</button>
+</div>
+
+<!-- 小地图切换 -->
+<button id="minimapToggle" onclick="toggleMinimap()">🗺️</button>
+
+<!-- 触摸方向键 -->
+<div id="touchControls">
+  <button class="tbtn up" ontouchstart="handleTouchBtn(0,event)" ontouchend="event.preventDefault()">▲</button>
+  <button class="tbtn left" ontouchstart="handleTouchBtn(3,event)" ontouchend="event.preventDefault()">◀</button>
+  <button class="tbtn center">●</button>
+  <button class="tbtn right" ontouchstart="handleTouchBtn(1,event)" ontouchend="event.preventDefault()">▶</button>
+  <button class="tbtn down" ontouchstart="handleTouchBtn(2,event)" ontouchend="event.preventDefault()">▼</button>
+</div>
+
+<!-- 完成弹窗 -->
+<div id="completeOverlay">
+  <h2>🎉 恭喜通关！</h2>
+  <div class="time" id="completeTime">00:00</div>
+  <div class="record" id="newRecord">🏆 新纪录！</div>
+  <div style="color:#aaa;font-size:14px" id="completeSteps">步数: 0</div>
+  <button id="restartBtn">再来一局</button>
+  <button id="backMenuBtn" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2)">返回菜单</button>
+</div>
+
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+// ============================================================
+// 迷宫探险 - 主游戏逻辑
+// ============================================================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ===== DOM 元素 =====
+const menuOverlay = document.getElementById('menuOverlay');
+const completeOverlay = document.getElementById('completeOverlay');
+const hud = document.getElementById('hud');
+const touchControls = document.getElementById('touchControls');
+const minimapToggle = document.getElementById('minimapToggle');
+const startBtn = document.getElementById('startBtn');
+const restartBtn = document.getElementById('restartBtn');
+const backMenuBtn = document.getElementById('backMenuBtn');
+const menuBtn = document.getElementById('menuBtn');
+const stepsDisplay = document.getElementById('stepsDisplay');
+const timeDisplay = document.getElementById('timeDisplay');
+const bestTimeDisplay = document.getElementById('bestTimeDisplay');
+const completeTime = document.getElementById('completeTime');
+const completeSteps = document.getElementById('completeSteps');
+const newRecord = document.getElementById('newRecord');
+const sizeBtns = document.querySelectorAll('.size-btns button');
+
+// ===== 游戏状态 =====
+const G = {
+  state: 'menu', // menu, playing, complete
+  size: 15,      // 15, 25, 35
+  rows: 15,
+  cols: 15,
+  cells: null,   // 2D array of {top,right,bottom,left,visited}
+  playerR: 0,
+  playerC: 0,
+  exitR: 0,
+  exitC: 0,
+  steps: 0,
+  timer: 0,
+  timerInterval: null,
+  explored: null,  // 2D boolean
+  fogRadius: 3,
+  showMinimap: true,
+  cellSize: 0,
+  offsetX: 0,
+  offsetY: 0,
+  playerAnim: 0,   // 玩家动画相位
+  trailParticles: [], // 尾迹粒子
+  winAnim: 0,
+};
+
+// ===== 音效 =====
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function initAudio() { if (!audioCtx) audioCtx = new AudioCtx(); }
+function playTone(freq, dur, type, vol) {
+  type = type || 'sine'; vol = vol || 0.15;
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type; osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+function sfxMove() { initAudio(); playTone(220 + Math.random() * 80, 0.06, 'sine', 0.08); }
+function sfxWin() { initAudio(); playTone(523, 0.15); setTimeout(function(){playTone(659, 0.15)}, 100); setTimeout(function(){playTone(784, 0.25)}, 200); }
+
+// ===== 最佳成绩 =====
+function getBestKey() { return 'maze_best_' + G.size; }
+function getBestTime() { return parseInt(localStorage.getItem(getBestKey()) || '0'); }
+function setBestTime(ms) {
+  var key = getBestKey();
+  var prev = parseInt(localStorage.getItem(key) || '0');
+  if (!prev || ms < prev) { localStorage.setItem(key, ms); return true; }
+  return false;
+}
+function formatTime(ms) {
+  if (!ms) return '--:--';
+  var totalSec = Math.floor(ms / 1000);
+  var min = Math.floor(totalSec / 60);
+  var sec = totalSec % 60;
+  return min + ':' + (sec < 10 ? '0' : '') + sec;
+}
+function updateBestDisplay() {
+  var bests = {};
+  [15,25,35].forEach(function(s) {
+    var t = parseInt(localStorage.getItem('maze_best_' + s) || '0');
+    bests[s] = t;
+    var el = document.getElementById('best' + s);
+    if (el) el.textContent = t ? formatTime(t) : '--:--';
+  });
+  bestTimeDisplay.textContent = formatTime(bests[G.size]);
+}
+
+// ===== 迷宫生成：递归回溯算法 =====
+function generateMaze(rows, cols) {
+  // 初始化所有单元格，所有墙壁存在
+  var cells = [];
+  for (var r = 0; r < rows; r++) {
+    cells[r] = [];
+    for (var c = 0; c < cols; c++) {
+      cells[r][c] = {
+        top: true, right: true, bottom: true, left: true,
+        visited: false
+      };
+    }
+  }
+
+  // 递归回溯
+  var stack = [];
+  var startR = 0, startC = 0;
+  cells[startR][startC].visited = true;
+  stack.push({ r: startR, c: startC });
+
+  while (stack.length > 0) {
+    var current = stack[stack.length - 1];
+    var neighbors = [];
+
+    // 检查四个方向
+    var dirs = [
+      { dr: -1, dc: 0, wall: 'top', oppWall: 'bottom' },
+      { dr: 1, dc: 0, wall: 'bottom', oppWall: 'top' },
+      { dr: 0, dc: -1, wall: 'left', oppWall: 'right' },
+      { dr: 0, dc: 1, wall: 'right', oppWall: 'left' }
+    ];
+
+    for (var i = 0; i < dirs.length; i++) {
+      var nr = current.r + dirs[i].dr;
+      var nc = current.c + dirs[i].dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !cells[nr][nc].visited) {
+        neighbors.push({ r: nr, c: nc, dir: dirs[i] });
+      }
+    }
+
+    if (neighbors.length > 0) {
+      // 随机选一个未访问邻居
+      var pick = neighbors[Math.floor(Math.random() * neighbors.length)];
+      // 移除墙壁
+      cells[current.r][current.c][pick.dir.wall] = false;
+      cells[pick.r][pick.c][pick.dir.oppWall] = false;
+      cells[pick.r][pick.c].visited = true;
+      stack.push({ r: pick.r, c: pick.c });
+    } else {
+      stack.pop();
+    }
+  }
+
+  // 清除 visited 标记（不再需要）
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      cells[r][c].visited = false;
+    }
+  }
+
+  return cells;
+}
+
+// ===== 初始化探索地图 =====
+function initExplored() {
+  G.explored = [];
+  for (var r = 0; r < G.rows; r++) {
+    G.explored[r] = [];
+    for (var c = 0; c < G.cols; c++) {
+      G.explored[r][c] = false;
+    }
+  }
+}
+
+// ===== 更新探索区域 =====
+function updateExplored() {
+  for (var r = 0; r < G.rows; r++) {
+    for (var c = 0; c < G.cols; c++) {
+      if (G.explored[r][c]) continue;
+      var dist = Math.abs(r - G.playerR) + Math.abs(c - G.playerC);
+      if (dist <= G.fogRadius) {
+        G.explored[r][c] = true;
+      }
+    }
+  }
+}
+
+// ===== 开始游戏 =====
+function startGame(size) {
+  G.size = size;
+  G.rows = size;
+  G.cols = size;
+  G.state = 'playing';
+  G.steps = 0;
+  G.timer = 0;
+  G.playerAnim = 0;
+  G.trailParticles = [];
+  G.winAnim = 0;
+
+  // 迷雾半径
+  if (size <= 15) G.fogRadius = 3;
+  else if (size <= 25) G.fogRadius = 4;
+  else G.fogRadius = 5;
+
+  // 生成迷宫
+  G.cells = generateMaze(G.rows, G.cols);
+
+  // 起点和终点
+  G.playerR = 0;
+  G.playerC = 0;
+  G.exitR = G.rows - 1;
+  G.exitC = G.cols - 1;
+
+  // 初始化探索
+  initExplored();
+  updateExplored();
+
+  // 计时器
+  if (G.timerInterval) clearInterval(G.timerInterval);
+  G.timer = 0;
+  G.timerInterval = setInterval(function() {
+    if (G.state === 'playing') {
+      G.timer += 100;
+      updateHUD();
+    }
+  }, 100);
+
+  // UI
+  menuOverlay.style.display = 'none';
+  completeOverlay.style.display = 'none';
+  hud.style.display = 'flex';
+  updateBestDisplay();
+  updateHUD();
+  resizeCanvas();
+
+  // 移动端显示方向键
+  if (window.innerWidth <= 768) {
+    touchControls.style.display = 'grid';
+    minimapToggle.style.display = 'block';
+  }
+}
+
+// ===== 移动玩家 =====
+function movePlayer(dr, dc) {
+  if (G.state !== 'playing') return;
+
+  var nr = G.playerR + dr;
+  var nc = G.playerC + dc;
+
+  // 边界检查
+  if (nr < 0 || nr >= G.rows || nc < 0 || nc >= G.cols) return;
+
+  // 墙壁检查
+  var cell = G.cells[G.playerR][G.playerC];
+  if (dr === -1 && cell.top) return;
+  if (dr === 1 && cell.bottom) return;
+  if (dc === -1 && cell.left) return;
+  if (dc === 1 && cell.right) return;
+
+  // 添加尾迹粒子
+  G.trailParticles.push({
+    r: G.playerR, c: G.playerC,
+    life: 1.0, size: G.cellSize * 0.15
+  });
+
+  G.playerR = nr;
+  G.playerC = nc;
+  G.steps++;
+  updateExplored();
+  sfxMove();
+
+  // 检查到达终点
+  if (nr === G.exitR && nc === G.exitC) {
+    completeGame();
+  }
+
+  updateHUD();
+}
+
+// ===== 完成游戏 =====
+function completeGame() {
+  G.state = 'complete';
+  if (G.timerInterval) clearInterval(G.timerInterval);
+  G.winAnim = 1.0;
+
+  var isNew = setBestTime(G.timer);
+  completeTime.textContent = formatTime(G.timer);
+  completeSteps.textContent = '步数: ' + G.steps;
+  if (isNew) {
+    newRecord.classList.add('show');
+  } else {
+    newRecord.classList.remove('show');
+  }
+  completeOverlay.style.display = 'flex';
+  updateBestDisplay();
+  sfxWin();
+
+  // 插屏广告
+  if (G.timer > 60000 && Math.random() < 0.5) {
+    setTimeout(function() { showInterstitialAd(); }, 1500);
+  }
+}
+
+// ===== 更新HUD =====
+function updateHUD() {
+  stepsDisplay.textContent = G.steps;
+  timeDisplay.textContent = formatTime(G.timer);
+  bestTimeDisplay.textContent = formatTime(getBestTime());
+}
+
+// ===== 返回菜单 =====
+function backToMenu() {
+  G.state = 'menu';
+  if (G.timerInterval) clearInterval(G.timerInterval);
+  menuOverlay.style.display = 'flex';
+  completeOverlay.style.display = 'none';
+  hud.style.display = 'none';
+  touchControls.style.display = 'none';
+  minimapToggle.style.display = 'none';
+  updateBestDisplay();
+  resizeCanvas();
+}
+
+// ===== 小地图切换 =====
+function toggleMinimap() {
+  G.showMinimap = !G.showMinimap;
+  minimapToggle.textContent = G.showMinimap ? '🗺️' : '📍';
+}
+
+// ===== Canvas 尺寸计算 =====
+function resizeCanvas() {
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+
+  if (G.state === 'playing' || G.state === 'complete') {
+    calculateCellSize();
+  }
+}
+
+function calculateCellSize() {
+  var W = window.innerWidth;
+  var H = window.innerHeight;
+  var availW = W - 20;
+  var availH = H - 160; // 留出顶部HUD和底部广告/方向键
+  var cellW = Math.floor(availW / G.cols);
+  var cellH = Math.floor(availH / G.rows);
+  G.cellSize = Math.min(cellW, cellH, 32);
+  G.cellSize = Math.max(G.cellSize, 6);
+  G.offsetX = Math.floor((W - G.cols * G.cellSize) / 2);
+  G.offsetY = Math.floor((H - 140 - G.rows * G.cellSize) / 2) + 40;
+}
+
+// ===== 渲染 =====
+function render(timestamp) {
+  if (!timestamp) timestamp = 0;
+  var W = window.innerWidth;
+  var H = window.innerHeight;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 背景
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, H);
+
+  if (G.state === 'menu') {
+    renderMenuBackground(W, H, timestamp);
+  } else if (G.cells) {
+    renderMaze(W, H, timestamp);
+  }
+
+  requestAnimationFrame(render);
+}
+
+function renderMenuBackground(W, H, timestamp) {
+  // 装饰性粒子
+  var t = timestamp / 1000;
+  for (var i = 0; i < 30; i++) {
+    var x = (Math.sin(t * 0.3 + i * 1.7) * 0.5 + 0.5) * W;
+    var y = (Math.cos(t * 0.4 + i * 2.1) * 0.5 + 0.5) * H;
+    var alpha = 0.15 + Math.sin(t + i) * 0.1;
+    ctx.fillStyle = 'rgba(120,100,255,' + alpha + ')';
+    ctx.beginPath();
+    ctx.arc(x, y, 2 + Math.random() * 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function renderMaze(W, H, timestamp) {
+  var cs = G.cellSize;
+  var ox = G.offsetX;
+  var oy = G.offsetY;
+  var rows = G.rows;
+  var cols = G.cols;
+
+  // 更新玩家动画
+  G.playerAnim += 0.05;
+
+  // 更新尾迹粒子
+  for (var i = G.trailParticles.length - 1; i >= 0; i--) {
+    G.trailParticles[i].life -= 0.02;
+    if (G.trailParticles[i].life <= 0) {
+      G.trailParticles.splice(i, 1);
+    }
+  }
+
+  // 更新胜利动画
+  if (G.winAnim > 0) G.winAnim = Math.max(0, G.winAnim - 0.01);
+
+  // 绘制迷宫单元格
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var cx = ox + c * cs;
+      var cy = oy + r * cs;
+
+      // 未探索区域：全黑
+      if (!G.explored[r][c]) {
+        ctx.fillStyle = '#050510';
+        ctx.fillRect(cx, cy, cs, cs);
+        continue;
+      }
+
+      // 计算与玩家的距离
+      var dist = Math.abs(r - G.playerR) + Math.abs(c - G.playerC);
+      var isVisible = dist <= G.fogRadius;
+
+      // 地面
+      if (isVisible) {
+        // 明亮区域
+        var brightGrad = ctx.createRadialGradient(
+          ox + G.playerC * cs + cs/2, oy + G.playerR * cs + cs/2, 0,
+          ox + G.playerC * cs + cs/2, oy + G.playerR * cs + cs/2, G.fogRadius * cs * 1.2
+        );
+        brightGrad.addColorStop(0, '#1a1530');
+        brightGrad.addColorStop(0.6, '#0f0d1f');
+        brightGrad.addColorStop(1, '#080812');
+        ctx.fillStyle = brightGrad;
+      } else {
+        // 已探索但不在视野内：暗色
+        ctx.fillStyle = '#080812';
+      }
+      ctx.fillRect(cx, cy, cs, cs);
+
+      // 尾迹粒子
+      if (isVisible) {
+        for (var p = 0; p < G.trailParticles.length; p++) {
+          var tp = G.trailParticles[p];
+          if (tp.r === r && tp.c === c) {
+            ctx.fillStyle = 'rgba(120,100,255,' + (tp.life * 0.4) + ')';
+            ctx.beginPath();
+            ctx.arc(cx + cs/2, cy + cs/2, tp.size * tp.life, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+
+      // 墙壁
+      var cell = G.cells[r][c];
+      ctx.strokeStyle = isVisible ? 'rgba(120,100,255,0.5)' : 'rgba(60,50,120,0.25)';
+      ctx.lineWidth = Math.max(1, cs * 0.06);
+
+      if (cell.top) {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + cs, cy);
+        ctx.stroke();
+      }
+      if (cell.right) {
+        ctx.beginPath();
+        ctx.moveTo(cx + cs, cy);
+        ctx.lineTo(cx + cs, cy + cs);
+        ctx.stroke();
+      }
+      if (cell.bottom) {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + cs);
+        ctx.lineTo(cx + cs, cy + cs);
+        ctx.stroke();
+      }
+      if (cell.left) {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx, cy + cs);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // 外边框
+  ctx.strokeStyle = 'rgba(120,100,255,0.6)';
+  ctx.lineWidth = Math.max(2, cs * 0.08);
+  ctx.strokeRect(ox, oy, cols * cs, rows * cs);
+
+  // 终点（始终可见提示）
+  var ex = ox + G.exitC * cs;
+  var ey = oy + G.exitR * cs;
+  if (!G.explored[G.exitR][G.exitC]) {
+    // 终点在迷雾中 → 显示微弱方向指示
+    var dx = G.exitC - G.playerC;
+    var dy = G.exitR - G.playerR;
+    var mx = ox + G.playerC * cs + cs/2;
+    var my = oy + G.playerR * cs + cs/2;
+    var dist2 = Math.sqrt(dx*dx + dy*dy);
+    if (dist2 > 0) {
+      var ndx = dx / dist2 * cs * 2;
+      var ndy = dy / dist2 * cs * 2;
+      ctx.strokeStyle = 'rgba(255,215,0,0.15)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.moveTo(mx + ndx * 0.3, my + ndy * 0.3);
+      ctx.lineTo(mx + ndx * 3, my + ndy * 3);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  } else {
+    // 终点可见
+    var pulse = Math.sin(G.playerAnim * 3) * 0.3 + 0.7;
+    var eg = ctx.createRadialGradient(ex + cs/2, ey + cs/2, 0, ex + cs/2, ey + cs/2, cs * 0.6);
+    eg.addColorStop(0, 'rgba(255,215,0,' + (0.5 * pulse) + ')');
+    eg.addColorStop(1, 'rgba(255,215,0,0)');
+    ctx.fillStyle = eg;
+    ctx.fillRect(ex - cs * 0.2, ey - cs * 0.2, cs * 1.4, cs * 1.4);
+
+    ctx.fillStyle = '#ffd700';
+    ctx.font = (cs * 0.7) + 'px "Microsoft YaHei"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🏁', ex + cs/2, ey + cs/2);
+  }
+
+  // 玩家
+  var px = ox + G.playerC * cs + cs/2;
+  var py = oy + G.playerR * cs + cs/2;
+  var playerRadius = cs * 0.35;
+
+  // 玩家光晕
+  var pg = ctx.createRadialGradient(px, py, 0, px, py, playerRadius * 2);
+  pg.addColorStop(0, 'rgba(100,200,255,0.5)');
+  pg.addColorStop(0.5, 'rgba(100,200,255,0.15)');
+  pg.addColorStop(1, 'rgba(100,200,255,0)');
+  ctx.fillStyle = pg;
+  ctx.beginPath();
+  ctx.arc(px, py, playerRadius * 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 玩家主体
+  var bounce = Math.sin(G.playerAnim * 4) * 0.05;
+  ctx.fillStyle = '#64c8ff';
+  ctx.beginPath();
+  ctx.arc(px, py + bounce * cs, playerRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = Math.max(1, cs * 0.04);
+  ctx.stroke();
+
+  // 胜利动画
+  if (G.winAnim > 0) {
+    for (var i = 0; i < 20; i++) {
+      var angle = (i / 20) * Math.PI * 2 + G.winAnim * 5;
+      var rad = cs * 3 * (1 - G.winAnim);
+      var sx = px + Math.cos(angle) * rad;
+      var sy = py + Math.sin(angle) * rad;
+      ctx.fillStyle = 'rgba(255,215,0,' + G.winAnim + ')';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2 + Math.random() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 小地图
+  if (G.showMinimap) {
+    drawMinimap(W, ox, oy, cs, rows, cols);
+  }
+}
+
+function drawMinimap(W, ox, oy, cs, rows, cols) {
+  var mmW = 120;
+  var mmH = 120;
+  var mmX = W - mmW - 12;
+  var mmY = 50;
+  var mmCell = Math.min(mmW / cols, mmH / rows);
+
+  // 背景
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(mmX - 2, mmY - 2, mmW + 4, mmH + 4);
+  ctx.strokeStyle = 'rgba(120,100,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mmX - 2, mmY - 2, mmW + 4, mmH + 4);
+
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      if (!G.explored[r][c]) continue;
+      var mcx = mmX + c * mmCell;
+      var mcy = mmY + r * mmCell;
+
+      // 墙壁简化：用深色表示
+      ctx.fillStyle = '#1a1530';
+      ctx.fillRect(mcx, mcy, Math.ceil(mmCell), Math.ceil(mmCell));
+
+      // 画墙壁
+      var cell = G.cells[r][c];
+      ctx.strokeStyle = 'rgba(120,100,255,0.3)';
+      ctx.lineWidth = 0.5;
+      if (cell.top) { ctx.beginPath(); ctx.moveTo(mcx, mcy); ctx.lineTo(mcx + mmCell, mcy); ctx.stroke(); }
+      if (cell.right) { ctx.beginPath(); ctx.moveTo(mcx + mmCell, mcy); ctx.lineTo(mcx + mmCell, mcy + mmCell); ctx.stroke(); }
+      if (cell.bottom) { ctx.beginPath(); ctx.moveTo(mcx, mcy + mmCell); ctx.lineTo(mcx + mmCell, mcy + mmCell); ctx.stroke(); }
+      if (cell.left) { ctx.beginPath(); ctx.moveTo(mcx, mcy); ctx.lineTo(mcx, mcy + mmCell); ctx.stroke(); }
+    }
+  }
+
+  // 终点
+  if (G.explored[G.exitR][G.exitC]) {
+    ctx.fillStyle = '#ffd700';
+    ctx.fillRect(mmX + G.exitC * mmCell, mmY + G.exitR * mmCell, Math.max(2, mmCell), Math.max(2, mmCell));
+  }
+
+  // 玩家
+  ctx.fillStyle = '#64c8ff';
+  ctx.fillRect(mmX + G.playerC * mmCell, mmY + G.playerR * mmCell, Math.max(2, mmCell), Math.max(2, mmCell));
+}
+
+// ===== 事件处理 =====
+
+// 键盘
+document.addEventListener('keydown', function(e) {
+  if (G.state === 'playing') {
+    switch(e.key) {
+      case 'ArrowUp': case 'w': case 'W': movePlayer(-1, 0); e.preventDefault(); break;
+      case 'ArrowDown': case 's': case 'S': movePlayer(1, 0); e.preventDefault(); break;
+      case 'ArrowLeft': case 'a': case 'A': movePlayer(0, -1); e.preventDefault(); break;
+      case 'ArrowRight': case 'd': case 'D': movePlayer(0, 1); e.preventDefault(); break;
+      case 'm': case 'M': toggleMinimap(); e.preventDefault(); break;
+    }
+  }
+});
+
+// 触摸滑动
+var touchStartX = 0, touchStartY = 0, touchMoved = false;
+canvas.addEventListener('touchstart', function(e) {
+  if (G.state !== 'playing') return;
+  if (e.touches.length === 1) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchMoved = false;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+  if (G.state !== 'playing') return;
+  if (touchMoved) return;
+  var dx = (e.changedTouches[0] ? e.changedTouches[0].clientX : 0) - touchStartX;
+  var dy = (e.changedTouches[0] ? e.changedTouches[0].clientY : 0) - touchStartY;
+  var absDx = Math.abs(dx);
+  var absDy = Math.abs(dy);
+
+  if (Math.max(absDx, absDy) < 15) return; // 太小忽略
+
+  if (absDx > absDy) {
+    movePlayer(0, dx > 0 ? 1 : -1);
+  } else {
+    movePlayer(dy > 0 ? 1 : -1, 0);
+  }
+  touchMoved = true;
+});
+
+// 触摸方向键
+function handleTouchBtn(dir, e) {
+  e.preventDefault();
+  switch(dir) {
+    case 0: movePlayer(-1, 0); break; // 上
+    case 1: movePlayer(0, 1); break;  // 右
+    case 2: movePlayer(1, 0); break;  // 下
+    case 3: movePlayer(0, -1); break; // 左
+  }
+}
+
+// 窗口大小变化
+window.addEventListener('resize', function() {
+  resizeCanvas();
+});
+
+// 按钮事件
+startBtn.addEventListener('click', function() {
+  startGame(G.size);
+});
+
+restartBtn.addEventListener('click', function() {
+  startGame(G.size);
+});
+
+backMenuBtn.addEventListener('click', function() {
+  backToMenu();
+});
+
+menuBtn.addEventListener('click', function() {
+  backToMenu();
+});
+
+// 尺寸选择
+sizeBtns.forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    sizeBtns.forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    G.size = parseInt(btn.dataset.size);
+    updateBestDisplay();
+  });
+});
+
+// ===== 广告系统 =====
+(function(){
+  var sb = document.getElementById('sponsorBtn');
+  var sp = document.getElementById('sponsorPanel');
+  var sc = document.getElementById('sponsorClose');
+  if (sb && sp) {
+    sb.onclick = function() { sp.style.display = 'flex'; };
+    if (sc) sc.onclick = function() { sp.style.display = 'none'; };
+  }
+  var ia = document.getElementById('interstitialAd');
+  var si = document.getElementById('skipInterstitial');
+  if (ia && si) {
+    si.onclick = function() { ia.style.display = 'none'; };
+  }
+  window.showInterstitialAd = function() {
+    if (ia) ia.style.display = 'flex';
+  };
+})();
+
+// ===== 初始化 =====
+function init() {
+  updateBestDisplay();
+  resizeCanvas();
+  requestAnimationFrame(render);
+}
+
+init();
+</script>
+</body>
+</html>

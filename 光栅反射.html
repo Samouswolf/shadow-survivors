@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<title>光栅反射</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#06060f;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:'Segoe UI','Microsoft YaHei',sans-serif;overflow-x:hidden;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+#gameWrapper{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;max-width:520px;padding:8px;padding-bottom:100px}
+#header{display:flex;align-items:center;justify-content:space-between;width:100%;padding:4px 8px}
+#levelName{color:#00e5ff;font:bold 16px 'Microsoft YaHei',sans-serif;text-shadow:0 0 10px rgba(0,229,255,.5)}
+#starDisplay{display:flex;gap:2px}
+#starDisplay span{font-size:18px;color:#333;transition:.3s}
+#starDisplay span.earned{color:#ffd700;text-shadow:0 0 8px rgba(255,215,0,.6)}
+#btnRow{display:flex;gap:6px}
+#btnRow button{background:rgba(0,229,255,.1);border:1px solid rgba(0,229,255,.25);color:#00e5ff;padding:4px 10px;border-radius:8px;font:11px 'Microsoft YaHei',sans-serif;cursor:pointer;transition:.2s}
+#btnRow button:hover{background:rgba(0,229,255,.2)}
+#btnRow button:active{transform:scale(.95)}
+#gameCanvas{border:2px solid rgba(0,229,255,.2);border-radius:12px;box-shadow:0 0 30px rgba(0,229,255,.08),inset 0 0 30px rgba(0,229,255,.03);cursor:pointer;background:#0a0a1a}
+#inventory{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;padding:4px;min-height:52px;align-items:center}
+.inv-item{width:44px;height:44px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;transition:.2s;position:relative;border:2px solid transparent}
+.inv-item.selected{border-color:#ffd700!important;box-shadow:0 0 16px rgba(255,215,0,.5);transform:scale(1.1)}
+.inv-item:active{transform:scale(.9)}
+.inv-item .badge{position:absolute;top:-4px;right:-4px;background:#e04040;color:#fff;border-radius:10px;font:bold 10px sans-serif;padding:1px 6px;min-width:18px;text-align:center}
+.inv-item.empty{opacity:.3;cursor:default}
+#hintText{color:#667;font:11px 'Microsoft YaHei',sans-serif;text-align:center;min-height:16px}
+#levelSelect{position:fixed;inset:0;background:rgba(6,6,15,.97);z-index:100;display:none;flex-direction:column;align-items:center;overflow-y:auto;padding:20px}
+#levelSelect h2{color:#00e5ff;font:bold 22px 'Microsoft YaHei',sans-serif;margin:16px 0;text-shadow:0 0 20px rgba(0,229,255,.4)}
+#levelGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;max-width:420px;width:100%;padding:0 12px 40px}
+.lvl-btn{aspect-ratio:1;border-radius:12px;background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.15);color:#889;font:bold 14px 'Microsoft YaHei',sans-serif;cursor:pointer;transition:.2s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.lvl-btn .stars{font-size:11px;color:#444}
+.lvl-btn .stars .s{color:#ffd700}
+.lvl-btn.unlocked{color:#aabbcc;border-color:rgba(0,229,255,.3)}
+.lvl-btn.unlocked:hover{background:rgba(0,229,255,.15);transform:scale(1.05)}
+.lvl-btn.current{background:rgba(0,229,255,.2);border-color:#00e5ff;color:#00e5ff;box-shadow:0 0 16px rgba(0,229,255,.3)}
+.lvl-btn.locked{opacity:.35;cursor:default}
+#closeLvl{position:fixed;top:16px;right:16px;z-index:101;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);color:#aaa;width:36px;height:36px;border-radius:50%;font-size:18px;cursor:pointer;transition:.2s}
+#closeLvl:hover{background:rgba(255,255,255,.12);color:#fff}
+#winOverlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:50;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+#winOverlay h2{color:#ffd700;font:bold 28px 'Microsoft YaHei',sans-serif;text-shadow:0 0 30px rgba(255,215,0,.5);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+#winOverlay .win-stars{font-size:36px}
+#winOverlay button{background:rgba(0,229,255,.15);border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:10px 28px;border-radius:20px;font:bold 15px 'Microsoft YaHei',sans-serif;cursor:pointer;margin:4px;transition:.2s}
+#winOverlay button:hover{background:rgba(0,229,255,.25)}
+#winOverlay button.primary{background:rgba(0,229,255,.25);border-color:#00e5ff}
+</style>
+<style>/* 游戏工坊广告系统 */
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+</style>
+</head>
+<body>
+<div id="gameWrapper">
+  <div id="header">
+    <span id="levelName">光栅反射</span>
+    <div id="starDisplay"><span>★</span><span>★</span><span>★</span></div>
+    <div id="btnRow">
+      <button id="btnLevels">📋 关卡</button>
+      <button id="btnReset">🔄 重置</button>
+    </div>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+  <div id="inventory"></div>
+  <div id="hintText"></div>
+</div>
+<div id="levelSelect"><span id="closeLvl">✕</span><h2>选择关卡</h2><div id="levelGrid"></div></div>
+<div id="winOverlay"><h2>🎉 通关！</h2><div class="win-stars" id="winStars"></div><button class="primary" id="btnNext">下一关 ▶</button><button id="btnReplay">🔄 重玩</button><button id="btnWinLevels">📋 选关</button></div>
+<!-- 广告系统 -->
+<div class="ad-banner-container" id="adBanner"><div class="ad-label">广告</div><div id="adSlot" style="width:728px;max-width:100%;height:90px;display:flex;align-items:center;justify-content:center;color:#888;font:12px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="sponsor-btn" id="sponsorBtn">☕ 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+<script>
+// ============ 常量 ============
+const DIR = { RIGHT:0, DOWN:1, LEFT:2, UP:3 };
+const DIR_DX = [1,0,-1,0];
+const DIR_DY = [0,1,0,-1];
+const DIR_NAME = ['right','down','left','up'];
+const DIR_ARROW = ['→','↓','←','↑'];
+
+const MIRROR_DEFS = {
+  backslash: {icon:'⬊', name:'反射镜 \\', color:'#ff8800', bg:'rgba(255,136,0,.15)', border:'rgba(255,136,0,.35)'},
+  slash:     {icon:'⬋', name:'反射镜 /', color:'#00aaff', bg:'rgba(0,170,255,.15)', border:'rgba(0,170,255,.35)'},
+  splitter:  {icon:'⊕', name:'分光镜',   color:'#ff44ff', bg:'rgba(255,68,255,.15)', border:'rgba(255,68,255,.35)'},
+  'filter-r':{icon:'🔴', name:'红色滤光', color:'#ff4444', bg:'rgba(255,68,68,.15)', border:'rgba(255,68,68,.35)'},
+  'filter-g':{icon:'🟢', name:'绿色滤光', color:'#44ff44', bg:'rgba(68,255,68,.15)', border:'rgba(68,255,68,.35)'},
+  'filter-b':{icon:'🔵', name:'蓝色滤光', color:'#4488ff', bg:'rgba(68,136,255,.15)', border:'rgba(68,136,255,.35)'}
+};
+
+const MIRROR_REFLECT = {
+  backslash:{[DIR.RIGHT]:DIR.DOWN,[DIR.DOWN]:DIR.RIGHT,[DIR.LEFT]:DIR.UP,[DIR.UP]:DIR.LEFT},
+  slash:{[DIR.RIGHT]:DIR.UP,[DIR.UP]:DIR.RIGHT,[DIR.LEFT]:DIR.DOWN,[DIR.DOWN]:DIR.LEFT}
+};
+
+const FILTER_COLOR = {'filter-r':'red','filter-g':'green','filter-b':'blue'};
+
+// ============ 关卡数据 ============
+const LEVELS = [
+  // 1-5: 入门
+  {name:'初次见面', cols:5,rows:5, src:{c:0,r:2,d:DIR.RIGHT,color:'white'}, tgts:[{c:4,r:2}], walls:[], fixed:[], inv:[], par:0},
+  {name:'转角遇到光', cols:5,rows:5, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:2,r:1}], walls:[], fixed:[], inv:[{t:'backslash',n:1},{t:'slash',n:1}], par:2},
+  {name:'L形路径', cols:5,rows:5, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:2,r:3}], walls:[], fixed:[], inv:[{t:'backslash',n:2}], par:2},
+  {name:'绕行', cols:5,rows:5, src:{c:0,r:2,d:DIR.RIGHT,color:'white'}, tgts:[{c:4,r:2}], walls:[{c:2,r:2}], fixed:[], inv:[{t:'backslash',n:2},{t:'slash',n:1}], par:3},
+  {name:'简单反射', cols:6,rows:6, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:5}], walls:[], fixed:[], inv:[{t:'backslash',n:3},{t:'slash',n:3}], par:5},
+  // 6-10: 基础
+  {name:'双镜折返', cols:6,rows:6, src:{c:0,r:2,d:DIR.RIGHT,color:'white'}, tgts:[{c:0,r:4}], walls:[{c:2,r:2},{c:2,r:3}], fixed:[], inv:[{t:'backslash',n:1},{t:'slash',n:1}], par:2},
+  {name:'穿越障碍', cols:6,rows:6, src:{c:0,r:1,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:4}], walls:[{c:2,r:1},{c:2,r:2},{c:2,r:3}], fixed:[], inv:[{t:'backslash',n:2},{t:'slash',n:2}], par:3},
+  {name:'阶梯下行', cols:6,rows:6, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:4,r:4}], walls:[{c:2,r:0},{c:3,r:1},{c:4,r:2}], fixed:[], inv:[{t:'backslash',n:2},{t:'slash',n:2}], par:3},
+  {name:'Z形弯道', cols:6,rows:6, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:0}], walls:[{c:2,r:0},{c:2,r:1},{c:3,r:0},{c:4,r:1}], fixed:[], inv:[{t:'backslash',n:2},{t:'slash',n:2}], par:3},
+  {name:'环绕中心', cols:6,rows:6, src:{c:0,r:1,d:DIR.RIGHT,color:'white'}, tgts:[{c:0,r:4}], walls:[{c:2,r:1},{c:2,r:2},{c:3,r:3},{c:4,r:4}], fixed:[], inv:[{t:'backslash',n:3},{t:'slash',n:3}], par:4},
+  // 11-15: 进阶
+  {name:'蛇形走位', cols:6,rows:6, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:5}], walls:[{c:2,r:0},{c:2,r:2},{c:2,r:4},{c:4,r:1},{c:4,r:3},{c:4,r:5}], fixed:[], inv:[{t:'backslash',n:3},{t:'slash',n:3}], par:5},
+  {name:'回字形', cols:6,rows:6, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:5}], walls:[{c:1,r:1},{c:2,r:1},{c:3,r:1},{c:4,r:1},{c:1,r:4},{c:2,r:4},{c:3,r:4},{c:4,r:4},{c:1,r:2},{c:1,r:3},{c:4,r:2},{c:4,r:3}], fixed:[], inv:[{t:'backslash',n:4},{t:'slash',n:4}], par:7},
+  {name:'十字路口', cols:7,rows:7, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:3}], walls:[{c:3,r:0},{c:3,r:1},{c:3,r:2},{c:3,r:4},{c:3,r:5},{c:3,r:6}], fixed:[], inv:[{t:'backslash',n:3},{t:'slash',n:3}], par:4},
+  {name:'迷宫入口', cols:7,rows:7, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:6}], walls:[{c:3,r:0},{c:4,r:0},{c:5,r:0},{c:0,r:1},{c:0,r:2},{c:0,r:3},{c:0,r:4},{c:6,r:1},{c:6,r:2},{c:6,r:3},{c:6,r:4},{c:1,r:6},{c:2,r:6},{c:3,r:6},{c:4,r:6}], fixed:[], inv:[{t:'backslash',n:4},{t:'slash',n:4}], par:7},
+  {name:'钻石路径', cols:7,rows:7, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:3}], walls:[{c:2,r:1},{c:4,r:1},{c:1,r:2},{c:5,r:2},{c:1,r:4},{c:5,r:4},{c:2,r:5},{c:4,r:5}], fixed:[], inv:[{t:'backslash',n:3},{t:'slash',n:3}], par:4},
+  // 16-20: 分光镜
+  {name:'一分为二', cols:6,rows:6, src:{c:0,r:2,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:0},{c:5,r:4}], walls:[], fixed:[], inv:[{t:'splitter',n:1},{t:'backslash',n:2},{t:'slash',n:2}], par:3},
+  {name:'双目标', cols:6,rows:6, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:1},{c:5,r:5}], walls:[{c:2,r:3}], fixed:[], inv:[{t:'splitter',n:1},{t:'backslash',n:2},{t:'slash',n:2}], par:3},
+  {name:'光分三路', cols:7,rows:7, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:0},{c:6,r:3},{c:6,r:6}], walls:[], fixed:[], inv:[{t:'splitter',n:2},{t:'backslash',n:2},{t:'slash',n:2}], par:4},
+  {name:'分光合流', cols:7,rows:7, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:3}], walls:[{c:2,r:2},{c:2,r:4},{c:5,r:2},{c:5,r:4}], fixed:[], inv:[{t:'splitter',n:1},{t:'backslash',n:2},{t:'slash',n:2}], par:3},
+  {name:'交叉火力', cols:7,rows:7, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:0},{c:6,r:6}], walls:[{c:2,r:0},{c:5,r:0}], fixed:[], inv:[{t:'splitter',n:1},{t:'backslash',n:3},{t:'slash',n:3}], par:4},
+  // 21-25: 滤色镜
+  {name:'红色通道', cols:6,rows:6, src:{c:0,r:2,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:2,color:'red'}], walls:[{c:2,r:2}], fixed:[{c:4,r:4,t:'filter-r'}], inv:[{t:'backslash',n:1},{t:'slash',n:2}], par:3},
+  {name:'绿色迷阵', cols:6,rows:6, src:{c:0,r:2,d:DIR.RIGHT,color:'white'}, tgts:[{c:5,r:2,color:'green'}], walls:[{c:2,r:2}], fixed:[{c:4,r:4,t:'filter-g'}], inv:[{t:'backslash',n:1},{t:'slash',n:2}], par:3},
+  {name:'三色分离', cols:7,rows:7, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:1,color:'red'},{c:6,r:5,color:'blue'}], walls:[], fixed:[{c:1,r:3,t:'splitter'},{c:4,r:1,t:'filter-r'},{c:4,r:5,t:'filter-b'}], inv:[{t:'backslash',n:1},{t:'slash',n:3}], par:3},
+  {name:'滤色迷宫', cols:7,rows:7, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:6,color:'blue'}], walls:[{c:2,r:0}], fixed:[{c:1,r:5,t:'filter-b'}], inv:[{t:'backslash',n:1},{t:'slash',n:1}], par:2},
+  {name:'色彩之门', cols:7,rows:7, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:6,r:0,color:'red'},{c:6,r:6,color:'blue'}], walls:[], fixed:[{c:1,r:3,t:'splitter'},{c:4,r:0,t:'filter-r'},{c:4,r:6,t:'filter-b'}], inv:[{t:'backslash',n:1},{t:'slash',n:3}], par:3},
+  // 26-30: 综合
+  {name:'镜中镜', cols:8,rows:8, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:3}], walls:[{c:2,r:2},{c:2,r:4},{c:5,r:2},{c:5,r:4},{c:3,r:0},{c:3,r:1},{c:3,r:5},{c:3,r:6},{c:4,r:0},{c:4,r:1},{c:4,r:5},{c:4,r:6}], fixed:[], inv:[{t:'backslash',n:4},{t:'slash',n:4}], par:6},
+  {name:'螺旋陷阱', cols:8,rows:8, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:3,r:3}], walls:[{c:2,r:0},{c:3,r:0},{c:4,r:0},{c:5,r:0},{c:6,r:0},{c:0,r:1},{c:0,r:2},{c:0,r:3},{c:0,r:4},{c:0,r:5},{c:1,r:5},{c:2,r:5},{c:3,r:5},{c:4,r:5},{c:5,r:5},{c:6,r:5},{c:7,r:1},{c:7,r:2},{c:7,r:3},{c:7,r:4}], fixed:[], inv:[{t:'backslash',n:4},{t:'slash',n:4}], par:7},
+  {name:'光栅矩阵', cols:8,rows:8, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:7}], walls:[{c:1,r:1},{c:2,r:2},{c:3,r:3},{c:4,r:4},{c:5,r:5},{c:6,r:6}], fixed:[], inv:[{t:'backslash',n:4},{t:'slash',n:4}], par:6},
+  {name:'对称之美', cols:8,rows:8, src:{c:0,r:4,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:0},{c:7,r:7}], walls:[{c:2,r:2},{c:2,r:5},{c:5,r:2},{c:5,r:5}], fixed:[{c:3,r:3,t:'splitter'}], inv:[{t:'backslash',n:3},{t:'slash',n:3}], par:5},
+  {name:'终极挑战', cols:8,rows:8, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:0,color:'red'},{c:7,r:7,color:'blue'}], walls:[{c:2,r:1},{c:2,r:2},{c:2,r:4},{c:2,r:5},{c:5,r:1},{c:5,r:2},{c:5,r:4},{c:5,r:5}], fixed:[{c:1,r:3,t:'splitter'},{c:3,r:0,t:'filter-r'},{c:3,r:6,t:'filter-b'}], inv:[{t:'backslash',n:4},{t:'slash',n:4}], par:7},
+  // 31-35: 大师
+  {name:'光子迷宫', cols:8,rows:8, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:0},{c:7,r:7},{c:0,r:7}], walls:[{c:2,r:0},{c:4,r:0},{c:6,r:0},{c:1,r:2},{c:3,r:2},{c:5,r:2},{c:2,r:4},{c:4,r:4},{c:6,r:4},{c:1,r:6},{c:3,r:6},{c:5,r:6}], fixed:[], inv:[{t:'backslash',n:4},{t:'slash',n:4},{t:'splitter',n:1}], par:8},
+  {name:'全息投影', cols:8,rows:8, src:{c:0,r:3,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:1},{c:7,r:3},{c:7,r:5}], walls:[{c:2,r:0},{c:2,r:2},{c:2,r:4},{c:2,r:6},{c:5,r:0},{c:5,r:2},{c:5,r:4},{c:5,r:6}], fixed:[{c:1,r:3,t:'splitter'},{c:6,r:1,t:'filter-r'},{c:6,r:5,t:'filter-b'}], inv:[{t:'backslash',n:3},{t:'slash',n:3},{t:'splitter',n:1}], par:5},
+  {name:'无限反射', cols:8,rows:8, src:{c:0,r:0,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:7}], walls:[{c:2,r:0},{c:3,r:0},{c:4,r:0},{c:5,r:0},{c:7,r:1},{c:7,r:2},{c:7,r:3},{c:7,r:4},{c:7,r:5},{c:7,r:6},{c:1,r:7},{c:2,r:7},{c:3,r:7},{c:4,r:7},{c:5,r:7},{c:0,r:1},{c:0,r:2},{c:0,r:3},{c:0,r:4},{c:0,r:5},{c:0,r:6}], fixed:[], inv:[{t:'backslash',n:4},{t:'slash',n:4}], par:7},
+  {name:'量子纠缠', cols:8,rows:8, src:{c:0,r:4,d:DIR.RIGHT,color:'white'}, tgts:[{c:7,r:0,color:'red'},{c:7,r:4,color:'green'},{c:7,r:7,color:'blue'}], walls:[{c:3,r:1},{c:3,r:3},{c:3,r:5},{c:3,r:7}], fixed:[{c:1,r:4,t:'splitter'},{c:4,r:0,t:'filter-r'},{c:4,r:4,t:'filter-g'},{c:4,r:7,t:'filter-b'}], inv:[{t:'backslash',n:3},{t:'slash',n:3}], par:5},
+  {name:'光之终章', cols:9,rows:9, src:{c:0,r:4,d:DIR.RIGHT,color:'white'}, tgts:[{c:8,r:0},{c:8,r:2},{c:8,r:4},{c:8,r:6},{c:8,r:8}], walls:[{c:2,r:0},{c:2,r:2},{c:2,r:4},{c:2,r:6},{c:2,r:8},{c:5,r:0},{c:5,r:2},{c:5,r:4},{c:5,r:6},{c:5,r:8}], fixed:[{c:1,r:4,t:'splitter'},{c:6,r:4,t:'splitter'}], inv:[{t:'backslash',n:4},{t:'slash',n:4},{t:'splitter',n:1}], par:6}
+];
+
+// ============ 游戏状态 ============
+let state = {
+  levelIdx: 0,
+  grid: [],
+  placed: [],
+  selectedItem: null,
+  laserPaths: [],
+  hitTargets: [],
+  animProgress: 0,
+  animating: false,
+  levelComplete: false,
+  canvasW: 0,
+  canvasH: 0,
+  cellSize: 0,
+  gridOX: 0,
+  gridOY: 0,
+  cellOX: 0,
+  cellOY: 0
+};
+
+// ============ DOM ============
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const elLevelName = document.getElementById('levelName');
+const elStarDisplay = document.getElementById('starDisplay');
+const elInventory = document.getElementById('inventory');
+const elHintText = document.getElementById('hintText');
+const elLevelSelect = document.getElementById('levelSelect');
+const elLevelGrid = document.getElementById('levelGrid');
+const elWinOverlay = document.getElementById('winOverlay');
+const elWinStars = document.getElementById('winStars');
+
+// ============ 进度存储 ============
+function loadProgress() {
+  try { return JSON.parse(localStorage.getItem('grating_progress')||'{}'); } catch(e) { return {}; }
+}
+function saveProgress(prog) {
+  localStorage.setItem('grating_progress',JSON.stringify(prog));
+}
+function getStars(li) { return (loadProgress()[li]||0); }
+function setStars(li, s) {
+  let p = loadProgress();
+  p[li] = Math.max(p[li]||0, s);
+  saveProgress(p);
+}
+
+// ============ 关卡加载 ============
+function loadLevel(idx) {
+  state.levelIdx = idx;
+  state.placed = [];
+  state.selectedItem = null;
+  state.laserPaths = [];
+  state.hitTargets = [];
+  state.animProgress = 0;
+  state.animating = false;
+  state.levelComplete = false;
+  elWinOverlay.style.display = 'none';
+  let lv = LEVELS[idx];
+  state.grid = [];
+  for (let r = 0; r < lv.rows; r++) {
+    state.grid[r] = [];
+    for (let c = 0; c < lv.cols; c++) {
+      state.grid[r][c] = {wall:false, mirror:null, fixed:false, target:false, targetColor:null, source:false, sourceDir:null, sourceColor:null};
+    }
+  }
+  // walls
+  for (let w of lv.walls) state.grid[w.r][w.c].wall = true;
+  // source
+  state.grid[lv.src.r][lv.src.c].source = true;
+  state.grid[lv.src.r][lv.src.c].sourceDir = lv.src.d;
+  state.grid[lv.src.r][lv.src.c].sourceColor = lv.src.color;
+  // targets
+  for (let t of lv.tgts) {
+    state.grid[t.r][t.c].target = true;
+    state.grid[t.r][t.c].targetColor = t.color||null;
+  }
+  // fixed mirrors
+  for (let f of lv.fixed) {
+    state.grid[f.r][f.c].mirror = f.t;
+    state.grid[f.r][f.c].fixed = true;
+  }
+  elLevelName.textContent = `${idx+1}. ${lv.name}`;
+  updateStars();
+  updateInventory();
+  resizeCanvas();
+  traceLaser();
+  render();
+}
+
+// ============ 激光追踪 ============
+function traceLaser() {
+  let lv = LEVELS[state.levelIdx];
+  state.laserPaths = [];
+  state.hitTargets = [];
+  let visited = new Set();
+  // Collect all sources
+  let beams = [{c:lv.src.c, r:lv.src.r, d:lv.src.d, color:lv.src.color, path:[{c:lv.src.c,r:lv.src.r}]}];
+  while (beams.length > 0) {
+    let newBeams = [];
+    for (let b of beams) {
+      let nc = b.c + DIR_DX[b.d];
+      let nr = b.r + DIR_DY[b.d];
+      if (nc < 0 || nc >= lv.cols || nr < 0 || nr >= lv.rows) {
+        state.laserPaths.push({path:b.path, color:b.color});
+        continue;
+      }
+      let key = `${nc},${nr},${b.d},${b.color}`;
+      if (visited.has(key)) { state.laserPaths.push({path:b.path, color:b.color}); continue; }
+      visited.add(key);
+      let newPath = [...b.path, {c:nc, r:nr}];
+      let cell = state.grid[nr][nc];
+      if (cell.wall) { state.laserPaths.push({path:newPath, color:b.color}); continue; }
+      if (cell.target) {
+        if (!cell.targetColor || cell.targetColor === b.color) {
+          if (!state.hitTargets.find(t=>t.c===nc&&t.r===nr)) state.hitTargets.push({c:nc,r:nr});
+        }
+        state.laserPaths.push({path:newPath, color:b.color, hitTarget:true});
+        continue;
+      }
+      if (cell.mirror === 'backslash' || cell.mirror === 'slash') {
+        let nd = MIRROR_REFLECT[cell.mirror][b.d];
+        newBeams.push({c:nc, r:nr, d:nd, color:b.color, path:newPath});
+      } else if (cell.mirror === 'splitter') {
+        let nd = MIRROR_REFLECT['backslash'][b.d];
+        newBeams.push({c:nc, r:nr, d:nd, color:b.color, path:[...newPath]});
+        newBeams.push({c:nc, r:nr, d:b.d, color:b.color, path:[...newPath]});
+      } else if (cell.mirror && cell.mirror.startsWith('filter-')) {
+        let fc = FILTER_COLOR[cell.mirror];
+        if (b.color === 'white' || b.color === fc) {
+          newBeams.push({c:nc, r:nr, d:b.d, color:fc, path:newPath});
+        } else {
+          state.laserPaths.push({path:newPath, color:b.color});
+        }
+      } else {
+        newBeams.push({c:nc, r:nr, d:b.d, color:b.color, path:newPath});
+      }
+    }
+    beams = newBeams;
+  }
+  // Check level complete
+  let allHit = true;
+  for (let t of lv.tgts) {
+    if (!state.hitTargets.find(h=>h.c===t.c&&h.r===t.r)) { allHit = false; break; }
+  }
+  if (allHit && state.hitTargets.length >= lv.tgts.length) {
+    if (!state.levelComplete) {
+      state.levelComplete = true;
+      let placedCount = state.placed.length;
+      let par = lv.par;
+      let stars = placedCount <= par ? 3 : (placedCount <= par*1.5 ? 2 : 1);
+      setStars(state.levelIdx, stars);
+      updateStars();
+      setTimeout(()=>{
+        elWinStars.textContent = '★'.repeat(stars)+'☆'.repeat(3-stars);
+        elWinOverlay.style.display = 'flex';
+        if (state.levelIdx >= 10) showInterstitialAd();
+      }, 600);
+    }
+  }
+  // Start animation
+  state.animProgress = 0;
+  state.animating = true;
+}
+
+// ============ 渲染 ============
+function resizeCanvas() {
+  let lv = LEVELS[state.levelIdx];
+  let maxW = Math.min(window.innerWidth - 20, 500);
+  let maxH = Math.min(window.innerHeight - 260, 500);
+  let cs = Math.floor(Math.min(maxW / lv.cols, maxH / lv.rows));
+  cs = Math.max(cs, 28);
+  state.cellSize = cs;
+  state.canvasW = cs * lv.cols;
+  state.canvasH = cs * lv.rows;
+  canvas.width = state.canvasW;
+  canvas.height = state.canvasH;
+  canvas.style.width = state.canvasW + 'px';
+  canvas.style.height = state.canvasH + 'px';
+  state.gridOX = 0;
+  state.gridOY = 0;
+  state.cellOX = 0;
+  state.cellOY = 0;
+}
+
+function cx(c) { return state.cellOX + c * state.cellSize + state.cellSize/2; }
+function cy(r) { return state.cellOY + r * state.cellSize + state.cellSize/2; }
+
+function render() {
+  let lv = LEVELS[state.levelIdx];
+  let cs = state.cellSize;
+  let w = state.canvasW, h = state.canvasH;
+  ctx.clearRect(0,0,w,h);
+
+  // Grid background
+  ctx.fillStyle = '#080818';
+  ctx.fillRect(0,0,w,h);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(0,229,255,.07)';
+  ctx.lineWidth = 1;
+  for (let r = 0; r <= lv.rows; r++) {
+    ctx.beginPath();
+    ctx.moveTo(0, r*cs);
+    ctx.lineTo(w, r*cs);
+    ctx.stroke();
+  }
+  for (let c = 0; c <= lv.cols; c++) {
+    ctx.beginPath();
+    ctx.moveTo(c*cs, 0);
+    ctx.lineTo(c*cs, h);
+    ctx.stroke();
+  }
+
+  // Cells
+  for (let r = 0; r < lv.rows; r++) {
+    for (let c = 0; c < lv.cols; c++) {
+      let cell = state.grid[r][c];
+      let x = c*cs, y = r*cs;
+      let pad = cs*0.08;
+
+      if (cell.wall) {
+        ctx.fillStyle = '#1a1a35';
+        ctx.fillRect(x+pad, y+pad, cs-pad*2, cs-pad*2);
+        ctx.strokeStyle = 'rgba(100,100,150,.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x+pad, y+pad, cs-pad*2, cs-pad*2);
+        // Wall pattern
+        ctx.fillStyle = 'rgba(100,100,150,.08)';
+        for (let i=0; i<3; i++) {
+          ctx.fillRect(x+pad+cs*0.15, y+pad+cs*(0.2+i*0.25), cs*0.7, cs*0.03);
+        }
+      }
+
+      if (cell.mirror) {
+        let def = MIRROR_DEFS[cell.mirror];
+        if (cell.mirror === 'backslash') {
+          // \ diagonal
+          ctx.strokeStyle = def.color;
+          ctx.lineWidth = Math.max(2, cs*0.08);
+          ctx.shadowColor = def.color;
+          ctx.shadowBlur = cs*0.25;
+          ctx.beginPath();
+          ctx.moveTo(x+pad*2, y+pad*2);
+          ctx.lineTo(x+cs-pad*2, y+cs-pad*2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          // Mirror surface
+          ctx.fillStyle = 'rgba(255,255,255,.06)';
+          ctx.fillRect(x+pad*1.5, y+pad*1.5, cs-pad*3, cs-pad*3);
+        } else if (cell.mirror === 'slash') {
+          // / diagonal
+          ctx.strokeStyle = def.color;
+          ctx.lineWidth = Math.max(2, cs*0.08);
+          ctx.shadowColor = def.color;
+          ctx.shadowBlur = cs*0.25;
+          ctx.beginPath();
+          ctx.moveTo(x+cs-pad*2, y+pad*2);
+          ctx.lineTo(x+pad*2, y+cs-pad*2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255,255,255,.06)';
+          ctx.fillRect(x+pad*1.5, y+pad*1.5, cs-pad*3, cs-pad*3);
+        } else if (cell.mirror === 'splitter') {
+          // Diamond shape
+          ctx.fillStyle = def.bg;
+          ctx.fillRect(x+pad, y+pad, cs-pad*2, cs-pad*2);
+          ctx.fillStyle = def.color;
+          ctx.shadowColor = def.color;
+          ctx.shadowBlur = cs*0.3;
+          ctx.beginPath();
+          let mx=cx(c), my=cy(r), hs=cs*0.35;
+          ctx.moveTo(mx, my-hs);
+          ctx.lineTo(mx+hs, my);
+          ctx.lineTo(mx, my+hs);
+          ctx.lineTo(mx-hs, my);
+          ctx.closePath();
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          // Cross lines
+          ctx.strokeStyle = def.color;
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(x+pad, y+pad); ctx.lineTo(x+cs-pad, y+cs-pad); ctx.stroke();
+        } else if (cell.mirror.startsWith('filter-')) {
+          let fc = FILTER_COLOR[cell.mirror];
+          let fcMap = {red:'#ff4444',green:'#44ff44',blue:'#4488ff'};
+          let col = fcMap[fc];
+          ctx.fillStyle = 'rgba(0,0,0,.6)';
+          ctx.fillRect(x+pad, y+pad, cs-pad*2, cs-pad*2);
+          // Glass effect
+          let grd = ctx.createLinearGradient(x+pad, y+pad, x+cs-pad, y+cs-pad);
+          grd.addColorStop(0, col.replace(')',').3)').replace('rgb','rgba'));
+          grd.addColorStop(0.5, col.replace(')',').6)').replace('rgb','rgba'));
+          grd.addColorStop(1, col.replace(')',').3)').replace('rgb','rgba'));
+          ctx.fillStyle = grd;
+          ctx.fillRect(x+pad+2, y+pad+2, cs-pad*2-4, cs-pad*2-4);
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(x+pad+2, y+pad+2, cs-pad*2-4, cs-pad*2-4);
+          // Circle in center
+          ctx.fillStyle = col;
+          ctx.shadowColor = col;
+          ctx.shadowBlur = cs*0.2;
+          ctx.beginPath();
+          ctx.arc(cx(c), cy(r), cs*0.18, 0, Math.PI*2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+        // Fixed indicator
+        if (cell.fixed) {
+          ctx.strokeStyle = 'rgba(255,255,255,.2)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2,2]);
+          ctx.strokeRect(x+1, y+1, cs-2, cs-2);
+          ctx.setLineDash([]);
+        }
+      }
+
+      // Target
+      if (cell.target) {
+        let tc = cell.targetColor || 'white';
+        let tcm = {red:'#ff4444',green:'#44ff44',blue:'#4488ff',white:'#ffdd44'};
+        let col = tcm[tc];
+        let isHit = state.hitTargets.find(t=>t.c===c&&t.r===r);
+        let alpha = isHit ? 1 : 0.5;
+        let pulse = isHit ? (1 + Math.sin(Date.now()/200)*0.15) : 1;
+        // Outer ring
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = Math.max(2, cs*0.06);
+        ctx.shadowColor = col;
+        ctx.shadowBlur = isHit ? cs*0.5 : cs*0.2;
+        ctx.beginPath();
+        ctx.arc(cx(c), cy(r), cs*0.3*pulse, 0, Math.PI*2);
+        ctx.stroke();
+        // Inner dot
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(cx(c), cy(r), cs*0.12, 0, Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+      }
+
+      // Source
+      if (cell.source) {
+        let sc = cell.sourceColor || 'white';
+        let scm = {red:'#ff6666',green:'#66ff66',blue:'#6688ff',white:'#ffffff'};
+        let col = scm[sc];
+        // Base
+        let grd = ctx.createRadialGradient(cx(c), cy(r), cs*0.05, cx(c), cy(r), cs*0.4);
+        grd.addColorStop(0, col);
+        grd.addColorStop(0.5, 'rgba(0,0,0,.3)');
+        grd.addColorStop(1, 'rgba(0,0,0,.6)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(cx(c), cy(r), cs*0.35, 0, Math.PI*2);
+        ctx.fill();
+        // Glow
+        ctx.fillStyle = col;
+        ctx.shadowColor = col;
+        ctx.shadowBlur = cs*0.4;
+        ctx.beginPath();
+        ctx.arc(cx(c), cy(r), cs*0.12, 0, Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // Direction indicator
+        let da = cell.sourceDir * Math.PI/2;
+        let ax = cx(c) + Math.cos(da)*cs*0.2;
+        let ay = cy(r) + Math.sin(da)*cs*0.2;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(ax, ay, cs*0.08, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Laser beams
+  if (state.animating) {
+    let totalSegs = 0;
+    for (let lp of state.laserPaths) totalSegs += lp.path.length - 1;
+    if (totalSegs === 0) { state.animating = false; }
+    let maxSegs = Math.ceil(totalSegs * Math.min(1, state.animProgress));
+    let segCount = 0;
+
+    for (let lp of state.laserPaths) {
+      let lc = lp.color;
+      let lcm = {red:'#ff4444',green:'#44ff44',blue:'#4488ff',white:'#00ff88'};
+      let col = lcm[lc]||'#00ff88';
+      for (let i = 0; i < lp.path.length - 1; i++) {
+        if (segCount >= maxSegs) break;
+        segCount++;
+        let p1 = lp.path[i], p2 = lp.path[i+1];
+        let x1 = cx(p1.c), y1 = cy(p1.r);
+        let x2 = cx(p2.c), y2 = cy(p2.r);
+        // Glow
+        ctx.strokeStyle = col;
+        ctx.lineWidth = cs*0.12;
+        ctx.globalAlpha = 0.3;
+        ctx.shadowColor = col;
+        ctx.shadowBlur = cs*0.4;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        // Core
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = cs*0.04;
+        ctx.globalAlpha = 0.9;
+        ctx.shadowBlur = cs*0.15;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+      }
+      if (segCount >= maxSegs) break;
+    }
+  }
+
+  // Hover highlight for selected item
+  if (state.selectedItem && state.hoverCell) {
+    let {c,r} = state.hoverCell;
+    let cell = state.grid[r]&&state.grid[r][c];
+    if (cell && !cell.wall && !cell.mirror && !cell.source && !cell.target) {
+      ctx.strokeStyle = 'rgba(255,215,0,.5)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4,4]);
+      ctx.strokeRect(c*cs+1, r*cs+1, cs-2, cs-2);
+      ctx.setLineDash([]);
+    }
+  }
+}
+
+// ============ 动画循环 ============
+function animate(ts) {
+  if (state.animating) {
+    state.animProgress += 0.03;
+    if (state.animProgress >= 1) {
+      state.animProgress = 1;
+      state.animating = false;
+    }
+  }
+  render();
+  requestAnimationFrame(animate);
+}
+
+// ============ 库存 ============
+function updateInventory() {
+  let lv = LEVELS[state.levelIdx];
+  elInventory.innerHTML = '';
+  for (let item of lv.inv) {
+    let placed = state.placed.filter(p=>p.type===item.t).length;
+    let remaining = item.n - placed;
+    let def = MIRROR_DEFS[item.t];
+    let div = document.createElement('div');
+    div.className = 'inv-item' + (remaining <= 0 ? ' empty' : '') + (state.selectedItem === item.t ? ' selected' : '');
+    div.style.background = def.bg;
+    div.style.borderColor = def.border;
+    div.textContent = def.icon;
+    div.title = def.name + ' (剩余' + remaining + ')';
+    if (remaining > 0) {
+      let badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = remaining;
+      div.appendChild(badge);
+      div.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.selectedItem === item.t) {
+          state.selectedItem = null;
+        } else {
+          state.selectedItem = item.t;
+        }
+        updateInventory();
+        render();
+      });
+    }
+    elInventory.appendChild(div);
+  }
+  elHintText.textContent = state.selectedItem ? '点击网格放置 ' + (MIRROR_DEFS[state.selectedItem]||{}).name : '选择道具后点击网格放置';
+}
+
+// ============ 输入处理 ============
+function getGridCell(e) {
+  let rect = canvas.getBoundingClientRect();
+  let x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  let y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  let cs = state.cellSize;
+  let lv = LEVELS[state.levelIdx];
+  let c = Math.floor(x / cs);
+  let r = Math.floor(y / cs);
+  if (c >= 0 && c < lv.cols && r >= 0 && r < lv.rows) return {c,r};
+  return null;
+}
+
+canvas.addEventListener('mousemove', (e) => {
+  state.hoverCell = getGridCell(e);
+  if (!state.selectedItem) state.hoverCell = null;
+});
+canvas.addEventListener('mouseleave', () => { state.hoverCell = null; });
+
+canvas.addEventListener('click', (e) => {
+  if (state.levelComplete) return;
+  let cell = getGridCell(e);
+  if (!cell) return;
+  let {c,r} = cell;
+  let gcell = state.grid[r][c];
+  // If no selected item and cell has a placed mirror, remove it
+  if (!state.selectedItem) {
+    if (gcell.mirror && !gcell.fixed && !gcell.target && !gcell.source) {
+      let idx = state.placed.findIndex(p=>p.c===c&&p.r===r);
+      if (idx >= 0) { state.placed.splice(idx,1); }
+      gcell.mirror = null;
+      updateInventory();
+      traceLaser();
+      render();
+    }
+    return;
+  }
+  // Check if cell is occupied
+  if (gcell.wall || gcell.mirror || gcell.source || gcell.target) return;
+  // Check inventory
+  let lv = LEVELS[state.levelIdx];
+  let invItem = lv.inv.find(i=>i.t===state.selectedItem);
+  if (!invItem) return;
+  let placed = state.placed.filter(p=>p.type===state.selectedItem).length;
+  if (placed >= invItem.n) return;
+  // Place mirror
+  gcell.mirror = state.selectedItem;
+  gcell.fixed = false;
+  state.placed.push({c,r,type:state.selectedItem});
+  updateInventory();
+  traceLaser();
+  render();
+});
+
+// Touch events
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (state.levelComplete) return;
+  let touch = e.touches[0];
+  let cell = getGridCell(touch);
+  if (!cell) return;
+  let {c,r} = cell;
+  let gcell = state.grid[r][c];
+  if (!state.selectedItem) {
+    if (gcell.mirror && !gcell.fixed && !gcell.target && !gcell.source) {
+      let idx = state.placed.findIndex(p=>p.c===c&&p.r===r);
+      if (idx >= 0) { state.placed.splice(idx,1); }
+      gcell.mirror = null;
+      updateInventory();
+      traceLaser();
+      render();
+    }
+    return;
+  }
+  if (gcell.wall || gcell.mirror || gcell.source || gcell.target) return;
+  let lv = LEVELS[state.levelIdx];
+  let invItem = lv.inv.find(i=>i.t===state.selectedItem);
+  if (!invItem) return;
+  let placed = state.placed.filter(p=>p.type===state.selectedItem).length;
+  if (placed >= invItem.n) return;
+  gcell.mirror = state.selectedItem;
+  gcell.fixed = false;
+  state.placed.push({c,r,type:state.selectedItem});
+  updateInventory();
+  traceLaser();
+  render();
+}, {passive:false});
+
+// ============ 按钮事件 ============
+document.getElementById('btnReset').addEventListener('click', () => {
+  loadLevel(state.levelIdx);
+});
+document.getElementById('btnLevels').addEventListener('click', () => {
+  showLevelSelect();
+});
+document.getElementById('btnNext').addEventListener('click', () => {
+  let next = state.levelIdx + 1;
+  if (next < LEVELS.length) loadLevel(next);
+});
+document.getElementById('btnReplay').addEventListener('click', () => {
+  loadLevel(state.levelIdx);
+});
+document.getElementById('btnWinLevels').addEventListener('click', () => {
+  elWinOverlay.style.display = 'none';
+  showLevelSelect();
+});
+document.getElementById('closeLvl').addEventListener('click', () => {
+  elLevelSelect.style.display = 'none';
+});
+
+// ============ 关卡选择 ============
+function showLevelSelect() {
+  elLevelSelect.style.display = 'flex';
+  elLevelGrid.innerHTML = '';
+  let prog = loadProgress();
+  for (let i = 0; i < LEVELS.length; i++) {
+    let stars = prog[i] || 0;
+    let unlocked = i === 0 || (prog[i-1] && prog[i-1] >= 1);
+    let btn = document.createElement('div');
+    btn.className = 'lvl-btn' + (i === state.levelIdx ? ' current' : '') + (unlocked ? ' unlocked' : ' locked');
+    btn.innerHTML = '<span>' + (i+1) + '</span><span class="stars">' + '★'.repeat(stars) + '☆'.repeat(3-stars) + '</span>';
+    if (unlocked) {
+      btn.addEventListener('click', () => {
+        elLevelSelect.style.display = 'none';
+        loadLevel(i);
+      });
+    }
+    elLevelGrid.appendChild(btn);
+  }
+}
+document.getElementById('levelSelect').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+
+// ============ 窗口大小 ============
+window.addEventListener('resize', () => {
+  resizeCanvas();
+  render();
+});
+
+// ============ 键盘快捷操作 ============
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    state.selectedItem = null;
+    updateInventory();
+    render();
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    loadLevel(state.levelIdx);
+  }
+  if (e.key === 'n' || e.key === 'N') {
+    if (state.levelComplete && state.levelIdx + 1 < LEVELS.length) {
+      loadLevel(state.levelIdx + 1);
+    }
+  }
+});
+
+// ============ 初始化 ============
+function init() {
+  resizeCanvas();
+  loadLevel(0);
+  requestAnimationFrame(animate);
+}
+
+// 广告系统
+(function(){
+var sb=document.getElementById('sponsorBtn'),sp=document.getElementById('sponsorPanel'),sc=document.getElementById('sponsorClose');
+if(sb&&sp){sb.onclick=function(){sp.style.display='flex'};if(sc)sc.onclick=function(){sp.style.display='none'}}
+var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+if(ia&&si){si.onclick=function(){ia.style.display='none'}}
+window.showInterstitialAd=function(){if(ia)ia.style.display='flex'};
+})();
+
+init();
+</script>
+</body>
+</html>
