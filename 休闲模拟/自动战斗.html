@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>自动战斗</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f0c29 0%, #302b63 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; color: #fff; }
+        .stat-label { font-size: 12px; opacity: 0.8; }
+        .stat-value { font-size: 20px; font-weight: bold; }
+        
+        .battlefield { flex: 1; display: flex; justify-content: space-between; align-items: center; padding: 20px; }
+        .side { display: flex; flex-direction: column; align-items: center; }
+        .character { width: 120px; height: 120px; background: linear-gradient(135deg, #4ecdc4, #44a08d); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 50px; }
+        .character.enemy { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); }
+        .hp-bar { width: 150px; height: 15px; background: rgba(255,255,255,0.2); border-radius: 8px; margin-top: 15px; overflow: hidden; }
+        .hp-fill { height: 100%; transition: width 0.3s; }
+        .hp-fill.player { background: linear-gradient(90deg, #4ecdc4, #44a08d); }
+        .hp-fill.enemy { background: linear-gradient(90deg, #ff6b6b, #ee5a5a); }
+        
+        .battle-log { flex: 1; background: rgba(0,0,0,0.3); border-radius: 15px; padding: 15px; margin-top: 10px; overflow-y: auto; color: #fff; font-size: 14px; }
+        .log-item { margin-bottom: 5px; }
+        .log-item.player { color: #4ecdc4; }
+        .log-item.enemy { color: #ff6b6b; }
+        .log-item.system { color: #f39c12; }
+        
+        .panel { width: 100%; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .skills { display: flex; gap: 10px; justify-content: center; }
+        .skill-btn { padding: 12px 24px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.3s; }
+        .skill-btn.attack { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); color: #fff; }
+        .skill-btn.defend { background: linear-gradient(135deg, #3498db, #2980b9); color: #fff; }
+        .skill-btn.heal { background: linear-gradient(135deg, #2ecc71, #27ae60); color: #fff; }
+        .skill-btn.special { background: linear-gradient(135deg, #9b59b6, #8e44ad); color: #fff; }
+        .skill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">关卡</div>
+                <div class="stat-value" id="stage">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">金币</div>
+                <div class="stat-value" id="gold">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">经验</div>
+                <div class="stat-value" id="exp">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">连击</div>
+                <div class="stat-value" id="combo">0</div>
+            </div>
+        </div>
+        
+        <div class="battlefield">
+            <div class="side">
+                <div class="character" id="playerChar">⚔️</div>
+                <div class="hp-bar">
+                    <div class="hp-fill player" id="playerHp" style="width: 100%;"></div>
+                </div>
+                <div style="color: #fff; font-size: 14px; margin-top: 5px;">HP: <span id="playerHpText">100/100</span></div>
+            </div>
+            
+            <div style="font-size: 40px; color: #fff; opacity: 0.5;">VS</div>
+            
+            <div class="side">
+                <div class="character enemy" id="enemyChar">👹</div>
+                <div class="hp-bar">
+                    <div class="hp-fill enemy" id="enemyHp" style="width: 100%;"></div>
+                </div>
+                <div style="color: #fff; font-size: 14px; margin-top: 5px;">HP: <span id="enemyHpText">100/100</span></div>
+            </div>
+        </div>
+        
+        <div class="battle-log" id="log"></div>
+        
+        <div class="panel">
+            <div class="skills">
+                <button class="skill-btn attack" id="btnAttack">⚔️ 攻击</button>
+                <button class="skill-btn defend" id="btnDefend">🛡️ 防御</button>
+                <button class="skill-btn heal" id="btnHeal">💚 治疗</button>
+                <button class="skill-btn special" id="btnSpecial">✨ 必杀技</button>
+            </div>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const ENEMIES = [
+            { emoji: '👹', name: '哥布林', hp: 100, attack: 10, defense: 5 },
+            { emoji: '👺', name: '恶鬼', hp: 150, attack: 15, defense: 8 },
+            { emoji: '💀', name: '骷髅', hp: 200, attack: 20, defense: 10 },
+            { emoji: '🦇', name: '蝙蝠王', hp: 300, attack: 25, defense: 12 },
+            { emoji: '🐉', name: '巨龙', hp: 500, attack: 35, defense: 20 }
+        ];
+        
+        let stage = 1;
+        let gold = 0;
+        let exp = 0;
+        let combo = 0;
+        
+        let player = { hp: 100, maxHp: 100, attack: 15, defense: 10, level: 1 };
+        let enemy = { ...ENEMIES[0] };
+        
+        let isAuto = true;
+        let battleInterval = null;
+        
+        const logEl = document.getElementById('log');
+        const messageEl = document.getElementById('message');
+        
+        function addLog(text, type = 'system') {
+            const item = document.createElement('div');
+            item.className = `log-item ${type}`;
+            item.textContent = text;
+            logEl.appendChild(item);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function updateStats() {
+            document.getElementById('stage').textContent = stage;
+            document.getElementById('gold').textContent = gold;
+            document.getElementById('exp').textContent = exp;
+            document.getElementById('combo').textContent = combo;
+            
+            document.getElementById('playerHpText').textContent = player.hp + '/' + player.maxHp;
+            document.getElementById('playerHp').style.width = (player.hp / player.maxHp * 100) + '%';
+            
+            document.getElementById('enemyHpText').textContent = enemy.hp + '/' + enemy.maxHp;
+            document.getElementById('enemyHp').style.width = (enemy.hp / enemy.maxHp * 100) + '%';
+            
+            document.getElementById('playerChar').textContent = getPlayerEmoji();
+            document.getElementById('enemyChar').textContent = enemy.emoji;
+        }
+        
+        function getPlayerEmoji() {
+            if (player.level >= 10) return '👑';
+            if (player.level >= 5) return '⚔️';
+            return '🥷';
+        }
+        
+        function playerAttack() {
+            const dmg = Math.max(1, player.attack * (1 + combo * 0.1) - enemy.defense);
+            enemy.hp -= dmg;
+            combo++;
+            
+            addLog(`你对${enemy.name}造成 ${dmg} 点伤害！`, 'player');
+            
+            if (enemy.hp <= 0) {
+                winBattle();
+            }
+        }
+        
+        function enemyAttack() {
+            const dmg = Math.max(1, enemy.attack - player.defense * 0.5);
+            player.hp -= dmg;
+            combo = 0;
+            
+            addLog(`${enemy.name}对你造成 ${dmg} 点伤害！`, 'enemy');
+            
+            if (player.hp <= 0) {
+                loseBattle();
+            }
+        }
+        
+        function defend() {
+            const reduction = player.defense * 2;
+            player.defense += 5;
+            
+            addLog('你进入防御姿态，防御力提升！', 'player');
+            
+            setTimeout(() => {
+                player.defense -= 5;
+                addLog('防御姿态结束', 'system');
+            }, 3000);
+        }
+        
+        function heal() {
+            const healAmount = Math.floor(player.maxHp * 0.3);
+            player.hp = Math.min(player.maxHp, player.hp + healAmount);
+            
+            addLog(`你恢复了 ${healAmount} 点生命值！`, 'player');
+            updateStats();
+        }
+        
+        function special() {
+            const dmg = player.attack * 3;
+            enemy.hp -= dmg;
+            combo = 0;
+            
+            addLog(`✨ 必杀技！对${enemy.name}造成 ${dmg} 点伤害！`, 'player');
+            
+            if (enemy.hp <= 0) {
+                winBattle();
+            }
+        }
+        
+        function winBattle() {
+            stopAuto();
+            
+            const reward = enemy.maxHp * 0.5;
+            gold += Math.floor(reward);
+            exp += enemy.maxHp;
+            stage++;
+            
+            addLog(`🎉 击败${enemy.name}！获得 ${Math.floor(reward)} 金币！`, 'system');
+            
+            if (exp >= player.level * 100) {
+                player.level++;
+                player.maxHp += 20;
+                player.hp = player.maxHp;
+                player.attack += 5;
+                player.defense += 3;
+                exp -= player.level * 100;
+                
+                addLog(`🌟 升级了！当前等级 ${player.level}`, 'system');
+            }
+            
+            loadEnemy();
+            updateStats();
+            startAuto();
+            
+            showMessage(`胜利！关卡 ${stage}`);
+        }
+        
+        function loseBattle() {
+            stopAuto();
+            addLog('💀 战斗失败！', 'system');
+            
+            player.hp = player.maxHp;
+            combo = 0;
+            
+            loadEnemy();
+            updateStats();
+            startAuto();
+            
+            showMessage('战斗失败，重新开始');
+        }
+        
+        function loadEnemy() {
+            const index = Math.min(Math.floor(stage / 5), ENEMIES.length - 1);
+            enemy = { ...ENEMIES[index] };
+            enemy.hp = Math.floor(enemy.hp * Math.pow(1.3, Math.floor(stage / 5)));
+            enemy.maxHp = enemy.hp;
+            enemy.attack = Math.floor(enemy.attack * Math.pow(1.2, Math.floor(stage / 5)));
+        }
+        
+        function startAuto() {
+            if (battleInterval) clearInterval(battleInterval);
+            battleInterval = setInterval(() => {
+                playerAttack();
+                updateStats();
+                
+                if (enemy.hp > 0) {
+                    setTimeout(() => {
+                        enemyAttack();
+                        updateStats();
+                    }, 500);
+                }
+            }, 1500);
+        }
+        
+        function stopAuto() {
+            if (battleInterval) {
+                clearInterval(battleInterval);
+                battleInterval = null;
+            }
+        }
+        
+        function showMessage(msg) {
+            messageEl.textContent = msg;
+            messageEl.classList.add('show');
+            setTimeout(() => messageEl.classList.remove('show'), 2000);
+        }
+        
+        document.getElementById('btnAttack').addEventListener('click', () => {
+            stopAuto();
+            playerAttack();
+            updateStats();
+            setTimeout(() => {
+                if (enemy.hp > 0) {
+                    enemyAttack();
+                    updateStats();
+                }
+                startAuto();
+            }, 500);
+        });
+        
+        document.getElementById('btnDefend').addEventListener('click', () => {
+            stopAuto();
+            defend();
+            setTimeout(() => {
+                enemyAttack();
+                updateStats();
+                startAuto();
+            }, 500);
+        });
+        
+        document.getElementById('btnHeal').addEventListener('click', () => {
+            stopAuto();
+            heal();
+            setTimeout(() => {
+                enemyAttack();
+                updateStats();
+                startAuto();
+            }, 500);
+        });
+        
+        document.getElementById('btnSpecial').addEventListener('click', () => {
+            stopAuto();
+            special();
+            updateStats();
+            setTimeout(() => {
+                if (enemy.hp > 0) {
+                    enemyAttack();
+                    updateStats();
+                }
+                startAuto();
+            }, 500);
+        });
+        
+        loadEnemy();
+        updateStats();
+        addLog('⚔️ 战斗开始！', 'system');
+        startAuto();
+    </script>
+</body>
+</html>

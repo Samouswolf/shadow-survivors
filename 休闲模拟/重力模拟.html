@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>重力模拟</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; color: #fff; }
+        .stat-label { font-size: 12px; opacity: 0.8; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #ffd700; }
+        
+        .canvas-container { flex: 1; position: relative; background: rgba(0,0,0,0.3); border-radius: 15px; overflow: hidden; }
+        #gameCanvas { width: 100%; height: 100%; display: block; }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+        .btn { padding: 12px 25px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+        .btn-secondary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        .btn-success { background: linear-gradient(135deg, #4facfe, #00f2fe); color: #fff; }
+        
+        .gravity-control { display: flex; align-items: center; gap: 10px; color: #fff; padding: 10px 15px; background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .gravity-slider { width: 100px; }
+        
+        .info-panel { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: #fff; padding: 10px; border-radius: 10px; font-size: 12px; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">物体数量</div>
+                <div class="stat-value" id="objectCount">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">碰撞次数</div>
+                <div class="stat-value" id="collisions">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">最高记录</div>
+                <div class="stat-value" id="highScore">0</div>
+            </div>
+        </div>
+        
+        <div class="canvas-container">
+            <canvas id="gameCanvas"></canvas>
+            <div class="info-panel">
+                <div>点击添加物体</div>
+                <div>拖动调整重力</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="gravity-control">
+                <span>重力:</span>
+                <input type="range" class="gravity-slider" id="gravitySlider" min="0" max="2" step="0.1" value="0.5">
+                <span id="gravityValue">0.5</span>
+            </div>
+            <button class="btn btn-primary" id="btnAdd">➕ 添加物体</button>
+            <button class="btn btn-secondary" id="btnClear">🗑️ 清空</button>
+            <button class="btn btn-success" id="btnReset">🔄 重置重力</button>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let objects = [];
+        let gravity = 0.5;
+        let collisionCount = 0;
+        let highScore = parseInt(localStorage.getItem('highscore_重力模拟') || '0');
+        
+        const COLORS = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#ffeaa7', '#dfe6e9', '#fd79a8', '#a29bfe'];
+        const SHAPES = ['circle', 'square'];
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+        
+        class PhysicsObject {
+            constructor(x, y, radius, shape = 'circle') {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.shape = shape;
+                this.vx = (Math.random() - 0.5) * 4;
+                this.vy = 0;
+                this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                this.mass = radius;
+                this.bounce = 0.7 + Math.random() * 0.2;
+            }
+            
+            update() {
+                this.vy += gravity;
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // 边界碰撞
+                if (this.x - this.radius < 0) {
+                    this.x = this.radius;
+                    this.vx *= -this.bounce;
+                    collisionCount++;
+                }
+                if (this.x + this.radius > canvas.width) {
+                    this.x = canvas.width - this.radius;
+                    this.vx *= -this.bounce;
+                    collisionCount++;
+                }
+                if (this.y - this.radius < 0) {
+                    this.y = this.radius;
+                    this.vy *= -this.bounce;
+                    collisionCount++;
+                }
+                if (this.y + this.radius > canvas.height) {
+                    this.y = canvas.height - this.radius;
+                    this.vy *= -this.bounce;
+                    collisionCount++;
+                }
+                
+                // 摩擦力
+                this.vx *= 0.99;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 10;
+                
+                if (this.shape === 'circle') {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+                }
+                
+                ctx.shadowBlur = 0;
+            }
+            
+            collideWith(other) {
+                const dx = other.x - this.x;
+                const dy = other.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < this.radius + other.radius) {
+                    // 简单弹性碰撞
+                    const angle = Math.atan2(dy, dx);
+                    const sin = Math.sin(angle);
+                    const cos = Math.cos(angle);
+                    
+                    // 旋转速度
+                    const vx1 = this.vx * cos + this.vy * sin;
+                    const vy1 = this.vy * cos - this.vx * sin;
+                    const vx2 = other.vx * cos + other.vy * sin;
+                    const vy2 = other.vy * cos - other.vx * sin;
+                    
+                    // 碰撞后速度
+                    const finalVx1 = ((this.mass - other.mass) * vx1 + 2 * other.mass * vx2) / (this.mass + other.mass);
+                    const finalVx2 = ((other.mass - this.mass) * vx2 + 2 * this.mass * vx1) / (this.mass + other.mass);
+                    
+                    // 旋转回原坐标系
+                    this.vx = finalVx1 * cos - vy1 * sin;
+                    this.vy = vy1 * cos + finalVx1 * sin;
+                    other.vx = finalVx2 * cos - vy2 * sin;
+                    other.vy = vy2 * cos + finalVx2 * sin;
+                    
+                    // 分离物体
+                    const overlap = (this.radius + other.radius - distance) / 2;
+                    this.x -= overlap * cos;
+                    this.y -= overlap * sin;
+                    other.x += overlap * cos;
+                    other.y += overlap * sin;
+                    
+                    collisionCount++;
+                }
+            }
+        }
+        
+        function addObject(x, y) {
+            if (objects.length < 50) {
+                const radius = 15 + Math.random() * 25;
+                const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+                objects.push(new PhysicsObject(x, y, radius, shape));
+                updateStats();
+            }
+        }
+        
+        function updateStats() {
+            document.getElementById('objectCount').textContent = objects.length;
+            document.getElementById('collisions').textContent = collisionCount;
+            
+            if (collisionCount > highScore) {
+                highScore = collisionCount;
+                localStorage.setItem('highscore_重力模拟', highScore);
+            }
+            document.getElementById('highScore').textContent = highScore;
+        }
+        
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制背景网格
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 50) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            
+            // 更新和绘制物体
+            for (let i = 0; i < objects.length; i++) {
+                objects[i].update();
+                
+                // 物体间碰撞
+                for (let j = i + 1; j < objects.length; j++) {
+                    objects[i].collideWith(objects[j]);
+                }
+                
+                objects[i].draw();
+            }
+            
+            updateStats();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // 事件监听
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            addObject(x, y);
+        });
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            addObject(x, y);
+        }, { passive: false });
+        
+        document.getElementById('gravitySlider').addEventListener('input', (e) => {
+            gravity = parseFloat(e.target.value);
+            document.getElementById('gravityValue').textContent = gravity.toFixed(1);
+        });
+        
+        document.getElementById('btnAdd').addEventListener('click', () => {
+            const x = Math.random() * (canvas.width - 100) + 50;
+            const y = 50;
+            addObject(x, y);
+        });
+        
+        document.getElementById('btnClear').addEventListener('click', () => {
+            objects = [];
+            collisionCount = 0;
+            updateStats();
+        });
+        
+        document.getElementById('btnReset').addEventListener('click', () => {
+            gravity = 0.5;
+            document.getElementById('gravitySlider').value = 0.5;
+            document.getElementById('gravityValue').textContent = '0.5';
+        });
+        
+        // 初始化
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        document.getElementById('highScore').textContent = highScore;
+        
+        // 添加初始物体
+        for (let i = 0; i < 5; i++) {
+            setTimeout(() => {
+                addObject(Math.random() * canvas.width, Math.random() * 100);
+            }, i * 200);
+        }
+        
+        gameLoop();
+    </script>
+</body>
+</html>

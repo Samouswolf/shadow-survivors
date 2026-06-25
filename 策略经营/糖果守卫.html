@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>糖果守卫</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.3); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; color: #333; }
+        .stat-label { font-size: 12px; opacity: 0.8; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #e91e63; }
+        
+        .game-area { flex: 1; display: flex; gap: 10px; }
+        
+        .grid-section { flex: 1; background: rgba(255,255,255,0.3); border-radius: 15px; padding: 10px; }
+        .grid-title { text-align: center; color: #333; font-weight: bold; margin-bottom: 10px; }
+        
+        .candy-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+        .candy { aspect-ratio: 1; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 28px; cursor: pointer; transition: all 0.2s; }
+        .candy:hover { transform: scale(1.1); }
+        .candy.selected { box-shadow: 0 0 15px #ffd700; transform: scale(1.1); }
+        
+        .battlefield { flex: 1; background: rgba(0,0,0,0.3); border-radius: 15px; position: relative; overflow: hidden; }
+        #battleCanvas { width: 100%; height: 100%; display: block; }
+        
+        .tower-panel { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+        .tower-btn { width: 50px; height: 50px; border-radius: 10px; background: rgba(255,255,255,0.5); border: 2px solid #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 24px; transition: all 0.2s; }
+        .tower-btn:hover { transform: scale(1.1); }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #e91e63, #9c27b0); color: #fff; }
+        .btn-secondary { background: linear-gradient(135deg, #4facfe, #00f2fe); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+    <script src="game_core.js"></script>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">波次</div>
+                <div class="stat-value" id="wave">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">金币</div>
+                <div class="stat-value" id="gold">100</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">生命</div>
+                <div class="stat-value" id="hp">20</div>
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <div class="grid-section">
+                <div class="grid-title">🍬 糖果制造厂</div>
+                <div class="candy-grid" id="candyGrid"></div>
+            </div>
+            
+            <div class="battlefield">
+                <canvas id="battleCanvas"></canvas>
+            </div>
+        </div>
+        
+        <div class="tower-panel">
+            <div class="tower-btn" title="红色炮塔">🔴</div>
+            <div class="tower-btn" title="蓝色炮塔">🔵</div>
+            <div class="tower-btn" title="绿色炮塔">🟢</div>
+            <div class="tower-btn" title="黄色炮塔">🟡</div>
+            <div class="tower-btn" title="紫色炮塔">🟣</div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="btnMatch">💥 匹配消除</button>
+            <button class="btn btn-secondary" id="btnSpawn">⬇️ 生成糖果</button>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const GRID_SIZE = 6;
+        const CANDY_TYPES = [
+            { emoji: '🍬', color: '#ff6b6b', name: '红' },
+            { emoji: '🍭', color: '#4facfe', name: '蓝' },
+            { emoji: '🍫', color: '#48c78e', name: '绿' },
+            { emoji: '🍩', color: '#ffd700', name: '黄' },
+            { emoji: '🍡', color: '#a855f7', name: '紫' }
+        ];
+        
+        let grid = [];
+        let selectedCandy = null;
+        let gold = 100;
+        let hp = 20;
+        let wave = 1;
+        let gameRunning = false;
+        
+        let towers = [];
+        let enemies = [];
+        let projectiles = [];
+        
+        const GAME_NAME = '糖果守卫';
+        
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const battleCanvas = document.getElementById('battleCanvas');
+        const battleCtx = battleCanvas.getContext('2d');
+        
+        function resizeBattleCanvas() {
+            const container = battleCanvas.parentElement;
+            battleCanvas.width = container.clientWidth;
+            battleCanvas.height = container.clientHeight;
+        }
+        
+        function initGrid() {
+            grid = [];
+            for (let i = 0; i < GRID_SIZE; i++) {
+                grid[i] = [];
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    grid[i][j] = Math.floor(Math.random() * CANDY_TYPES.length);
+                }
+            }
+            renderGrid();
+        }
+        
+        function renderGrid() {
+            const gridEl = document.getElementById('candyGrid');
+            gridEl.innerHTML = '';
+            
+            for (let i = 0; i < GRID_SIZE; i++) {
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    const candy = document.createElement('div');
+                    candy.className = 'candy';
+                    candy.dataset.row = i;
+                    candy.dataset.col = j;
+                    
+                    const typeIndex = grid[i][j];
+                    if (typeIndex >= 0) {
+                        candy.textContent = CANDY_TYPES[typeIndex].emoji;
+                        candy.style.background = CANDY_TYPES[typeIndex].color;
+                    } else {
+                        candy.style.background = 'rgba(255,255,255,0.2)';
+                    }
+                    
+                    if (selectedCandy && selectedCandy.row === i && selectedCandy.col === j) {
+                        candy.classList.add('selected');
+                    }
+                    
+                    candy.onclick = () => selectCandy(i, j);
+                    gridEl.appendChild(candy);
+                }
+            }
+        }
+        
+        function selectCandy(row, col) {
+            if (grid[row][col] < 0) return;
+            
+            if (!selectedCandy) {
+                selectedCandy = { row, col };
+            } else {
+                const dr = Math.abs(selectedCandy.row - row);
+                const dc = Math.abs(selectedCandy.col - col);
+                
+                if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+                    // 交换
+                    const temp = grid[selectedCandy.row][selectedCandy.col];
+                    grid[selectedCandy.row][selectedCandy.col] = grid[row][col];
+                    grid[row][col] = temp;
+                    
+                    selectedCandy = null;
+                    renderGrid();
+                    
+                    // 检查匹配
+                    checkMatches();
+                } else {
+                    selectedCandy = { row, col };
+                }
+            }
+            renderGrid();
+        }
+        
+        function checkMatches() {
+            let matches = [];
+            
+            // 检查行
+            for (let i = 0; i < GRID_SIZE; i++) {
+                for (let j = 0; j < GRID_SIZE - 2; j++) {
+                    if (grid[i][j] >= 0 && 
+                        grid[i][j] === grid[i][j+1] && 
+                        grid[i][j] === grid[i][j+2]) {
+                        matches.push({ row: i, col: j, type: grid[i][j] });
+                        matches.push({ row: i, col: j+1, type: grid[i][j] });
+                        matches.push({ row: i, col: j+2, type: grid[i][j] });
+                    }
+                }
+            }
+            
+            // 检查列
+            for (let j = 0; j < GRID_SIZE; j++) {
+                for (let i = 0; i < GRID_SIZE - 2; i++) {
+                    if (grid[i][j] >= 0 && 
+                        grid[i][j] === grid[i+1][j] && 
+                        grid[i][j] === grid[i+2][j]) {
+                        matches.push({ row: i, col: j, type: grid[i][j] });
+                        matches.push({ row: i+1, col: j, type: grid[i][j] });
+                        matches.push({ row: i+2, col: j, type: grid[i][j] });
+                    }
+                }
+            }
+            
+            if (matches.length > 0) {
+                // 消除
+                const uniqueMatches = [...new Map(matches.map(m => [m.row + ',' + m.col, m])).values()];
+                
+                // 生成炮弹
+                uniqueMatches.forEach(m => {
+                    const type = CANDY_TYPES[m.type];
+                    spawnProjectile(type.color);
+                    gold += 5;
+                });
+                
+                // 清空匹配位置
+                uniqueMatches.forEach(m => {
+                    grid[m.row][m.col] = -1;
+                });
+                
+                renderGrid();
+                updateStats();
+                
+                // 填充
+                setTimeout(() => {
+                    fillGrid();
+                    renderGrid();
+                }, 300);
+            }
+        }
+        
+        function fillGrid() {
+            for (let j = 0; j < GRID_SIZE; j++) {
+                for (let i = GRID_SIZE - 1; i >= 0; i--) {
+                    if (grid[i][j] < 0) {
+                        // 向上查找
+                        for (let k = i - 1; k >= 0; k--) {
+                            if (grid[k][j] >= 0) {
+                                grid[i][j] = grid[k][j];
+                                grid[k][j] = -1;
+                                break;
+                            }
+                        }
+                        
+                        if (grid[i][j] < 0) {
+                            grid[i][j] = Math.floor(Math.random() * CANDY_TYPES.length);
+                        }
+                    }
+                }
+            }
+        }
+        
+        function spawnProjectile(color) {
+            const canvasRect = battleCanvas.getBoundingClientRect();
+            projectiles.push({
+                x: Math.random() * battleCanvas.width,
+                y: 0,
+                targetX: battleCanvas.width / 2 + (Math.random() - 0.5) * 100,
+                targetY: battleCanvas.height - 50,
+                speed: 5,
+                color: color,
+                damage: 10
+            });
+        }
+        
+        class Enemy {
+            constructor() {
+                this.x = Math.random() * (battleCanvas.width - 100) + 50;
+                this.y = -30;
+                this.width = 40;
+                this.height = 40;
+                this.speed = 1 + wave * 0.2;
+                this.hp = 30 + wave * 10;
+                this.maxHp = this.hp;
+            }
+            
+            update() {
+                this.y += this.speed;
+                return this.y < battleCanvas.height - 60;
+            }
+            
+            draw() {
+                battleCtx.fillStyle = '#f5576c';
+                battleCtx.fillRect(this.x - this.width/2, this.y - this.height/2, this.width, this.height);
+                
+                // 眼睛
+                battleCtx.fillStyle = '#fff';
+                battleCtx.beginPath();
+                battleCtx.arc(this.x - 8, this.y - 5, 5, 0, Math.PI * 2);
+                battleCtx.arc(this.x + 8, this.y - 5, 5, 0, Math.PI * 2);
+                battleCtx.fill();
+                
+                // 血条
+                battleCtx.fillStyle = '#333';
+                battleCtx.fillRect(this.x - 20, this.y - 30, 40, 5);
+                battleCtx.fillStyle = '#48c78e';
+                battleCtx.fillRect(this.x - 20, this.y - 30, 40 * (this.hp / this.maxHp), 5);
+            }
+        }
+        
+        function updateProjectiles() {
+            projectiles = projectiles.filter(p => {
+                p.y += p.speed;
+                
+                // 检查命中敌人
+                enemies.forEach(enemy => {
+                    const dist = Math.sqrt((p.x - enemy.x) ** 2 + (p.y - enemy.y) ** 2);
+                    if (dist < 30) {
+                        enemy.hp -= p.damage;
+                        return false;
+                    }
+                });
+                
+                return p.y < battleCanvas.height;
+            });
+            
+            // 移除死亡敌人
+            enemies = enemies.filter(e => {
+                if (e.hp <= 0) {
+                    gold += 20;
+                    return false;
+                }
+                return true;
+            });
+        }
+        
+        function drawBattlefield() {
+            battleCtx.clearRect(0, 0, battleCanvas.width, battleCanvas.height);
+            
+            // 绘制敌人
+            enemies.forEach(e => e.draw());
+            
+            // 绘制炮弹
+            projectiles.forEach(p => {
+                battleCtx.fillStyle = p.color;
+                battleCtx.beginPath();
+                battleCtx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+                battleCtx.fill();
+            });
+        }
+        
+        function spawnWave() {
+            const count = 3 + wave;
+            
+            for (let i = 0; i < count; i++) {
+                setTimeout(() => {
+                    enemies.push(new Enemy());
+                }, i * 2000);
+            }
+        }
+        
+        function updateStats() {
+            document.getElementById('wave').textContent = wave;
+            document.getElementById('gold').textContent = gold;
+            document.getElementById('hp').textContent = hp;
+            
+            if (GameCore.highScore.set(GAME_NAME, gold)) {
+                GameCore.hints.show('新纪录！金币: ' + gold);
+            }
+        }
+        
+        function gameLoop() {
+            drawBattlefield();
+            
+            if (gameRunning) {
+                updateProjectiles();
+                
+                if (enemies.length === 0) {
+                    wave++;
+                    updateStats();
+                    setTimeout(() => {
+                        if (gameRunning) spawnWave();
+                    }, 2000);
+                }
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        document.getElementById('btnMatch').onclick = checkMatches;
+        
+        document.getElementById('btnSpawn').onclick = () => {
+            fillGrid();
+            renderGrid();
+        };
+        
+        // 初始化
+        initGrid();
+        resizeBattleCanvas();
+        window.addEventListener('resize', resizeBattleCanvas);
+        gameLoop();
+        
+        // 快速测试
+        setTimeout(() => {
+            gameRunning = true;
+            spawnWave();
+        }, 1000);
+    </script>
+</body>
+</html>

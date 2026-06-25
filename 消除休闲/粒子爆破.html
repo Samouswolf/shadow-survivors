@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>粒子爆破</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; overflow: hidden; color: #fff; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #ffd700; }
+        
+        .game-area { flex: 1; position: relative; background: rgba(0,0,0,0.3); border-radius: 15px; overflow: hidden; }
+        #gameCanvas { width: 100%; height: 100%; display: block; }
+        
+        .power-bar { position: absolute; bottom: 10px; left: 10px; width: 150px; height: 15px; background: rgba(0,0,0,0.5); border-radius: 10px; overflow: hidden; }
+        .power-fill { height: 100%; background: linear-gradient(90deg, #48c78e, #f5576c); width: 0%; transition: width 0.1s; }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">关卡</div>
+                <div class="stat-value" id="level">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">分数</div>
+                <div class="stat-value" id="score">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">最高</div>
+                <div class="stat-value" id="highScore">0</div>
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <canvas id="gameCanvas"></canvas>
+            <div class="power-bar">
+                <div class="power-fill" id="powerFill"></div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="btnStart">▶️ 开始游戏</button>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const GAME_NAME = '粒子爆破';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        let level = 1;
+        let score = 0;
+        let gameRunning = false;
+        let power = 0;
+        let charging = false;
+        
+        let particles = [];
+        let targets = [];
+        let obstacles = [];
+        let explosions = [];
+        let emitter = { x: 0, y: 0, angle: -Math.PI / 2 };
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            emitter.x = canvas.width / 2;
+            emitter.y = canvas.height - 50;
+            initLevel();
+        }
+        
+        function initLevel() {
+            particles = [];
+            targets = [];
+            obstacles = [];
+            explosions = [];
+            power = 0;
+            
+            const targetCount = 3 + level;
+            for (let i = 0; i < targetCount; i++) {
+                targets.push({
+                    x: 50 + (i % 3) * (canvas.width / 3),
+                    y: 50 + Math.floor(i / 3) * 120,
+                    radius: 20 + Math.random() * 15,
+                    health: 100,
+                    color: `hsl(${Math.random() * 60 + 30}, 80%, 50%)`,
+                    points: (100 - Math.floor(i / 3) * 20)
+                });
+            }
+            
+            const obstacleCount = level;
+            for (let i = 0; i < obstacleCount; i++) {
+                obstacles.push({
+                    x: 100 + Math.random() * (canvas.width - 200),
+                    y: 150 + Math.random() * (canvas.height - 350),
+                    width: 40 + Math.random() * 40,
+                    height: 10 + Math.random() * 20,
+                    angle: Math.random() * Math.PI,
+                    elasticity: 0.6 + Math.random() * 0.3
+                });
+            }
+        }
+        
+        function chargePower() {
+            charging = true;
+            const chargeInterval = setInterval(() => {
+                if (!charging) {
+                    clearInterval(chargeInterval);
+                    return;
+                }
+                power = Math.min(100, power + 2);
+                document.getElementById('powerFill').style.width = power + '%';
+            }, 30);
+        }
+        
+        function releasePower() {
+            charging = false;
+            if (power < 10) return;
+            
+            const velocity = power * 0.3;
+            const particleCount = Math.floor(power / 15) + 1;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const spread = (Math.random() - 0.5) * 0.5;
+                particles.push({
+                    x: emitter.x,
+                    y: emitter.y,
+                    vx: Math.cos(emitter.angle + spread) * velocity,
+                    vy: Math.sin(emitter.angle + spread) * velocity,
+                    radius: 4 + Math.random() * 3,
+                    life: 1,
+                    color: `hsl(${Math.random() * 60 + 180}, 80%, 60%)`
+                });
+            }
+            
+            power = 0;
+            document.getElementById('powerFill').style.width = '0%';
+        }
+        
+        function updateParticles() {
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.3;
+                p.life -= 0.01;
+                
+                if (p.x < 0 || p.x > canvas.width || p.y > canvas.height) {
+                    return false;
+                }
+                
+                obstacles.forEach(obs => {
+                    if (checkRectCollision(p, obs)) {
+                        const normal = getCollisionNormal(p, obs);
+                        const dot = p.vx * normal.x + p.vy * normal.y;
+                        p.vx = (p.vx - 2 * dot * normal.x) * obs.elasticity;
+                        p.vy = (p.vy - 2 * dot * normal.y) * obs.elasticity;
+                        p.x += p.vx;
+                        p.y += p.vy;
+                    }
+                });
+                
+                targets.forEach(t => {
+                    const dx = p.x - t.x;
+                    const dy = p.y - t.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < t.radius + p.radius) {
+                        t.health -= 20;
+                        createExplosion(p.x, p.y, '#ff6b6b');
+                        return false;
+                    }
+                });
+                
+                return p.life > 0;
+            });
+            
+            targets = targets.filter(t => {
+                if (t.health <= 0) {
+                    score += t.points;
+                    createExplosion(t.x, t.y, t.color);
+                    return false;
+                }
+                return true;
+            });
+            
+            if (targets.length === 0 && gameRunning) {
+                level++;
+                score += level * 200;
+                initLevel();
+            }
+        }
+        
+        function checkRectCollision(p, rect) {
+            const cos = Math.cos(rect.angle);
+            const sin = Math.sin(rect.angle);
+            
+            const px = p.x - rect.x;
+            const py = p.y - rect.y;
+            
+            const rx = px * cos + py * sin;
+            const ry = -px * sin + py * cos;
+            
+            return rx >= -rect.width / 2 && rx <= rect.width / 2 &&
+                   ry >= -rect.height / 2 && ry <= rect.height / 2;
+        }
+        
+        function getCollisionNormal(p, rect) {
+            const cos = Math.cos(rect.angle);
+            const sin = Math.sin(rect.angle);
+            
+            const px = p.x - rect.x;
+            const py = p.y - rect.y;
+            
+            const rx = px * cos + py * sin;
+            const ry = -px * sin + py * cos;
+            
+            const hw = rect.width / 2;
+            const hh = rect.height / 2;
+            
+            const dx = rx > 0 ? rx - hw : rx + hw;
+            const dy = ry > 0 ? ry - hh : ry + hh;
+            
+            if (Math.abs(dx) > Math.abs(dy)) {
+                return { x: dx > 0 ? cos : -cos, y: dx > 0 ? sin : -sin };
+            } else {
+                return { x: dy > 0 ? -sin : sin, y: dy > 0 ? cos : -cos };
+            }
+        }
+        
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 15; i++) {
+                explosions.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    radius: 2 + Math.random() * 4,
+                    life: 1,
+                    color: color
+                });
+            }
+        }
+        
+        function updateExplosions() {
+            explosions = explosions.filter(e => {
+                e.x += e.vx;
+                e.y += e.vy;
+                e.life -= 0.03;
+                return e.life > 0;
+            });
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 30) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 30) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            
+            obstacles.forEach(obs => {
+                ctx.save();
+                ctx.translate(obs.x, obs.y);
+                ctx.rotate(obs.angle);
+                ctx.fillStyle = '#666';
+                ctx.fillRect(-obs.width / 2, -obs.height / 2, obs.width, obs.height);
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(-obs.width / 2, -obs.height / 2, obs.width, obs.height);
+                ctx.restore();
+            });
+            
+            targets.forEach(t => {
+                const gradient = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, t.radius);
+                gradient.addColorStop(0, t.color);
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.shadowColor = t.color;
+                ctx.shadowBlur = 15;
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.ceil(t.health) + '%', t.x, t.y + 4);
+            });
+            
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 5;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+            ctx.globalAlpha = 1;
+            
+            explosions.forEach(e => {
+                ctx.fillStyle = e.color;
+                ctx.globalAlpha = e.life;
+                ctx.beginPath();
+                ctx.arc(e.x, e.y, e.radius * (2 - e.life), 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+            
+            ctx.fillStyle = '#4ecdc4';
+            ctx.shadowColor = '#4ecdc4';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(emitter.x, emitter.y, 15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            if (charging) {
+                ctx.strokeStyle = '#f5576c';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(emitter.x, emitter.y);
+                const len = 50 + power;
+                ctx.lineTo(emitter.x + Math.cos(emitter.angle) * len, emitter.y + Math.sin(emitter.angle) * len);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+        
+        function updateStats() {
+            document.getElementById('level').textContent = level;
+            document.getElementById('score').textContent = score;
+            document.getElementById('highScore').textContent = GameCore.highScore.get(GAME_NAME);
+            
+            if (GameCore.highScore.set(GAME_NAME, score)) {
+                GameCore.hints.show('新纪录！分数: ' + score);
+            }
+        }
+        
+        function gameLoop() {
+            draw();
+            
+            if (gameRunning) {
+                updateParticles();
+                updateExplosions();
+            }
+            
+            updateStats();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        canvas.addEventListener('mousedown', chargePower);
+        canvas.addEventListener('mouseup', releasePower);
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            chargePower();
+        }, { passive: false });
+        
+        canvas.addEventListener('touchend', e => {
+            e.preventDefault();
+            releasePower();
+        }, { passive: false });
+        
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            emitter.angle = Math.atan2(y - emitter.y, x - emitter.x);
+        });
+        
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            emitter.angle = Math.atan2(y - emitter.y, x - emitter.x);
+        }, { passive: false });
+        
+        document.getElementById('btnStart').onclick = () => {
+            gameRunning = true;
+            level = 1;
+            score = 0;
+            initLevel();
+        };
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        gameLoop();
+    </script>
+</body>
+</html>

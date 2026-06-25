@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>水墨江湖</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: #f5f5f5; min-height: 100vh; overflow: hidden; color: #333; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #8b0000; }
+        
+        .game-area { flex: 1; position: relative; background: #fff; border-radius: 15px; overflow: hidden; }
+        #gameCanvas { width: 100%; height: 100%; display: block; }
+        
+        .ink-indicator { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.9); padding: 10px 20px; border-radius: 10px; font-size: 16px; }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #8b0000, #5a0000); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">关卡</div>
+                <div class="stat-value" id="level">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">分数</div>
+                <div class="stat-value" id="score">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">最高</div>
+                <div class="stat-value" id="highScore">0</div>
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <canvas id="gameCanvas"></canvas>
+            <div class="ink-indicator" id="inkIndicator">墨汁: 100%</div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="btnStart">▶️ 开始游戏</button>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const GAME_NAME = '水墨江湖';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        let level = 1;
+        let score = 0;
+        let gameRunning = false;
+        let ink = 100;
+        
+        let player = { x: 50, y: 300, width: 30, height: 50, vx: 0, vy: 0 };
+        let enemies = [];
+        let inkTrails = [];
+        let targets = [];
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            initLevel();
+        }
+        
+        function initLevel() {
+            player.x = 50;
+            player.y = canvas.height / 2;
+            player.vx = 0;
+            player.vy = 0;
+            ink = 100;
+            
+            enemies = [];
+            inkTrails = [];
+            targets = [];
+            
+            const enemyCount = 3 + level;
+            for (let i = 0; i < enemyCount; i++) {
+                enemies.push({
+                    x: canvas.width - 100 - i * 100,
+                    y: 50 + Math.random() * (canvas.height - 100),
+                    width: 30,
+                    height: 30,
+                    vx: -1 - Math.random() * level,
+                    inkLevel: 50
+                });
+            }
+            
+            targets.push({
+                x: canvas.width - 80,
+                y: canvas.height / 2,
+                width: 40,
+                height: 40,
+                activated: false
+            });
+        }
+        
+        function drawInkLine(x1, y1, x2, y2) {
+            if (ink <= 0) return;
+            
+            inkTrails.push({
+                x1, y1, x2, y2,
+                opacity: 1,
+                width: 3 + Math.random() * 3
+            });
+            
+            ink -= 0.5;
+        }
+        
+        function updatePlayer() {
+            player.x += player.vx;
+            player.y += player.vy;
+            player.vx *= 0.95;
+            player.vy *= 0.95;
+            
+            if (player.x < 0) player.x = 0;
+            if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+            if (player.y < 0) player.y = 0;
+            if (player.y > canvas.height - player.height) player.y = canvas.height - player.height;
+        }
+        
+        function updateEnemies() {
+            enemies = enemies.filter(enemy => {
+                enemy.x += enemy.vx;
+                
+                // 检查墨汁轨迹碰撞
+                inkTrails.forEach(trail => {
+                    if (enemy.inkLevel > 0) {
+                        const dist = pointToLineDistance(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2,
+                            trail.x1, trail.y1, trail.x2, trail.y2);
+                        
+                        if (dist < 20) {
+                            enemy.inkLevel -= 1;
+                            trail.opacity -= 0.1;
+                        }
+                    }
+                });
+                
+                if (enemy.inkLevel <= 0) {
+                    score += 200;
+                    return false;
+                }
+                
+                return enemy.x > -50;
+            });
+            
+            inkTrails = inkTrails.filter(t => t.opacity > 0);
+            
+            if (enemies.length === 0) {
+                targets[0].activated = true;
+            }
+        }
+        
+        function pointToLineDistance(px, py, x1, y1, x2, y2) {
+            const A = px - x1;
+            const B = py - y1;
+            const C = x2 - x1;
+            const D = y2 - y1;
+            
+            const dot = A * C + B * D;
+            const lenSq = C * C + D * D;
+            let param = -1;
+            
+            if (lenSq !== 0) param = dot / lenSq;
+            
+            let xx, yy;
+            
+            if (param < 0) {
+                xx = x1;
+                yy = y1;
+            } else if (param > 1) {
+                xx = x2;
+                yy = y2;
+            } else {
+                xx = x1 + param * C;
+                yy = y1 + param * D;
+            }
+            
+            const dx = px - xx;
+            const dy = py - yy;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+        
+        function checkCollisions() {
+            targets.forEach(target => {
+                if (target.activated) {
+                    if (player.x < target.x + target.width &&
+                        player.x + player.width > target.x &&
+                        player.y < target.y + target.height &&
+                        player.y + player.height > target.y) {
+                        level++;
+                        score += level * 500;
+                        initLevel();
+                    }
+                }
+            });
+            
+            if (ink <= 0) {
+                gameRunning = false;
+                GameCore.hints.show('墨汁耗尽！游戏结束！\n分数: ' + score, 5000);
+            }
+            
+            updateStats();
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#f5f5f5';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 水墨纹理背景
+            ctx.fillStyle = 'rgba(0,0,0,0.02)';
+            for (let i = 0; i < 50; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, Math.random() * 50, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // 墨汁轨迹
+            inkTrails.forEach(trail => {
+                ctx.strokeStyle = `rgba(0,0,0,${trail.opacity})`;
+                ctx.lineWidth = trail.width;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(trail.x1, trail.y1);
+                ctx.lineTo(trail.x2, trail.y2);
+                ctx.stroke();
+            });
+            
+            // 敌人
+            enemies.forEach(enemy => {
+                ctx.fillStyle = `rgba(0,0,0,${enemy.inkLevel / 50})`;
+                ctx.beginPath();
+                ctx.arc(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, enemy.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 血条
+                ctx.fillStyle = '#333';
+                ctx.fillRect(enemy.x - 10, enemy.y - 20, 50, 5);
+                ctx.fillStyle = '#8b0000';
+                ctx.fillRect(enemy.x - 10, enemy.y - 20, 50 * (enemy.inkLevel / 50), 5);
+            });
+            
+            // 目标
+            targets.forEach(target => {
+                ctx.strokeStyle = target.activated ? '#8b0000' : '#999';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(target.x, target.y);
+                ctx.lineTo(target.x + target.width, target.y + target.height);
+                ctx.moveTo(target.x + target.width, target.y);
+                ctx.lineTo(target.x, target.y + target.height);
+                ctx.stroke();
+                
+                if (target.activated) {
+                    ctx.fillStyle = '#8b0000';
+                    ctx.font = '24px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('🚪', target.x + target.width / 2, target.y + target.height / 2 + 8);
+                }
+            });
+            
+            // 玩家
+            ctx.fillStyle = '#333';
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            
+            // 毛笔效果
+            ctx.fillStyle = '#8b0000';
+            ctx.beginPath();
+            ctx.moveTo(player.x + player.width / 2, player.y);
+            ctx.lineTo(player.x + player.width, player.y + 10);
+            ctx.lineTo(player.x + player.width / 2, player.y + 5);
+            ctx.lineTo(player.x, player.y + 10);
+            ctx.closePath();
+            ctx.fill();
+        }
+        
+        function updateStats() {
+            document.getElementById('level').textContent = level;
+            document.getElementById('score').textContent = score;
+            document.getElementById('highScore').textContent = GameCore.highScore.get(GAME_NAME);
+            document.getElementById('inkIndicator').textContent = '墨汁: ' + Math.round(ink) + '%';
+            
+            if (GameCore.highScore.set(GAME_NAME, score)) {
+                GameCore.hints.show('新纪录！分数: ' + score);
+            }
+        }
+        
+        let lastX, lastY;
+        
+        function gameLoop() {
+            draw();
+            
+            if (gameRunning) {
+                updatePlayer();
+                updateEnemies();
+                checkCollisions();
+                
+                if (ink < 100) ink += 0.1;
+            }
+            
+            updateStats();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        document.addEventListener('keydown', e => {
+            if (!gameRunning) return;
+            
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') player.vx = 5;
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') player.vx = -5;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') player.vy = -5;
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') player.vy = 5;
+        });
+        
+        document.addEventListener('keyup', e => {
+            if (e.code === 'ArrowRight' || e.code === 'KeyD' || e.code === 'ArrowLeft' || e.code === 'KeyA') player.vx = 0;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'ArrowDown' || e.code === 'KeyS') player.vy = 0;
+        });
+        
+        canvas.addEventListener('mousedown', e => {
+            const rect = canvas.getBoundingClientRect();
+            lastX = e.clientX - rect.left;
+            lastY = e.clientY - rect.top;
+        });
+        
+        canvas.addEventListener('mousemove', e => {
+            if (!gameRunning || !lastX) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            drawInkLine(lastX, lastY, x, y);
+            
+            lastX = x;
+            lastY = y;
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            lastX = null;
+            lastY = null;
+        });
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            if (!gameRunning) return;
+            
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            lastX = touch.clientX - rect.left;
+            lastY = touch.clientY - rect.top;
+        }, { passive: false });
+        
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (!gameRunning || !lastX) return;
+            
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            
+            drawInkLine(lastX, lastY, x, y);
+            
+            lastX = x;
+            lastY = y;
+        }, { passive: false });
+        
+        canvas.addEventListener('touchend', () => {
+            lastX = null;
+            lastY = null;
+        });
+        
+        document.getElementById('btnStart').onclick = () => {
+            gameRunning = true;
+            level = 1;
+            score = 0;
+            initLevel();
+        };
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        gameLoop();
+    </script>
+</body>
+</html>

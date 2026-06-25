@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>吉他弹奏</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #2d1f47 0%, #1a1a2e 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .score-display { color: #ffd700; font-size: 24px; font-weight: bold; }
+        .song-display { color: #4ecdc4; font-size: 16px; }
+        
+        .guitar-neck { flex: 1; background: linear-gradient(180deg, #8b4513, #654321); border-radius: 20px; position: relative; overflow: hidden; }
+        .frets { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 20px; padding: 20px; }
+        .fret { height: 60px; display: flex; gap: 10px; }
+        
+        .string { flex: 1; background: rgba(255,255,255,0.3); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 16px; cursor: pointer; transition: background 0.1s; }
+        .string:hover { background: rgba(255,255,255,0.5); }
+        .string.played { background: #4ecdc4; animation: stringVibrate 0.3s ease; }
+        
+        .chord-display { height: 80px; background: rgba(255,255,255,0.1); border-radius: 15px; margin: 10px 0; display: flex; align-items: center; justify-content: center; gap: 20px; }
+        .chord-note { width: 50px; height: 50px; background: rgba(255,255,255,0.3); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .chord-note.active { background: #ffd700; }
+        
+        .stats { display: flex; justify-content: space-around; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .stat-item { text-align: center; color: #fff; }
+        .stat-value { font-size: 20px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+        
+        @keyframes stringVibrate {
+            0% { transform: translateY(0); }
+            25% { transform: translateY(-3px); }
+            50% { transform: translateY(3px); }
+            75% { transform: translateY(-3px); }
+            100% { transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="score-display">🎸 <span id="score">0</span></div>
+            <div class="song-display">和弦: <span id="chord">C</span></div>
+        </div>
+        
+        <div class="chord-display" id="chordDisplay"></div>
+        
+        <div class="guitar-neck" id="guitarNeck">
+            <div class="frets" id="frets"></div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="correct">0</div>
+                <div class="stat-label">正确</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="streak">0</div>
+                <div class="stat-label">连击</div>
+            </div>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const STRINGS = ['E', 'A', 'D', 'G', 'B', 'e'];
+        const FRET_COUNT = 5;
+        
+        const CHORDS = {
+            'C': ['E', 'A', 'D', 'G', 'B'],
+            'G': ['E', 'A', 'D', 'G', 'B', 'e'],
+            'D': ['D', 'G', 'B', 'e'],
+            'Am': ['E', 'A', 'D', 'G', 'B'],
+            'Em': ['E', 'A', 'D', 'G', 'B', 'e']
+        };
+        
+        let score = 0;
+        let correct = 0;
+        let streak = 0;
+        let currentChord = 'C';
+        let playedStrings = [];
+        let chordIndex = 0;
+        
+        function loadData() {
+            const saved = GameCore.storage.get('guitar_play_data', null);
+            if (saved) {
+                score = saved.score;
+            }
+            updateUI();
+            setupGuitar();
+            showChord();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('guitar_play_data', { score });
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('chord').textContent = currentChord;
+            document.getElementById('correct').textContent = correct;
+            document.getElementById('streak').textContent = streak;
+        }
+        
+        function setupGuitar() {
+            const frets = document.getElementById('frets');
+            frets.innerHTML = '';
+            
+            for (let f = 0; f < FRET_COUNT; f++) {
+                const fret = document.createElement('div');
+                fret.className = 'fret';
+                
+                STRINGS.forEach(string => {
+                    const stringEl = document.createElement('div');
+                    stringEl.className = 'string';
+                    stringEl.textContent = string;
+                    stringEl.dataset.string = string;
+                    stringEl.onclick = () => playString(string);
+                    fret.appendChild(stringEl);
+                });
+                
+                frets.appendChild(fret);
+            }
+        }
+        
+        function showChord() {
+            const display = document.getElementById('chordDisplay');
+            display.innerHTML = '';
+            
+            const chordStrings = CHORDS[currentChord];
+            STRINGS.forEach(string => {
+                const note = document.createElement('div');
+                note.className = 'chord-note';
+                note.textContent = string;
+                note.dataset.string = string;
+                if (chordStrings.includes(string)) {
+                    note.classList.add('active');
+                }
+                display.appendChild(note);
+            });
+            
+            playedStrings = [];
+        }
+        
+        function playString(string) {
+            // Find all string elements and animate
+            document.querySelectorAll('.string').forEach(el => {
+                if (el.dataset.string === string) {
+                    el.classList.add('played');
+                    setTimeout(() => el.classList.remove('played'), 300);
+                }
+            });
+            
+            playedStrings.push(string);
+            
+            // Check if chord is complete
+            const chordStrings = CHORDS[currentChord];
+            const requiredStrings = chordStrings.filter(s => !playedStrings.includes(s));
+            
+            if (requiredStrings.length === 0) {
+                correct++;
+                streak++;
+                score += 10 + streak * 2;
+                showMessage('✨ 完美和弦！');
+                
+                // Next chord
+                const chordNames = Object.keys(CHORDS);
+                chordIndex = (chordIndex + 1) % chordNames.length;
+                currentChord = chordNames[chordIndex];
+                
+                setTimeout(() => showChord(), 1000);
+            }
+            
+            updateUI();
+            saveData();
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 1000);
+        }
+        
+        GameCore.init({ highScore: 'guitar_play' });
+        loadData();
+    </script>
+</body>
+</html>

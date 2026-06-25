@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>餐厅经营</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #8B4513 0%, #654321 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .resource { display: flex; align-items: center; gap: 5px; color: #fff; font-size: 14px; }
+        .resource span { font-weight: bold; }
+        
+        .restaurant { flex: 1; background: rgba(255,228,181,0.3); border-radius: 15px; position: relative; overflow: hidden; border: 2px solid rgba(255,255,255,0.2); }
+        .table { position: absolute; width: 80px; height: 80px; background: #DEB887; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border: 2px solid #8B4513; }
+        .table.empty { background: #F5DEB3; }
+        .table.occupied { background: #FA8072; }
+        .table.served { background: #90EE90; }
+        
+        .customer { font-size: 20px; }
+        .table-number { font-size: 10px; color: #8B4513; }
+        
+        .panel { width: 100%; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .menu { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        .menu-item { padding: 10px 15px; background: rgba(255,255,255,0.1); border-radius: 10px; color: #fff; cursor: pointer; transition: all 0.3s; text-align: center; }
+        .menu-item:hover { background: rgba(255,255,255,0.2); }
+        
+        .actions { display: flex; gap: 10px; justify-content: center; margin-top: 15px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 20px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #4ecdc4, #44a08d); color: #fff; }
+        .btn-danger { background: linear-gradient(135deg, #e74c3c, #c0392b); color: #fff; }
+        
+        .stats { display: flex; justify-content: space-around; margin-top: 15px; color: #fff; font-size: 14px; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="resource">💰 <span id="money">2000</span></div>
+            <div class="resource">🍳 <span id="dishes">0</span></div>
+            <div class="resource">😀 <span id="reputation">50</span></div>
+            <div class="resource">👨‍🍳 <span id="chefs">1</span></div>
+        </div>
+        
+        <div class="restaurant" id="restaurant"></div>
+        
+        <div class="panel">
+            <div class="menu">
+                <div class="menu-item" data-dish="noodles">🍜 面条<br><span style="font-size: 12px;">💰 15 | 2秒</span></div>
+                <div class="menu-item" data-dish="rice">🍚 米饭<br><span style="font-size: 12px;">💰 10 | 1秒</span></div>
+                <div class="menu-item" data-dish="soup">🍲 汤品<br><span style="font-size: 12px;">💰 20 | 3秒</span></div>
+                <div class="menu-item" data-dish="steak">🥩 牛排<br><span style="font-size: 12px;">💰 50 | 5秒</span></div>
+                <div class="menu-item" data-dish="sushi">🍣 寿司<br><span style="font-size: 12px;">💰 35 | 4秒</span></div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" id="btnHire">👨‍🍳 雇佣厨师</button>
+                <button class="btn btn-danger" id="btnClean">🧹 清理餐厅</button>
+            </div>
+            <div class="stats">
+                <div>顾客数: <span id="customers">0</span></div>
+                <div>总收入: <span id="totalIncome">0</span></div>
+                <div>满意度: <span id="satisfaction">0</span>%</div>
+            </div>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const DISHES = {
+            noodles: { emoji: '🍜', name: '面条', price: 15, cookTime: 2000, cost: 5 },
+            rice: { emoji: '🍚', name: '米饭', price: 10, cookTime: 1000, cost: 3 },
+            soup: { emoji: '🍲', name: '汤品', price: 20, cookTime: 3000, cost: 8 },
+            steak: { emoji: '🥩', name: '牛排', price: 50, cookTime: 5000, cost: 20 },
+            sushi: { emoji: '🍣', name: '寿司', price: 35, cookTime: 4000, cost: 12 }
+        };
+        
+        const TABLE_COUNT = 6;
+        let tables = Array(TABLE_COUNT).fill(null).map(() => ({ status: 'empty', customer: null, order: null, startTime: 0 }));
+        let money = 2000;
+        let dishes = 0;
+        let reputation = 50;
+        let chefs = 1;
+        let customers = 0;
+        let totalIncome = 0;
+        
+        const restaurant = document.getElementById('restaurant');
+        const messageEl = document.getElementById('message');
+        
+        function renderTables() {
+            restaurant.innerHTML = '';
+            restaurant.appendChild(messageEl);
+            
+            const cols = 3;
+            const rows = 2;
+            
+            tables.forEach((table, index) => {
+                const col = index % cols;
+                const row = Math.floor(index / cols);
+                
+                const el = document.createElement('div');
+                el.className = `table ${table.status}`;
+                el.style.left = (col * 100 + 30) + 'px';
+                el.style.top = (row * 100 + 30) + 'px';
+                
+                if (table.status === 'empty') {
+                    el.innerHTML = `<div class="customer">🪑</div><div class="table-number">桌${index + 1}</div>`;
+                    el.onclick = () => seatCustomer(index);
+                } else if (table.status === 'occupied') {
+                    el.innerHTML = `<div class="customer">${table.customer}</div><div class="table-number">桌${index + 1}</div>`;
+                    el.onclick = () => takeOrder(index);
+                } else {
+                    el.innerHTML = `<div class="customer">${table.customer}😋</div><div class="table-number">桌${index + 1}</div>`;
+                    el.onclick = () => collectPayment(index);
+                }
+                
+                restaurant.appendChild(el);
+            });
+        }
+        
+        function seatCustomer(index) {
+            if (tables[index].status !== 'empty') return;
+            
+            const emojis = ['👨', '👩', '👴', '👵', '👦', '👧', '🧑', '👨‍🦰'];
+            tables[index].customer = emojis[Math.floor(Math.random() * emojis.length)];
+            tables[index].status = 'occupied';
+            customers++;
+            
+            renderTables();
+            showMessage('新顾客入座！');
+        }
+        
+        function takeOrder(index) {
+            if (tables[index].status !== 'occupied') return;
+            
+            const dishTypes = Object.keys(DISHES);
+            const randomDish = dishTypes[Math.floor(Math.random() * dishTypes.length)];
+            tables[index].order = randomDish;
+            tables[index].startTime = Date.now();
+            
+            const dish = DISHES[randomDish];
+            renderTables();
+            showMessage(`顾客点了${dish.emoji}${dish.name}`);
+        }
+        
+        function collectPayment(index) {
+            const table = tables[index];
+            if (table.status !== 'served') return;
+            
+            const dish = DISHES[table.order];
+            money += dish.price;
+            totalIncome += dish.price;
+            reputation = Math.min(100, reputation + 1);
+            
+            tables[index] = { status: 'empty', customer: null, order: null, startTime: 0 };
+            customers--;
+            
+            updateStats();
+            renderTables();
+            showMessage(`收款 ${dish.price} 金币！`);
+        }
+        
+        function hireChef() {
+            const cost = chefs * 500;
+            if (money < cost) {
+                showMessage('资金不足！');
+                return;
+            }
+            
+            money -= cost;
+            chefs++;
+            updateStats();
+            showMessage('雇佣了新厨师！');
+        }
+        
+        function cleanRestaurant() {
+            if (money < 100) {
+                showMessage('资金不足！');
+                return;
+            }
+            
+            money -= 100;
+            reputation = Math.min(100, reputation + 5);
+            updateStats();
+            showMessage('餐厅焕然一新！');
+        }
+        
+        function updateStats() {
+            document.getElementById('money').textContent = money;
+            document.getElementById('dishes').textContent = dishes;
+            document.getElementById('reputation').textContent = reputation;
+            document.getElementById('chefs').textContent = chefs;
+            document.getElementById('customers').textContent = customers;
+            document.getElementById('totalIncome').textContent = totalIncome;
+            document.getElementById('satisfaction').textContent = Math.round(reputation * 0.8 + (TABLE_COUNT - tables.filter(t => t.status === 'empty').length) / TABLE_COUNT * 20);
+        }
+        
+        function showMessage(msg) {
+            messageEl.textContent = msg;
+            messageEl.classList.add('show');
+            setTimeout(() => {
+                messageEl.classList.remove('show');
+            }, 2000);
+        }
+        
+        document.getElementById('btnHire').addEventListener('click', hireChef);
+        document.getElementById('btnClean').addEventListener('click', cleanRestaurant);
+        
+        setInterval(() => {
+            let changed = false;
+            tables.forEach((table, index) => {
+                if (table.status === 'occupied' && table.order) {
+                    const dish = DISHES[table.order];
+                    const elapsed = Date.now() - table.startTime;
+                    if (elapsed >= dish.cookTime / chefs) {
+                        tables[index].status = 'served';
+                        changed = true;
+                    }
+                }
+            });
+            
+            if (changed) {
+                renderTables();
+            }
+            
+            if (Math.random() < 0.1 && tables.filter(t => t.status === 'empty').length > 0) {
+                const emptyTables = tables.map((t, i) => t.status === 'empty' ? i : -1).filter(i => i !== -1);
+                if (emptyTables.length > 0) {
+                    seatCustomer(emptyTables[Math.floor(Math.random() * emptyTables.length)]);
+                }
+            }
+        }, 1000);
+        
+        renderTables();
+        updateStats();
+    </script>
+</body>
+</html>

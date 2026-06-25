@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>方块合成 - 游戏工坊</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%); min-height: 100vh; }
+#game-container { max-width: 600px; margin: 0 auto; padding: 20px; }
+#game-ui { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; color: #fff; }
+#game-ui h1 { font-size: 24px; color: #c4b5fd; }
+#score { font-size: 20px; font-weight: bold; color: #fbbf24; }
+#grid-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+.cell { aspect-ratio: 1; background: rgba(255,255,255,0.05); border-radius: 15px; display: flex; align-items: center; justify-content: center; font-size: 48px; position: relative; transition: all 0.3s ease; border: 2px solid rgba(255,255,255,0.1); }
+.cell.has-block { animation: appear 0.2s ease; }
+@keyframes appear { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.cell.merged { animation: merge 0.3s ease; }
+@keyframes merge { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+#game-over { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 100; flex-direction: column; align-items: center; justify-content: center; }
+#game-over h2 { font-size: 48px; color: #f5576c; margin-bottom: 20px; }
+#game-over p { font-size: 24px; color: #fff; margin-bottom: 30px; }
+#game-over .btn { padding: 15px 40px; font-size: 20px; background: #8b5cf6; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+#start-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 90; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#start-screen h1 { font-size: 48px; color: #c4b5fd; margin-bottom: 20px; text-shadow: 0 0 20px rgba(196,181,253,0.5); }
+#start-screen p { color: #aaa; margin-bottom: 40px; font-size: 16px; text-align: center; max-width: 400px; }
+#start-screen .btn { padding: 18px 50px; font-size: 22px; background: linear-gradient(145deg, #c4b5fd, #8b5cf6); color: #fff; border: none; border-radius: 15px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 20px rgba(196,181,253,0.4); }
+.ad-banner-container { margin-top: 20px; }
+.sponsor-btn { position: fixed; top: 20px; right: 20px; width: 50px; height: 50px; background: rgba(255,165,0,0.9); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; z-index: 100; }
+.sponsor-panel { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; }
+.sponsor-panel.show { display: flex; }
+.sponsor-content { background: #fff; padding: 30px; border-radius: 20px; text-align: center; }
+.sponsor-close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; }
+#loading-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1e1b4b; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#loading-screen .loading-icon { width: 60px; height: 60px; border: 4px solid #c4b5fd; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-screen p { color: #c4b5fd; margin-top: 20px; font-size: 18px; }
+.interstitial-ad { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 9999; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.interstitial-ad .ad-content { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; text-align: center; min-width: 280px; max-width: 400px; }
+.interstitial-ad .skip-btn { padding: 8px 28px; background: rgba(255,215,0,0.15); border: 1px solid rgba(255,215,0,0.3); border-radius: 20px; color: #ffd700; font-weight: bold; font-size: 15px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="loading-screen">
+  <div class="loading-icon"></div>
+  <p>加载中...</p>
+</div>
+
+<div class="sponsor-btn" onclick="showSponsor()">☕</div>
+<div class="sponsor-panel" id="sponsor-panel" onclick="hideSponsor()">
+  <div class="sponsor-content" onclick="event.stopPropagation()">
+    <h3>支持开发者</h3>
+    <p>感谢您的支持！</p>
+  </div>
+  <div class="sponsor-close" onclick="hideSponsor()">×</div>
+</div>
+
+<div class="interstitial-ad" id="interstitialAd">
+  <div class="ad-content">
+    <p>📢 赞助商广告</p>
+    <div style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;">广告加载中...</div>
+  </div>
+  <button class="skip-btn" onclick="closeInterstitial()">跳过广告 ▶</button>
+</div>
+
+<div id="start-screen">
+  <h1>🔷 方块合成</h1>
+  <p>操作说明：使用键盘方向键或滑动屏幕移动方块<br>相同方块碰撞会合成更高级的方块<br>目标：合成出传说中的彩虹方块！</p>
+  <button class="btn" onclick="startGame()">开始游戏</button>
+</div>
+
+<div id="game-container">
+  <div id="game-ui">
+    <h1>🔷 方块合成</h1>
+    <div>分数: <span id="score">0</span></div>
+  </div>
+  <div id="grid-container"></div>
+</div>
+
+<div id="game-over">
+  <h2>游戏结束</h2>
+  <p>最终分数: <span id="final-score">0</span></p>
+  <button class="btn" onclick="restartGame()">重新开始</button>
+</div>
+
+<script>
+// ==================== 游戏说明 ====================
+// 操作说明: 使用键盘方向键或触屏滑动控制方块移动
+// 游戏目标: 合成出最高级的方块获得最高分
+// 存档系统: 自动保存最高分到本地
+// ==================== 模块说明 ====================
+// 1. 游戏初始化模块 - 初始化网格和游戏状态
+// 2. 游戏逻辑模块 - 处理移动、合成、碰撞检测
+// 3. 渲染模块 - 绘制游戏画面和UI
+// 4. 音效模块 - 播放游戏音效
+// 5. 存档模块 - 管理最高分记录
+
+const GAME_NAME = '方块合成';
+
+class GameCore {
+  static init(options) {
+    if (options && options.highScore) {
+      this.highScoreKey = options.highScore;
+    }
+  }
+  
+  static getHighScore() {
+    try {
+      return parseInt(localStorage.getItem(this.highScoreKey)) || 0;
+    } catch (error) {
+      console.warn('读取最高分失败:', error);
+      return 0;
+    }
+  }
+  
+  static setHighScore(value) {
+    try {
+      const current = this.getHighScore();
+      if (value > current) {
+        localStorage.setItem(this.highScoreKey, value.toString());
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn('保存最高分失败:', error);
+      return false;
+    }
+  }
+}
+
+GameCore.init({ highScore: GAME_NAME });
+
+const BLOCKS = [
+  { level: 1, emoji: '🔷', name: '蓝色方块', color: '#3b82f6', score: 2 },
+  { level: 2, emoji: '🔶', name: '橙色方块', color: '#f97316', score: 4 },
+  { level: 3, emoji: '🟢', name: '绿色方块', color: '#22c55e', score: 8 },
+  { level: 4, emoji: '🟣', name: '紫色方块', color: '#a855f7', score: 16 },
+  { level: 5, emoji: '🔴', name: '红色方块', color: '#ef4444', score: 32 },
+  { level: 6, emoji: '🟡', name: '黄色方块', color: '#eab308', score: 64 },
+  { level: 7, emoji: '🔵', name: '深蓝方块', color: '#1d4ed8', score: 128 },
+  { level: 8, emoji: '🟠', name: '橙红方块', color: '#ea580c', score: 256 },
+  { level: 9, emoji: '🟢', name: '翠绿方块', color: '#16a34a', score: 512 },
+  { level: 10, emoji: '🟣', name: '深紫方块', color: '#7c3aed', score: 1024 },
+  { level: 11, emoji: '🔴', name: '深红方块', color: '#dc2626', score: 2048 },
+  { level: 12, emoji: '⚪', name: '白色方块', color: '#e5e7eb', score: 4096 },
+  { level: 13, emoji: '⚫', name: '黑色方块', color: '#374151', score: 8192 },
+  { level: 14, emoji: '🌈', name: '彩色方块', color: '#f472b6', score: 16384 },
+  { level: 15, emoji: '⭐', name: '星星方块', color: '#fbbf24', score: 32768 },
+  { level: 16, emoji: '💎', name: '钻石方块', color: '#60a5fa', score: 65536 },
+];
+
+let grid, score, gameRunning;
+
+function initGrid() {
+  grid = Array(4).fill(null).map(() => Array(4).fill(null));
+  score = 0;
+  updateScore();
+}
+
+function addRandomBlock() {
+  const emptyCells = [];
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      if (!grid[i][j]) {
+        emptyCells.push({ row: i, col: j });
+      }
+    }
+  }
+  if (emptyCells.length > 0) {
+    const { row, col } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+    const block = BLOCKS[0];
+    grid[row][col] = { ...block };
+    renderGrid();
+  }
+}
+
+function move(direction) {
+  if (!gameRunning) return;
+  
+  let moved = false;
+  
+  switch (direction) {
+    case 'up':
+      for (let col = 0; col < 4; col++) {
+        const column = [];
+        for (let row = 0; row < 4; row++) {
+          if (grid[row][col]) column.push(grid[row][col]);
+        }
+        const merged = merge(column);
+        for (let row = 0; row < 4; row++) {
+          if (merged[row] && grid[row][col]?.level !== merged[row].level) {
+            moved = true;
+          }
+          grid[row][col] = merged[row] || null;
+        }
+      }
+      break;
+    case 'down':
+      for (let col = 0; col < 4; col++) {
+        const column = [];
+        for (let row = 3; row >= 0; row--) {
+          if (grid[row][col]) column.push(grid[row][col]);
+        }
+        const merged = merge(column);
+        for (let row = 3; row >= 0; row--) {
+          const idx = 3 - row;
+          if (merged[idx] && grid[row][col]?.level !== merged[idx].level) {
+            moved = true;
+          }
+          grid[row][col] = merged[idx] || null;
+        }
+      }
+      break;
+    case 'left':
+      for (let row = 0; row < 4; row++) {
+        const rowArr = [];
+        for (let col = 0; col < 4; col++) {
+          if (grid[row][col]) rowArr.push(grid[row][col]);
+        }
+        const merged = merge(rowArr);
+        for (let col = 0; col < 4; col++) {
+          if (merged[col] && grid[row][col]?.level !== merged[col].level) {
+            moved = true;
+          }
+          grid[row][col] = merged[col] || null;
+        }
+      }
+      break;
+    case 'right':
+      for (let row = 0; row < 4; row++) {
+        const rowArr = [];
+        for (let col = 3; col >= 0; col--) {
+          if (grid[row][col]) rowArr.push(grid[row][col]);
+        }
+        const merged = merge(rowArr);
+        for (let col = 3; col >= 0; col--) {
+          const idx = 3 - col;
+          if (merged[idx] && grid[row][col]?.level !== merged[idx].level) {
+            moved = true;
+          }
+          grid[row][col] = merged[idx] || null;
+        }
+      }
+      break;
+  }
+  
+  if (moved) {
+    addRandomBlock();
+    renderGrid();
+    checkGameOver();
+  }
+}
+
+function merge(arr) {
+  const result = [];
+  let i = 0;
+  
+  while (i < arr.length) {
+    if (i + 1 < arr.length && arr[i].level === arr[i + 1].level) {
+      const newLevel = Math.min(arr[i].level + 1, BLOCKS.length);
+      const newBlock = BLOCKS[newLevel - 1];
+      result.push({ ...newBlock });
+      score += newBlock.score;
+      updateScore();
+      playSound(440, 0.1, 'sine');
+      i += 2;
+    } else {
+      result.push(arr[i]);
+      i++;
+    }
+  }
+  
+  while (result.length < 4) {
+    result.push(null);
+  }
+  
+  return result;
+}
+
+function renderGrid() {
+  const container = document.getElementById('grid-container');
+  container.innerHTML = '';
+  
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      
+      if (grid[i][j]) {
+        cell.classList.add('has-block');
+        cell.innerHTML = `<div style="font-size: 48px;">${grid[i][j].emoji}</div>`;
+        cell.style.background = `linear-gradient(145deg, ${grid[i][j].color}20, ${grid[i][j].color}10)`;
+        cell.style.borderColor = grid[i][j].color;
+      }
+      
+      container.appendChild(cell);
+    }
+  }
+}
+
+function updateScore() {
+  document.getElementById('score').textContent = score;
+}
+
+function checkGameOver() {
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      if (!grid[i][j]) return;
+      if (j < 3 && grid[i][j].level === grid[i][j + 1].level) return;
+      if (i < 3 && grid[i][j].level === grid[i + 1][j].level) return;
+    }
+  }
+  
+  gameRunning = false;
+  const finalScore = score;
+  document.getElementById('final-score').textContent = finalScore;
+  
+  if (GameCore.setHighScore(finalScore)) {
+    alert(`新纪录！分数: ${finalScore}`);
+  }
+  
+  document.getElementById('game-over').style.display = 'flex';
+}
+
+function startGame() {
+  try {
+    document.getElementById('start-screen').style.display = 'none';
+    document.getElementById('game-over').style.display = 'none';
+    gameRunning = true;
+    initGrid();
+    addRandomBlock();
+    addRandomBlock();
+    renderGrid();
+  } catch (error) {
+    console.error('开始游戏失败:', error);
+    alert('游戏启动失败，请重试');
+  }
+}
+
+function restartGame() {
+  startGame();
+}
+
+function showSponsor() {
+  try {
+    document.getElementById('sponsor-panel').classList.add('show');
+  } catch (error) {
+    console.error('显示赞助面板失败:', error);
+  }
+}
+
+function hideSponsor() {
+  try {
+    document.getElementById('sponsor-panel').classList.remove('show');
+  } catch (error) {
+    console.error('隐藏赞助面板失败:', error);
+  }
+}
+
+function closeInterstitial() {
+  try {
+    document.getElementById('interstitialAd').style.display = 'none';
+  } catch (error) {
+    console.error('关闭广告失败:', error);
+  }
+}
+
+let audioCtx = null;
+function initAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch (error) {
+    console.warn('音频初始化失败:', error);
+  }
+}
+function playSound(freq, dur, type, vol) {
+  try {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.value = vol || 0.15;
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  } catch (error) {
+    console.warn('音效播放失败:', error);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!gameRunning) return;
+  
+  switch (e.code) {
+    case 'ArrowUp':
+    case 'KeyW':
+      e.preventDefault();
+      move('up');
+      break;
+    case 'ArrowDown':
+    case 'KeyS':
+      e.preventDefault();
+      move('down');
+      break;
+    case 'ArrowLeft':
+    case 'KeyA':
+      e.preventDefault();
+      move('left');
+      break;
+    case 'ArrowRight':
+    case 'KeyD':
+      e.preventDefault();
+      move('right');
+      break;
+  }
+});
+
+let touchStartX = 0;
+let touchStartY = 0;
+
+document.addEventListener('touchstart', (e) => {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+});
+
+document.addEventListener('touchend', (e) => {
+  if (!gameRunning) return;
+  
+  const touchEndX = e.changedTouches[0].clientX;
+  const touchEndY = e.changedTouches[0].clientY;
+  
+  const dx = touchEndX - touchStartX;
+  const dy = touchEndY - touchStartY;
+  
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (Math.abs(dx) > 30) {
+      move(dx > 0 ? 'right' : 'left');
+    }
+  } else {
+    if (Math.abs(dy) > 30) {
+      move(dy > 0 ? 'down' : 'up');
+    }
+  }
+});
+
+window.addEventListener('load', () => {
+  try {
+    setTimeout(() => {
+      document.getElementById('loading-screen').style.display = 'none';
+    }, 1500);
+  } catch (error) {
+    console.error('初始化失败:', error);
+  }
+});
+</script>
+</body>
+</html>

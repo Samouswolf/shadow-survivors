@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>碰撞弹球</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; overflow: hidden; color: #fff; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #ffd700; }
+        
+        .game-area { flex: 1; position: relative; background: rgba(0,0,0,0.3); border-radius: 15px; overflow: hidden; }
+        #gameCanvas { width: 100%; height: 100%; display: block; }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">关卡</div>
+                <div class="stat-value" id="level">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">分数</div>
+                <div class="stat-value" id="score">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">最高</div>
+                <div class="stat-value" id="highScore">0</div>
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="btnStart">▶️ 开始游戏</button>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const GAME_NAME = '碰撞弹球';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        let level = 1;
+        let score = 0;
+        let gameRunning = false;
+        
+        let balls = [];
+        let targets = [];
+        let obstacles = [];
+        let launcher = { x: 0, y: 0, angle: -Math.PI / 2, power: 0 };
+        let charging = false;
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            launcher.x = canvas.width / 2;
+            launcher.y = canvas.height - 50;
+            initLevel();
+        }
+        
+        function initLevel() {
+            balls = [];
+            targets = [];
+            obstacles = [];
+            launcher.power = 0;
+            charging = false;
+            
+            balls.push({
+                x: launcher.x,
+                y: launcher.y - 20,
+                vx: 0,
+                vy: 0,
+                radius: 10,
+                color: '#4ecdc4',
+                active: false
+            });
+            
+            const targetCount = 5 + level;
+            for (let i = 0; i < targetCount; i++) {
+                const row = Math.floor(i / 3);
+                const col = i % 3;
+                
+                targets.push({
+                    x: 50 + col * (canvas.width - 100) / 2,
+                    y: 50 + row * 80,
+                    radius: 15 + Math.random() * 10,
+                    health: 100,
+                    color: `hsl(${Math.random() * 60 + 30}, 80%, 50%)`,
+                    points: 100 - row * 20,
+                    bouncy: row % 2 === 0
+                });
+            }
+            
+            const obstacleCount = level;
+            for (let i = 0; i < obstacleCount; i++) {
+                obstacles.push({
+                    x: 100 + Math.random() * (canvas.width - 200),
+                    y: 150 + Math.random() * (canvas.height - 300),
+                    radius: 20 + Math.random() * 15,
+                    mass: 10 + Math.random() * 20,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    color: '#666'
+                });
+            }
+        }
+        
+        function chargeLaunch() {
+            charging = true;
+            const chargeInterval = setInterval(() => {
+                if (!charging) {
+                    clearInterval(chargeInterval);
+                    return;
+                }
+                launcher.power = Math.min(100, launcher.power + 2);
+            }, 30);
+        }
+        
+        function releaseLaunch() {
+            charging = false;
+            
+            balls.forEach(ball => {
+                if (!ball.active) {
+                    ball.active = true;
+                    const velocity = launcher.power * 0.25;
+                    ball.vx = Math.cos(launcher.angle) * velocity;
+                    ball.vy = Math.sin(launcher.angle) * velocity;
+                    
+                    for (let i = 0; i < 10; i++) {
+                        balls.push({
+                            x: ball.x,
+                            y: ball.y,
+                            vx: ball.vx + (Math.random() - 0.5) * 3,
+                            vy: ball.vy + (Math.random() - 0.5) * 3,
+                            radius: 3 + Math.random() * 2,
+                            color: '#ffd700',
+                            active: true,
+                            life: 1
+                        });
+                    }
+                }
+            });
+            
+            launcher.power = 0;
+        }
+        
+        function updateBalls() {
+            balls = balls.filter(ball => {
+                if (ball.life !== undefined) {
+                    ball.life -= 0.02;
+                    if (ball.life <= 0) return false;
+                }
+                
+                if (!ball.active) return true;
+                
+                ball.vy += 0.2;
+                ball.x += ball.vx;
+                ball.y += ball.vy;
+                ball.vx *= 0.99;
+                ball.vy *= 0.99;
+                
+                if (ball.x - ball.radius < 0) {
+                    ball.x = ball.radius;
+                    ball.vx *= -0.8;
+                }
+                if (ball.x + ball.radius > canvas.width) {
+                    ball.x = canvas.width - ball.radius;
+                    ball.vx *= -0.8;
+                }
+                if (ball.y - ball.radius < 0) {
+                    ball.y = ball.radius;
+                    ball.vy *= -0.8;
+                }
+                if (ball.y + ball.radius > canvas.height) {
+                    ball.y = canvas.height - ball.radius;
+                    ball.vy *= -0.3;
+                    ball.vx *= 0.8;
+                    
+                    if (ball.color === '#4ecdc4') {
+                        ball.active = false;
+                        ball.x = launcher.x;
+                        ball.y = launcher.y - 20;
+                        ball.vx = 0;
+                        ball.vy = 0;
+                    }
+                }
+                
+                obstacles.forEach(obs => {
+                    const dx = ball.x - obs.x;
+                    const dy = ball.y - obs.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < ball.radius + obs.radius) {
+                        const nx = dx / dist;
+                        const ny = dy / dist;
+                        
+                        const relativeVx = ball.vx - obs.vx;
+                        const relativeVy = ball.vy - obs.vy;
+                        const dot = relativeVx * nx + relativeVy * ny;
+                        
+                        if (dot < 0) {
+                            const restitution = 0.8;
+                            
+                            if (ball.color === '#4ecdc4') {
+                                ball.vx -= (1 + restitution) * dot * nx;
+                                ball.vy -= (1 + restitution) * dot * ny;
+                                
+                                obs.vx += (1 + restitution) * dot * nx * (ball.radius / obs.mass);
+                                obs.vy += (1 + restitution) * dot * ny * (ball.radius / obs.mass);
+                            }
+                            
+                            const overlap = ball.radius + obs.radius - dist;
+                            ball.x += nx * overlap * 0.5;
+                            ball.y += ny * overlap * 0.5;
+                            obs.x -= nx * overlap * 0.5;
+                            obs.y -= ny * overlap * 0.5;
+                        }
+                    }
+                });
+                
+                targets.forEach(target => {
+                    const dx = ball.x - target.x;
+                    const dy = ball.y - target.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < target.radius + ball.radius) {
+                        const impact = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                        target.health -= impact * 2;
+                        
+                        if (ball.color === '#4ecdc4') {
+                            const nx = dx / dist;
+                            const ny = dy / dist;
+                            
+                            if (target.bouncy) {
+                                ball.vx = -ball.vx * 1.2;
+                                ball.vy = -ball.vy * 1.2;
+                            } else {
+                                ball.vx = ball.vx * 0.5 - nx * 5;
+                                ball.vy = ball.vy * 0.5 - ny * 5;
+                            }
+                            
+                            const overlap = target.radius + ball.radius - dist;
+                            ball.x += nx * overlap;
+                            ball.y += ny * overlap;
+                        }
+                        
+                        for (let i = 0; i < 8; i++) {
+                            balls.push({
+                                x: ball.x,
+                                y: ball.y,
+                                vx: (Math.random() - 0.5) * 5,
+                                vy: (Math.random() - 0.5) * 5,
+                                radius: 3,
+                                color: target.color,
+                                active: true,
+                                life: 1
+                            });
+                        }
+                    }
+                });
+                
+                return true;
+            });
+            
+            obstacles.forEach(obs => {
+                obs.x += obs.vx;
+                obs.y += obs.vy;
+                
+                if (obs.x - obs.radius < 0 || obs.x + obs.radius > canvas.width) obs.vx *= -1;
+                if (obs.y - obs.radius < 0 || obs.y + obs.radius > canvas.height) obs.vy *= -1;
+                
+                obs.vx *= 0.99;
+                obs.vy *= 0.99;
+            });
+            
+            targets = targets.filter(target => {
+                if (target.health <= 0) {
+                    score += target.points;
+                    
+                    for (let i = 0; i < 20; i++) {
+                        balls.push({
+                            x: target.x,
+                            y: target.y,
+                            vx: (Math.random() - 0.5) * 10,
+                            vy: (Math.random() - 0.5) * 10,
+                            radius: 4 + Math.random() * 3,
+                            color: target.color,
+                            active: true,
+                            life: 1
+                        });
+                    }
+                    
+                    return false;
+                }
+                return true;
+            });
+            
+            if (targets.length === 0 && gameRunning) {
+                level++;
+                score += level * 500;
+                GameCore.hints.show('关卡完成！');
+                initLevel();
+            }
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 30) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 30) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            
+            obstacles.forEach(obs => {
+                const gradient = ctx.createRadialGradient(obs.x, obs.y, 0, obs.x, obs.y, obs.radius);
+                gradient.addColorStop(0, '#888');
+                gradient.addColorStop(1, '#444');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(obs.x, obs.y, obs.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#666';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(obs.x, obs.y, obs.radius, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            targets.forEach(target => {
+                const gradient = ctx.createRadialGradient(target.x, target.y, 0, target.x, target.y, target.radius);
+                gradient.addColorStop(0, target.color);
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.shadowColor = target.color;
+                ctx.shadowBlur = target.bouncy ? 20 : 10;
+                ctx.beginPath();
+                ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.ceil(target.health) + '%', target.x, target.y + 4);
+                
+                if (target.bouncy) {
+                    ctx.strokeStyle = '#ffd700';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(target.x, target.y, target.radius + 5, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            });
+            
+            balls.forEach(ball => {
+                ctx.fillStyle = ball.color;
+                ctx.globalAlpha = ball.life !== undefined ? ball.life : 1;
+                ctx.shadowColor = ball.color;
+                ctx.shadowBlur = ball.color === '#4ecdc4' ? 10 : 0;
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+            ctx.globalAlpha = 1;
+            
+            ctx.fillStyle = '#4ecdc4';
+            ctx.shadowColor = '#4ecdc4';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(launcher.x, launcher.y, 15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            if (charging) {
+                ctx.strokeStyle = '#f5576c';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(launcher.x, launcher.y);
+                const len = 30 + launcher.power;
+                ctx.lineTo(launcher.x + Math.cos(launcher.angle) * len, launcher.y + Math.sin(launcher.angle) * len);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                ctx.fillStyle = '#f5576c';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.floor(launcher.power), launcher.x, launcher.y + 30);
+            }
+        }
+        
+        function updateStats() {
+            document.getElementById('level').textContent = level;
+            document.getElementById('score').textContent = score;
+            document.getElementById('highScore').textContent = GameCore.highScore.get(GAME_NAME);
+            
+            if (GameCore.highScore.set(GAME_NAME, score)) {
+                GameCore.hints.show('新纪录！分数: ' + score);
+            }
+        }
+        
+        function gameLoop() {
+            draw();
+            
+            if (gameRunning) {
+                updateBalls();
+            }
+            
+            updateStats();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        canvas.addEventListener('mousedown', chargeLaunch);
+        canvas.addEventListener('mouseup', releaseLaunch);
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            chargeLaunch();
+        }, { passive: false });
+        
+        canvas.addEventListener('touchend', e => {
+            e.preventDefault();
+            releaseLaunch();
+        }, { passive: false });
+        
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            launcher.angle = Math.atan2(y - launcher.y, x - launcher.x);
+        });
+        
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            launcher.angle = Math.atan2(y - launcher.y, x - launcher.x);
+        }, { passive: false });
+        
+        document.getElementById('btnStart').onclick = () => {
+            gameRunning = true;
+            level = 1;
+            score = 0;
+            initLevel();
+        };
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        gameLoop();
+    </script>
+</body>
+</html>

@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>迷宫生成器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #164e63 0%, #0e7490 100%); min-height: 100vh; display: flex; flex-direction: column; align-items: center; overflow: hidden; }
+#game-container { position: relative; width: 100%; max-width: 500px; padding: 20px; }
+#game-header { text-align: center; color: #fff; margin-bottom: 20px; }
+#game-header h1 { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+#game-header .stats { display: flex; justify-content: center; gap: 30px; font-size: 16px; }
+#game-header .stats span { color: #4ade80; font-weight: bold; }
+#maze-board { display: grid; gap: 1px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 20px; }
+.cell { aspect-ratio: 1; border-radius: 2px; }
+.cell.wall { background: #334155; }
+.cell.path { background: rgba(99,102,241,0.4); }
+.cell.start { background: #22c55e; }
+.cell.end { background: #ef4444; }
+.cell.player { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
+.cell.solution { background: rgba(34,197,94,0.5); }
+#direction-pad { display: grid; grid-template-columns: repeat(3, 60px); gap: 10px; justify-content: center; margin-bottom: 20px; }
+.dir-btn { width: 60px; height: 60px; font-size: 24px; background: rgba(255,255,255,0.2); color: #fff; border: none; border-radius: 10px; cursor: pointer; }
+.dir-btn:hover { background: rgba(255,255,255,0.3); }
+#controls { display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; }
+.btn { padding: 12px 25px; font-size: 16px; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+.btn-primary { background: linear-gradient(145deg, #6366f1, #4f46e5); color: #fff; }
+.btn-primary:hover { transform: translateY(-2px); }
+#message { text-align: center; font-size: 18px; font-weight: bold; color: #4ade80; min-height: 30px; }
+#loading-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #164e63; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; }
+#loading-screen .spinner { width: 50px; height: 50px; border: 4px solid rgba(99,102,241,0.3); border-top-color: #6366f1; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ad-banner-container { width: 100%; max-width: 728px; margin-top: auto; padding: 10px; }
+.sponsor-btn { position: fixed; top: 20px; right: 20px; width: 50px; height: 50px; background: rgba(255,165,0,0.9); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; z-index: 100; }
+.sponsor-panel { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; }
+.sponsor-panel.show { display: flex; }
+.sponsor-content { background: #fff; padding: 30px; border-radius: 20px; text-align: center; }
+.sponsor-close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; }
+.interstitial-ad { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 300; align-items: center; justify-content: center; flex-direction: column; }
+.interstitial-ad.show { display: flex; }
+</style>
+</head>
+<body>
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <p style="color:#fff;margin-top:20px;">游戏加载中...</p>
+</div>
+
+<div class="sponsor-btn" onclick="showSponsor()">☕</div>
+<div class="sponsor-panel" id="sponsor-panel" onclick="hideSponsor()">
+  <div class="sponsor-content" onclick="event.stopPropagation()">
+    <h3>支持开发者</h3>
+    <p>感谢您的支持！</p>
+  </div>
+  <div class="sponsor-close" onclick="hideSponsor()">×</div>
+</div>
+
+<div class="interstitial-ad" id="interstitial-ad">
+  <h2 style="color:#fff;margin-bottom:30px;">🎉 恭喜通关！</h2>
+  <button class="btn btn-primary" onclick="hideInterstitial()">继续游戏</button>
+</div>
+
+<div id="game-container">
+  <div id="game-header">
+    <h1>迷宫生成器</h1>
+    <div class="stats">
+      <span>尺寸: <span id="size">15×15</span></span>
+      <span>步数: <span id="moves">0</span></span>
+      <span>最佳: <span id="best">--</span></span>
+    </div>
+  </div>
+  
+  <div id="message"></div>
+  
+  <div id="maze-board"></div>
+  
+  <div id="direction-pad">
+    <div></div>
+    <button class="dir-btn" onclick="move(0, -1)">↑</button>
+    <div></div>
+    <button class="dir-btn" onclick="move(-1, 0)">←</button>
+    <button class="dir-btn" onclick="move(0, 1)">↓</button>
+    <button class="dir-btn" onclick="move(1, 0)">→</button>
+  </div>
+  
+  <div id="controls">
+    <button class="btn btn-primary" onclick="generateMaze()">生成新迷宫</button>
+    <button class="btn btn-primary" onclick="showSolution()">显示答案</button>
+  </div>
+</div>
+
+<div class="ad-banner-container">
+  <div style="background:#f0f0f0;height:90px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#666;">广告位</div>
+</div>
+
+<script>
+class GameCore {
+  static init(options) {
+    if (options.loading) {
+      setTimeout(() => {
+        document.getElementById('loading-screen').style.display = 'none';
+      }, 800);
+    }
+    if (options.highScore) {
+      this.highScoreKey = options.highScore;
+    }
+  }
+  
+  static getHighScore() {
+    return localStorage.getItem(this.highScoreKey) || '--';
+  }
+  
+  static setHighScore(value) {
+    const current = localStorage.getItem(this.highScoreKey);
+    if (!current || value < parseInt(current)) {
+      localStorage.setItem(this.highScoreKey, value);
+      return true;
+    }
+    return false;
+  }
+}
+
+GameCore.init({ loading: true, highScore: '迷宫生成器' });
+
+class MazeGenerator {
+  constructor() {
+    this.size = 15;
+    this.maze = [];
+    this.playerPos = { x: 1, y: 1 };
+    this.endPos = { x: 0, y: 0 };
+    this.moves = 0;
+    this.solution = [];
+    
+    this.board = document.getElementById('maze-board');
+    this.sizeDisplay = document.getElementById('size');
+    this.movesDisplay = document.getElementById('moves');
+    this.bestDisplay = document.getElementById('best');
+    this.message = document.getElementById('message');
+    
+    this.init();
+  }
+  
+  init() {
+    this.bestDisplay.textContent = GameCore.getHighScore();
+    this.generateMaze();
+    this.setupControls();
+  }
+  
+  generateMaze() {
+    this.maze = Array(this.size).fill(null).map(() => Array(this.size).fill(1));
+    
+    const stack = [];
+    const startX = 1;
+    const startY = 1;
+    
+    this.maze[startY][startX] = 0;
+    stack.push({ x: startX, y: startY });
+    
+    while (stack.length > 0) {
+      const current = stack[stack.length - 1];
+      const neighbors = this.getUnvisitedNeighbors(current.x, current.y);
+      
+      if (neighbors.length > 0) {
+        const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+        
+        const wallX = Math.floor((current.x + next.x) / 2);
+        const wallY = Math.floor((current.y + next.y) / 2);
+        this.maze[wallY][wallX] = 0;
+        this.maze[next.y][next.x] = 0;
+        
+        stack.push(next);
+      } else {
+        stack.pop();
+      }
+    }
+    
+    this.maze[1][0] = 0;
+    this.maze[this.size - 2][this.size - 1] = 0;
+    
+    this.playerPos = { x: 1, y: 1 };
+    this.endPos = { x: this.size - 2, y: this.size - 1 };
+    this.moves = 0;
+    this.movesDisplay.textContent = '0';
+    this.solution = [];
+    
+    this.render();
+  }
+  
+  getUnvisitedNeighbors(x, y) {
+    const neighbors = [];
+    const directions = [
+      { dx: 0, dy: -2 },
+      { dx: 0, dy: 2 },
+      { dx: -2, dy: 0 },
+      { dx: 2, dy: 0 }
+    ];
+    
+    for (const dir of directions) {
+      const nx = x + dir.dx;
+      const ny = y + dir.dy;
+      
+      if (nx >= 1 && nx < this.size - 1 && ny >= 1 && ny < this.size - 1 && this.maze[ny][nx] === 1) {
+        neighbors.push({ x: nx, y: ny });
+      }
+    }
+    
+    return neighbors;
+  }
+  
+  render() {
+    this.board.innerHTML = '';
+    this.board.style.gridTemplateColumns = `repeat(${this.size}, 1fr)`;
+    
+    for (let y = 0; y < this.size; y++) {
+      for (let x = 0; x < this.size; x++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        
+        if (this.maze[y][x] === 1) {
+          cell.classList.add('wall');
+        } else {
+          cell.classList.add('path');
+        }
+        
+        if (x === 1 && y === 1) {
+          cell.classList.add('start');
+        }
+        
+        if (x === this.endPos.x && y === this.endPos.y) {
+          cell.classList.add('end');
+        }
+        
+        if (x === this.playerPos.x && y === this.playerPos.y) {
+          cell.classList.add('player');
+        }
+        
+        if (this.solution.some(s => s.x === x && s.y === y)) {
+          cell.classList.add('solution');
+        }
+        
+        this.board.appendChild(cell);
+      }
+    }
+  }
+  
+  move(dx, dy) {
+    const newX = this.playerPos.x + dx;
+    const newY = this.playerPos.y + dy;
+    
+    if (newX >= 0 && newX < this.size && newY >= 0 && newY < this.size && this.maze[newY][newX] === 0) {
+      this.playerPos = { x: newX, y: newY };
+      this.moves++;
+      this.movesDisplay.textContent = this.moves;
+      this.render();
+      
+      if (newX === this.endPos.x && newY === this.endPos.y) {
+        this.win();
+      }
+    }
+  }
+  
+  showSolution() {
+    this.solution = this.findSolution();
+    this.render();
+  }
+  
+  findSolution() {
+    const visited = Array(this.size).fill(null).map(() => Array(this.size).fill(false));
+    const path = [];
+    
+    const dfs = (x, y) => {
+      if (x === this.endPos.x && y === this.endPos.y) {
+        return true;
+      }
+      
+      visited[y][x] = true;
+      
+      const directions = [
+        { dx: 0, dy: -1 },
+        { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 },
+        { dx: 1, dy: 0 }
+      ];
+      
+      for (const dir of directions) {
+        const nx = x + dir.dx;
+        const ny = y + dir.dy;
+        
+        if (nx >= 0 && nx < this.size && ny >= 0 && ny < this.size && 
+            !visited[ny][nx] && this.maze[ny][nx] === 0) {
+          path.push({ x: nx, y: ny });
+          
+          if (dfs(nx, ny)) {
+            return true;
+          }
+          
+          path.pop();
+        }
+      }
+      
+      return false;
+    };
+    
+    dfs(1, 1);
+    return path;
+  }
+  
+  win() {
+    this.message.textContent = '🎉 恭喜通关！';
+    this.message.style.color = '#4ade80';
+    
+    if (GameCore.setHighScore(this.moves)) {
+      this.bestDisplay.textContent = this.moves;
+      this.message.textContent += ' 新纪录！';
+    }
+    
+    setTimeout(() => {
+      document.getElementById('interstitial-ad').classList.add('show');
+    }, 500);
+  }
+  
+  setupControls() {
+    document.addEventListener('keydown', (e) => {
+      switch(e.key) {
+        case 'ArrowUp': e.preventDefault(); this.move(0, -1); break;
+        case 'ArrowDown': e.preventDefault(); this.move(0, 1); break;
+        case 'ArrowLeft': e.preventDefault(); this.move(-1, 0); break;
+        case 'ArrowRight': e.preventDefault(); this.move(1, 0); break;
+      }
+    });
+  }
+}
+
+function showSponsor() {
+  document.getElementById('sponsor-panel').classList.add('show');
+}
+
+function hideSponsor() {
+  document.getElementById('sponsor-panel').classList.remove('show');
+}
+
+function hideInterstitial() {
+  document.getElementById('interstitial-ad').classList.remove('show');
+}
+
+const mazeGenerator = new MazeGenerator();
+</script>
+</body>
+</html>

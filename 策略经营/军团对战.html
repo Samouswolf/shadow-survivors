@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>军团对战</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 10px; }
+        
+        .header { width: 100%; max-width: 600px; display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .score-box { text-align: center; color: #fff; }
+        .score-label { font-size: 12px; opacity: 0.8; }
+        .score-value { font-size: 24px; font-weight: bold; }
+        
+        .battlefield { width: 100%; max-width: 600px; height: 400px; background: rgba(255,255,255,0.05); border-radius: 20px; position: relative; overflow: hidden; border: 2px solid rgba(255,255,255,0.2); }
+        .unit { position: absolute; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; transition: all 0.3s; }
+        .unit.player { background: linear-gradient(135deg, #4ecdc4, #44a08d); box-shadow: 0 0 15px rgba(78, 205, 196, 0.5); }
+        .unit.enemy { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); box-shadow: 0 0 15px rgba(255, 107, 107, 0.5); }
+        .unit.selected { transform: scale(1.2); box-shadow: 0 0 20px rgba(255, 215, 0, 0.8); border: 2px solid gold; }
+        
+        .action-panel { width: 100%; max-width: 600px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .actions { display: flex; gap: 10px; justify-content: center; }
+        .btn { padding: 12px 24px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.3s; }
+        .btn-primary { background: linear-gradient(135deg, #4ecdc4, #44a08d); color: #fff; }
+        .btn-secondary { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); color: #fff; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .unit-info { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 10px; color: #fff; font-size: 12px; display: none; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; max-width: 600px; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="score-box">
+                <div class="score-label">我方兵力</div>
+                <div class="score-value" id="playerScore">300</div>
+            </div>
+            <div class="score-box">
+                <div class="score-label">敌方兵力</div>
+                <div class="score-value" id="enemyScore">300</div>
+            </div>
+        </div>
+        
+        <div class="battlefield" id="battlefield">
+            <div class="unit-info" id="unitInfo"></div>
+            <div class="message" id="message"></div>
+        </div>
+        
+        <div class="action-panel">
+            <div class="actions">
+                <button class="btn btn-primary" id="btnAttack">⚔️ 进攻</button>
+                <button class="btn btn-secondary" id="btnDefend">🛡️ 防御</button>
+                <button class="btn btn-primary" id="btnRecruit">👥 招募</button>
+                <button class="btn btn-secondary" id="btnSkill">✨ 技能</button>
+            </div>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const UNIT_TYPES = {
+            infantry: { emoji: '⚔️', name: '步兵', attack: 10, defense: 5, cost: 50 },
+            archer: { emoji: '🏹', name: '弓箭手', attack: 15, defense: 3, cost: 80 },
+            knight: { emoji: '🛡️', name: '骑士', attack: 20, defense: 10, cost: 120 },
+            mage: { emoji: '🧙', name: '法师', attack: 25, defense: 2, cost: 150 },
+            catapult: { emoji: '🚀', name: '投石车', attack: 30, defense: 1, cost: 200 }
+        };
+        
+        let playerArmy = [
+            { type: 'infantry', count: 20, position: { x: 50, y: 350 }, morale: 100 },
+            { type: 'archer', count: 10, position: { x: 150, y: 350 }, morale: 100 },
+            { type: 'knight', count: 5, position: { x: 250, y: 350 }, morale: 100 }
+        ];
+        
+        let enemyArmy = [
+            { type: 'infantry', count: 20, position: { x: 350, y: 50 }, morale: 100 },
+            { type: 'archer', count: 10, position: { x: 450, y: 50 }, morale: 100 },
+            { type: 'knight', count: 5, position: { x: 550, y: 50 }, morale: 100 }
+        ];
+        
+        let playerGold = 500;
+        let enemyGold = 500;
+        let selectedUnit = null;
+        let turn = 1;
+        let gameOver = false;
+        
+        const battlefield = document.getElementById('battlefield');
+        const playerScoreEl = document.getElementById('playerScore');
+        const enemyScoreEl = document.getElementById('enemyScore');
+        const unitInfoEl = document.getElementById('unitInfo');
+        const messageEl = document.getElementById('message');
+        
+        function renderUnits() {
+            battlefield.innerHTML = '';
+            battlefield.appendChild(unitInfoEl);
+            battlefield.appendChild(messageEl);
+            
+            playerArmy.forEach((unit, index) => {
+                const el = document.createElement('div');
+                el.className = `unit player ${selectedUnit === 'player-' + index ? 'selected' : ''}`;
+                el.innerHTML = UNIT_TYPES[unit.type].emoji;
+                el.style.left = unit.position.x + 'px';
+                el.style.top = unit.position.y + 'px';
+                el.onclick = () => selectUnit('player', index);
+                battlefield.appendChild(el);
+            });
+            
+            enemyArmy.forEach((unit, index) => {
+                const el = document.createElement('div');
+                el.className = `unit enemy ${selectedUnit === 'enemy-' + index ? 'selected' : ''}`;
+                el.innerHTML = UNIT_TYPES[unit.type].emoji;
+                el.style.left = unit.position.x + 'px';
+                el.style.top = unit.position.y + 'px';
+                el.onclick = () => selectUnit('enemy', index);
+                battlefield.appendChild(el);
+            });
+        }
+        
+        function selectUnit(side, index) {
+            if (gameOver) return;
+            selectedUnit = side + '-' + index;
+            renderUnits();
+            showUnitInfo(side, index);
+        }
+        
+        function showUnitInfo(side, index) {
+            const army = side === 'player' ? playerArmy : enemyArmy;
+            const unit = army[index];
+            const type = UNIT_TYPES[unit.type];
+            unitInfoEl.innerHTML = `
+                <div>${type.emoji} ${type.name}</div>
+                <div>兵力: ${unit.count}</div>
+                <div>攻击: ${type.attack}</div>
+                <div>防御: ${type.defense}</div>
+                <div>士气: ${unit.morale}</div>
+            `;
+            unitInfoEl.style.display = 'block';
+        }
+        
+        function calculateTotalStrength(army) {
+            return army.reduce((sum, unit) => {
+                return sum + unit.count * (UNIT_TYPES[unit.type].attack + UNIT_TYPES[unit.type].defense);
+            }, 0);
+        }
+        
+        function updateScore() {
+            playerScoreEl.textContent = calculateTotalStrength(playerArmy);
+            enemyScoreEl.textContent = calculateTotalStrength(enemyArmy);
+        }
+        
+        function showMessage(msg) {
+            messageEl.textContent = msg;
+            messageEl.classList.add('show');
+            setTimeout(() => {
+                messageEl.classList.remove('show');
+            }, 2000);
+        }
+        
+        function attack() {
+            if (!selectedUnit || gameOver) return;
+            
+            const [side, index] = selectedUnit.split('-');
+            if (side !== 'player') {
+                showMessage('请选择己方单位进攻！');
+                return;
+            }
+            
+            const attacker = playerArmy[index];
+            const attackerType = UNIT_TYPES[attacker.type];
+            
+            let targetIndex = -1;
+            let minDistance = Infinity;
+            
+            enemyArmy.forEach((enemy, i) => {
+                const dx = attacker.position.x - enemy.position.x;
+                const dy = attacker.position.y - enemy.position.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    targetIndex = i;
+                }
+            });
+            
+            if (targetIndex === -1) {
+                showMessage('没有敌人可以攻击！');
+                return;
+            }
+            
+            const target = enemyArmy[targetIndex];
+            const targetType = UNIT_TYPES[target.type];
+            
+            const damage = Math.max(1, attacker.count * attackerType.attack - target.count * targetType.defense * 0.5);
+            target.count -= Math.floor(damage / 10);
+            target.morale -= 10;
+            
+            attacker.position.y -= 20;
+            setTimeout(() => attacker.position.y += 20, 200);
+            
+            if (target.count <= 0) {
+                enemyArmy.splice(targetIndex, 1);
+                showMessage(`消灭了敌人的${targetType.name}！`);
+            } else {
+                showMessage(`对敌人${targetType.name}造成${Math.floor(damage / 10)}点伤亡！`);
+            }
+            
+            checkGameOver();
+            if (!gameOver) enemyTurn();
+            
+            renderUnits();
+            updateScore();
+        }
+        
+        function defend() {
+            if (!selectedUnit || gameOver) return;
+            
+            const [side, index] = selectedUnit.split('-');
+            if (side !== 'player') {
+                showMessage('请选择己方单位防御！');
+                return;
+            }
+            
+            playerArmy[index].morale = Math.min(100, playerArmy[index].morale + 20);
+            showMessage('防御姿态：士气提升！');
+            renderUnits();
+            updateScore();
+            
+            setTimeout(() => enemyTurn(), 1000);
+        }
+        
+        function recruit() {
+            if (gameOver) return;
+            
+            const recruitList = document.createElement('div');
+            recruitList.style.position = 'absolute';
+            recruitList.style.top = '50%';
+            recruitList.style.left = '50%';
+            recruitList.style.transform = 'translate(-50%, -50%)';
+            recruitList.style.background = 'rgba(0,0,0,0.9)';
+            recruitList.style.padding = '20px';
+            recruitList.style.borderRadius = '15px';
+            recruitList.style.color = '#fff';
+            recruitList.style.zIndex = '200';
+            
+            let html = `<div style="margin-bottom: 15px;">💰 金币: ${playerGold}</div>`;
+            Object.keys(UNIT_TYPES).forEach(key => {
+                const unit = UNIT_TYPES[key];
+                html += `
+                    <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                        <span>${unit.emoji} ${unit.name}</span>
+                        <button onclick="confirmRecruit('${key}')" ${playerGold < unit.cost ? 'disabled' : ''}
+                            style="padding: 5px 15px; border: none; border-radius: 10px; background: ${playerGold >= unit.cost ? '#4ecdc4' : '#666'}; color: #fff; cursor: pointer;">
+                            招募 (${unit.cost})
+                        </button>
+                    </div>
+                `;
+            });
+            html += `<button onclick="this.parentElement.remove()" style="margin-top: 15px; width: 100%; padding: 10px; border: none; border-radius: 10px; background: #ff6b6b; color: #fff;">取消</button>`;
+            recruitList.innerHTML = html;
+            document.body.appendChild(recruitList);
+        }
+        
+        window.confirmRecruit = function(type) {
+            const unit = UNIT_TYPES[type];
+            if (playerGold < unit.cost) return;
+            
+            playerGold -= unit.cost;
+            playerArmy.push({
+                type: type,
+                count: 10,
+                position: { x: 50 + playerArmy.length * 80, y: 350 },
+                morale: 100
+            });
+            
+            showMessage(`招募了${unit.name}！`);
+            document.querySelector('div[style*="z-index: 200"]').remove();
+            renderUnits();
+            updateScore();
+        }
+        
+        function useSkill() {
+            if (gameOver) return;
+            
+            const skills = [
+                { name: '鼓舞士气', effect: () => playerArmy.forEach(u => u.morale = 100), cost: 100 },
+                { name: '箭雨', effect: () => enemyArmy.forEach(e => e.count -= 5), cost: 200 },
+                { name: '医疗术', effect: () => playerArmy.forEach(u => u.count += 10), cost: 150 },
+                { name: '冲锋', effect: () => playerArmy.forEach(u => {
+                    const ut = UNIT_TYPES[u.type];
+                    ut.attack *= 1.5;
+                    setTimeout(() => ut.attack /= 1.5, 3000);
+                }), cost: 180 }
+            ];
+            
+            const skillList = document.createElement('div');
+            skillList.style.position = 'absolute';
+            skillList.style.top = '50%';
+            skillList.style.left = '50%';
+            skillList.style.transform = 'translate(-50%, -50%)';
+            skillList.style.background = 'rgba(0,0,0,0.9)';
+            skillList.style.padding = '20px';
+            skillList.style.borderRadius = '15px';
+            skillList.style.color = '#fff';
+            skillList.style.zIndex = '200';
+            
+            let html = `<div style="margin-bottom: 15px;">💰 金币: ${playerGold}</div>`;
+            skills.forEach((skill, i) => {
+                html += `
+                    <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                        <span>${['🎵', '🌧️', '💚', '⚡'][i]} ${skill.name}</span>
+                        <button onclick="confirmSkill(${i})" ${playerGold < skill.cost ? 'disabled' : ''}
+                            style="padding: 5px 15px; border: none; border-radius: 10px; background: ${playerGold >= skill.cost ? '#4ecdc4' : '#666'}; color: #fff; cursor: pointer;">
+                            使用 (${skill.cost})
+                        </button>
+                    </div>
+                `;
+            });
+            html += `<button onclick="this.parentElement.remove()" style="margin-top: 15px; width: 100%; padding: 10px; border: none; border-radius: 10px; background: #ff6b6b; color: #fff;">取消</button>`;
+            skillList.innerHTML = html;
+            document.body.appendChild(skillList);
+        }
+        
+        window.confirmSkill = function(index) {
+            const skill = [
+                { name: '鼓舞士气', effect: () => playerArmy.forEach(u => u.morale = 100), cost: 100 },
+                { name: '箭雨', effect: () => enemyArmy.forEach(e => e.count -= 5), cost: 200 },
+                { name: '医疗术', effect: () => playerArmy.forEach(u => u.count += 10), cost: 150 },
+                { name: '冲锋', effect: () => playerArmy.forEach(u => {
+                    const ut = UNIT_TYPES[u.type];
+                    ut.attack *= 1.5;
+                    setTimeout(() => ut.attack /= 1.5, 3000);
+                }), cost: 180 }
+            ][index];
+            
+            if (playerGold < skill.cost) return;
+            
+            playerGold -= skill.cost;
+            skill.effect();
+            
+            showMessage(`使用了${skill.name}！`);
+            document.querySelector('div[style*="z-index: 200"]').remove();
+            renderUnits();
+            updateScore();
+            
+            setTimeout(() => enemyTurn(), 1000);
+        }
+        
+        function enemyTurn() {
+            if (gameOver) return;
+            
+            showMessage('敌方回合...');
+            
+            setTimeout(() => {
+                if (enemyArmy.length === 0) return;
+                
+                const randomIndex = Math.floor(Math.random() * enemyArmy.length);
+                const enemy = enemyArmy[randomIndex];
+                
+                if (Math.random() < 0.7) {
+                    let targetIndex = -1;
+                    let minDistance = Infinity;
+                    
+                    playerArmy.forEach((player, i) => {
+                        const dx = enemy.position.x - player.position.x;
+                        const dy = enemy.position.y - player.position.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            targetIndex = i;
+                        }
+                    });
+                    
+                    if (targetIndex !== -1) {
+                        const target = playerArmy[targetIndex];
+                        const damage = Math.max(1, enemy.count * UNIT_TYPES[enemy.type].attack - target.count * UNIT_TYPES[target.type].defense * 0.5);
+                        target.count -= Math.floor(damage / 10);
+                        
+                        if (target.count <= 0) {
+                            playerArmy.splice(targetIndex, 1);
+                            showMessage(`敌人消灭了你的${UNIT_TYPES[target.type].name}！`);
+                        } else {
+                            showMessage(`敌人对你造成${Math.floor(damage / 10)}点伤亡！`);
+                        }
+                    }
+                } else {
+                    const types = Object.keys(UNIT_TYPES);
+                    const type = types[Math.floor(Math.random() * types.length)];
+                    const cost = UNIT_TYPES[type].cost;
+                    if (enemyGold >= cost) {
+                        enemyGold -= cost;
+                        enemyArmy.push({
+                            type: type,
+                            count: 10,
+                            position: { x: 350 + enemyArmy.length * 80, y: 50 },
+                            morale: 100
+                        });
+                        showMessage('敌方招募了新单位！');
+                    }
+                }
+                
+                checkGameOver();
+                renderUnits();
+                updateScore();
+            }, 1500);
+        }
+        
+        function checkGameOver() {
+            if (playerArmy.length === 0) {
+                gameOver = true;
+                showMessage('战斗失败！');
+            } else if (enemyArmy.length === 0) {
+                gameOver = true;
+                showMessage('战斗胜利！');
+                saveHighScore(calculateTotalStrength(playerArmy));
+            }
+        }
+        
+        function saveHighScore(score) {
+            const saved = localStorage.getItem('legionBattle_highScore');
+            const highScore = saved ? parseInt(saved) : 0;
+            if (score > highScore) {
+                localStorage.setItem('legionBattle_highScore', score);
+            }
+        }
+        
+        document.getElementById('btnAttack').addEventListener('click', attack);
+        document.getElementById('btnDefend').addEventListener('click', defend);
+        document.getElementById('btnRecruit').addEventListener('click', recruit);
+        document.getElementById('btnSkill').addEventListener('click', useSkill);
+        
+        renderUnits();
+        updateScore();
+    </script>
+</body>
+</html>

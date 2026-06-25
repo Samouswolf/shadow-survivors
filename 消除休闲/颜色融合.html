@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>颜色融合</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; overflow: hidden; color: #fff; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #ff6b6b; }
+        
+        .game-area { flex: 1; position: relative; background: rgba(0,0,0,0.4); border-radius: 15px; overflow: hidden; }
+        #gameCanvas { width: 100%; height: 100%; display: block; }
+        
+        .target-color { position: absolute; top: 10px; right: 10px; width: 60px; height: 60px; border-radius: 10px; border: 3px solid #fff; }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">关卡</div>
+                <div class="stat-value" id="level">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">分数</div>
+                <div class="stat-value" id="score">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">最高</div>
+                <div class="stat-value" id="highScore">0</div>
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <canvas id="gameCanvas"></canvas>
+            <div class="target-color" id="targetColor"></div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="btnStart">▶️ 开始游戏</button>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const GAME_NAME = '颜色融合';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        let level = 1;
+        let score = 0;
+        let gameRunning = false;
+        
+        let targetColor = { r: 255, g: 0, b: 0 };
+        let currentColor = { r: 128, g: 128, b: 128 };
+        let drops = [];
+        let particles = [];
+        
+        const COLOR_DROPS = [
+            { color: { r: 255, g: 0, b: 0 }, name: '红色', emoji: '🔴' },
+            { color: { r: 0, g: 255, b: 0 }, name: '绿色', emoji: '🟢' },
+            { color: { r: 0, g: 0, b: 255 }, name: '蓝色', emoji: '🔵' },
+            { color: { r: 255, g: 255, b: 0 }, name: '黄色', emoji: '🟡' },
+            { color: { r: 255, g: 0, b: 255 }, name: '紫色', emoji: '🟣' },
+            { color: { r: 0, g: 255, b: 255 }, name: '青色', emoji: '🔷' },
+            { color: { r: 255, g: 128, b: 0 }, name: '橙色', emoji: '🟠' },
+            { color: { r: 128, g: 0, b: 255 }, name: '深紫', emoji: '💜' }
+        ];
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            initLevel();
+        }
+        
+        function initLevel() {
+            targetColor = {
+                r: Math.floor(Math.random() * 256),
+                g: Math.floor(Math.random() * 256),
+                b: Math.floor(Math.random() * 256)
+            };
+            
+            currentColor = { r: 128, g: 128, b: 128 };
+            drops = [];
+            particles = [];
+            
+            document.getElementById('targetColor').style.background = 
+                `rgb(${targetColor.r}, ${targetColor.g}, ${targetColor.b})`;
+            
+            spawnDrop();
+        }
+        
+        function spawnDrop() {
+            if (!gameRunning) return;
+            
+            const dropType = COLOR_DROPS[Math.floor(Math.random() * COLOR_DROPS.length)];
+            drops.push({
+                x: Math.random() * (canvas.width - 40) + 20,
+                y: -50,
+                width: 40,
+                height: 40,
+                vy: 2 + level * 0.3,
+                color: dropType.color,
+                emoji: dropType.emoji
+            });
+            
+            setTimeout(spawnDrop, 1500 - level * 100);
+        }
+        
+        function updateDrops() {
+            drops = drops.filter(drop => {
+                drop.y += drop.vy;
+                
+                if (drop.y > canvas.height - 100) {
+                    // 融合颜色
+                    currentColor.r = Math.floor((currentColor.r + drop.color.r) / 2);
+                    currentColor.g = Math.floor((currentColor.g + drop.color.g) / 2);
+                    currentColor.b = Math.floor((currentColor.b + drop.color.b) / 2);
+                    
+                    // 粒子效果
+                    for (let i = 0; i < 15; i++) {
+                        particles.push({
+                            x: drop.x,
+                            y: drop.y,
+                            vx: (Math.random() - 0.5) * 8,
+                            vy: (Math.random() - 0.5) * 8,
+                            life: 1,
+                            color: `rgb(${drop.color.r}, ${drop.color.g}, ${drop.color.b})`
+                        });
+                    }
+                    
+                    score += 10;
+                    checkMatch();
+                    return false;
+                }
+                
+                return true;
+            });
+        }
+        
+        function checkMatch() {
+            const diff = Math.sqrt(
+                Math.pow(currentColor.r - targetColor.r, 2) +
+                Math.pow(currentColor.g - targetColor.g, 2) +
+                Math.pow(currentColor.b - targetColor.b, 2)
+            );
+            
+            if (diff < 30) {
+                level++;
+                score += level * 1000;
+                initLevel();
+                
+                for (let i = 0; i < 30; i++) {
+                    particles.push({
+                        x: canvas.width / 2,
+                        y: canvas.height / 2,
+                        vx: (Math.random() - 0.5) * 15,
+                        vy: (Math.random() - 0.5) * 15,
+                        life: 1,
+                        color: `rgb(${targetColor.r}, ${targetColor.g}, ${targetColor.b})`
+                    });
+                }
+            }
+        }
+        
+        function updateParticles() {
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+                return p.life > 0;
+            });
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 当前颜色区域
+            const currentGradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height - 50, 0,
+                canvas.width / 2, canvas.height - 50, 200
+            );
+            currentGradient.addColorStop(0, `rgb(${currentColor.r}, ${currentColor.g}, ${currentColor.b})`);
+            currentGradient.addColorStop(1, `rgba(${currentColor.r}, ${currentColor.g}, ${currentColor.b}, 0.1)`);
+            ctx.fillStyle = currentGradient;
+            ctx.fillRect(0, canvas.height - 100, canvas.width, 100);
+            
+            // 分界线
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height - 100);
+            ctx.lineTo(canvas.width, canvas.height - 100);
+            ctx.stroke();
+            
+            // 颜色差值指示
+            const diff = Math.sqrt(
+                Math.pow(currentColor.r - targetColor.r, 2) +
+                Math.pow(currentColor.g - targetColor.g, 2) +
+                Math.pow(currentColor.b - targetColor.b, 2)
+            );
+            
+            const progress = Math.max(0, 1 - diff / 441);
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(20, canvas.height - 40, canvas.width - 40, 20);
+            ctx.fillStyle = progress > 0.8 ? '#48c78e' : progress > 0.5 ? '#ffd700' : '#ff6b6b';
+            ctx.fillRect(20, canvas.height - 40, (canvas.width - 40) * progress, 20);
+            
+            // 下落的颜色滴
+            drops.forEach(drop => {
+                ctx.fillStyle = `rgb(${drop.color.r}, ${drop.color.g}, ${drop.color.b})`;
+                ctx.shadowColor = `rgb(${drop.color.r}, ${drop.color.g}, ${drop.color.b})`;
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.arc(drop.x, drop.y, 20, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(drop.emoji, drop.x, drop.y + 7);
+            });
+            
+            // 粒子
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 5, p.life * 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+        }
+        
+        function updateStats() {
+            document.getElementById('level').textContent = level;
+            document.getElementById('score').textContent = score;
+            document.getElementById('highScore').textContent = GameCore.highScore.get(GAME_NAME);
+            
+            if (GameCore.highScore.set(GAME_NAME, score)) {
+                GameCore.hints.show('新纪录！分数: ' + score);
+            }
+        }
+        
+        function gameLoop() {
+            draw();
+            
+            if (gameRunning) {
+                updateDrops();
+                updateParticles();
+            }
+            
+            updateStats();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        document.getElementById('btnStart').onclick = () => {
+            gameRunning = true;
+            level = 1;
+            score = 0;
+            initLevel();
+        };
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        gameLoop();
+    </script>
+</body>
+</html>

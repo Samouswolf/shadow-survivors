@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>足球射门</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #2d5a27 0%, #56ab2f 50%, #a8e063 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; overflow: hidden; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #fff; }
+        .stats { display: flex; gap: 20px; font-size: 14px; }
+        
+        .canvas-area { flex: 1; background: rgba(0,0,0,0.3); border-radius: 15px; overflow: hidden; position: relative; }
+        canvas { width: 100%; height: 100%; }
+        
+        .controls { display: flex; justify-content: center; gap: 15px; margin-top: 15px; }
+        .control-btn { padding: 15px 30px; border: none; border-radius: 15px; font-size: 18px; font-weight: bold; cursor: pointer; background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">⚽ 足球射门</div>
+            <div class="stats">
+                <span>📊 得分: <span id="score">0</span></span>
+                <span>🧤 扑救: <span id="saved">0</span></span>
+                <span>⏱️ 时间: <span id="time">60</span></span>
+            </div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" onclick="resetGame()">🔄 重新开始</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '足球射门';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameRunning = true;
+        let score = 0;
+        let saved = 0;
+        let timeLeft = 60;
+        let ball = { x: 0, y: 0, vx: 0, vy: 0, inAir: false };
+        let goalkeeper = { x: 0, y: 0, width: 80, height: 40, direction: 1 };
+        let goal = { x: 0, y: 0, width: 200, height: 100 };
+        let targetX = 0;
+        let targetY = 0;
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            goal.x = canvas.width / 2 - 100;
+            goal.y = 50;
+            resetBall();
+        }
+        
+        function resetBall() {
+            ball.x = canvas.width / 2;
+            ball.y = canvas.height - 100;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.inAir = false;
+            targetX = 0;
+            targetY = 0;
+            goalkeeper.x = canvas.width / 2 - 40;
+        }
+        
+        function initGame() {
+            resizeCanvas();
+            gameRunning = true;
+            score = 0;
+            saved = 0;
+            timeLeft = 60;
+            resetBall();
+            updateUI();
+            
+            const timer = setInterval(() => {
+                if (!gameRunning) {
+                    clearInterval(timer);
+                    return;
+                }
+                
+                timeLeft--;
+                updateUI();
+                
+                if (timeLeft <= 0) {
+                    gameOver();
+                    clearInterval(timer);
+                }
+            }, 1000);
+            
+            gameLoop();
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('saved').textContent = saved;
+            document.getElementById('time').textContent = timeLeft;
+            
+            GameCore.highScore.set(GAME_NAME, score);
+        }
+        
+        function handleClick(e) {
+            if (ball.inAir || !gameRunning) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            targetX = e.clientX - rect.left;
+            targetY = e.clientY - rect.top;
+            
+            const dx = targetX - ball.x;
+            const dy = targetY - ball.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            const maxDist = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height);
+            const velocity = (dist / maxDist) * 15 + 5;
+            
+            ball.vx = (dx / dist) * velocity;
+            ball.vy = (dy / dist) * velocity;
+            ball.inAir = true;
+        }
+        
+        function update() {
+            if (!gameRunning) return;
+            
+            if (ball.inAir) {
+                ball.vy += 0.3;
+                ball.x += ball.vx;
+                ball.y += ball.vy;
+                
+                if (ball.y > canvas.height) {
+                    resetBall();
+                }
+                
+                if (ball.x > goal.x && ball.x < goal.x + goal.width &&
+                    ball.y > goal.y && ball.y < goal.y + goal.height) {
+                    if (ball.x > goalkeeper.x && ball.x < goalkeeper.x + goalkeeper.width) {
+                        saved++;
+                        GameCore.hints.show('🧤 被扑救了！');
+                    } else {
+                        score++;
+                        GameCore.hints.show('⚽ 进球！');
+                    }
+                    resetBall();
+                    updateUI();
+                }
+            } else {
+                goalkeeper.x += goalkeeper.direction * 3;
+                
+                if (goalkeeper.x <= goal.x || goalkeeper.x + goalkeeper.width >= goal.x + goal.width) {
+                    goalkeeper.direction *= -1;
+                }
+            }
+        }
+        
+        function render() {
+            ctx.fillStyle = '#4a7c23';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#6b8e23';
+            ctx.fillRect(0, 0, canvas.width, 50);
+            
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(goal.x - 5, goal.y - 5, goal.width + 10, goal.height + 10);
+            
+            ctx.fillStyle = '#4a7c23';
+            ctx.fillRect(goal.x, goal.y, goal.width, goal.height);
+            
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(goal.x, goal.y);
+            ctx.lineTo(goal.x, goal.y + goal.height);
+            ctx.moveTo(goal.x + goal.width, goal.y);
+            ctx.lineTo(goal.x + goal.width, goal.y + goal.height);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#ff6b6b';
+            ctx.fillRect(goalkeeper.x, goalkeeper.y, goalkeeper.width, goalkeeper.height);
+            
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(goalkeeper.x + 5, goalkeeper.y + 5, 20, 15);
+            ctx.fillRect(goalkeeper.x + goalkeeper.width - 25, goalkeeper.y + 5, 20, 15);
+            
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.moveTo(goalkeeper.x, goalkeeper.y + goalkeeper.height);
+            ctx.lineTo(goalkeeper.x + 20, goalkeeper.y + goalkeeper.height + 15);
+            ctx.lineTo(goalkeeper.x + 40, goalkeeper.y + goalkeeper.height);
+            ctx.lineTo(goalkeeper.x + 60, goalkeeper.y + goalkeeper.height + 15);
+            ctx.lineTo(goalkeeper.x + goalkeeper.width, goalkeeper.y + goalkeeper.height);
+            ctx.fill();
+            
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, 25, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#4a7c23';
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, 20, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, 22, -Math.PI / 4, Math.PI / 4);
+            ctx.stroke();
+            
+            if (!ball.inAir && targetX !== 0) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(ball.x, ball.y);
+                ctx.lineTo(targetX, targetY);
+                ctx.stroke();
+                
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.beginPath();
+                ctx.arc(targetX, targetY, 10, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        function gameLoop() {
+            update();
+            render();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            GameCore.hints.show('⏱️ 时间到！');
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('时间到！', canvas.width / 2, canvas.height / 2 - 40);
+            ctx.font = '24px Arial';
+            ctx.fillText(`得分: ${score}`, canvas.width / 2, canvas.height / 2);
+            ctx.font = '20px Arial';
+            ctx.fillText(`被扑救: ${saved}`, canvas.width / 2, canvas.height / 2 + 30);
+        }
+        
+        function resetGame() {
+            initGame();
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        initGame();
+        GameCore.touch.enableAllButtons();
+        
+        canvas.addEventListener('click', handleClick);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleClick(e.touches[0]);
+        });
+    </script>
+</body>
+</html>

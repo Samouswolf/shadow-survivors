@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>回合制战斗 - 游戏工坊</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; }
+#game-container { max-width: 600px; margin: 0 auto; padding: 20px; }
+#game-ui { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; color: #fff; }
+#game-ui h1 { font-size: 24px; color: #f87171; }
+#turn-indicator { font-size: 18px; font-weight: bold; color: #fbbf24; }
+#battle-area { display: flex; justify-content: space-between; margin-bottom: 20px; }
+.character-card { background: rgba(255,255,255,0.05); border-radius: 15px; padding: 20px; width: 45%; text-align: center; border: 2px solid rgba(255,255,255,0.1); }
+.character-card.active { border-color: #4ade80; box-shadow: 0 0 20px rgba(74,222,128,0.3); }
+.character-card.enemy.active { border-color: #f87171; box-shadow: 0 0 20px rgba(248,113,113,0.3); }
+.character-card .emoji { font-size: 64px; margin-bottom: 10px; }
+.character-card .name { font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 10px; }
+.health-bar { width: 100%; height: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; margin-bottom: 5px; }
+.health-fill { height: 100%; background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e); transition: width 0.3s ease; }
+.health-text { font-size: 14px; color: #aaa; }
+.mana-bar { width: 100%; height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden; margin-bottom: 15px; }
+.mana-fill { height: 100%; background: #3b82f6; transition: width 0.3s ease; }
+#action-buttons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.action-btn { padding: 15px; font-size: 16px; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
+.action-btn.attack { background: linear-gradient(145deg, #ef4444, #dc2626); color: #fff; }
+.action-btn.skill { background: linear-gradient(145deg, #3b82f6, #2563eb); color: #fff; }
+.action-btn.heal { background: linear-gradient(145deg, #22c55e, #16a34a); color: #fff; }
+.action-btn.defend { background: linear-gradient(145deg, #6b7280, #4b5563); color: #fff; }
+.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+#battle-log { background: rgba(0,0,0,0.3); border-radius: 10px; padding: 15px; margin-top: 20px; max-height: 200px; overflow-y: auto; }
+#battle-log p { color: #aaa; font-size: 14px; margin-bottom: 5px; }
+#battle-log p.player { color: #4ade80; }
+#battle-log p.enemy { color: #f87171; }
+#battle-log p.critical { color: #fbbf24; font-weight: bold; }
+#game-over { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 100; flex-direction: column; align-items: center; justify-content: center; }
+#game-over h2 { font-size: 48px; color: #f5576c; margin-bottom: 20px; }
+#game-over p { font-size: 24px; color: #fff; margin-bottom: 30px; }
+#game-over .btn { padding: 15px 40px; font-size: 20px; background: #6366f1; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+#start-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 90; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#start-screen h1 { font-size: 48px; color: #f87171; margin-bottom: 20px; text-shadow: 0 0 20px rgba(248,113,113,0.5); }
+#start-screen p { color: #aaa; margin-bottom: 40px; font-size: 16px; text-align: center; max-width: 400px; }
+#start-screen .btn { padding: 18px 50px; font-size: 22px; background: linear-gradient(145deg, #f87171, #ef4444); color: #fff; border: none; border-radius: 15px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 20px rgba(248,113,113,0.4); }
+.ad-banner-container { margin-top: 20px; }
+.sponsor-btn { position: fixed; top: 20px; right: 20px; width: 50px; height: 50px; background: rgba(255,165,0,0.9); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; z-index: 100; }
+.sponsor-panel { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; }
+.sponsor-panel.show { display: flex; }
+.sponsor-content { background: #fff; padding: 30px; border-radius: 20px; text-align: center; }
+.sponsor-close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; }
+#loading-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1a1a2e; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#loading-screen .loading-icon { width: 60px; height: 60px; border: 4px solid #f87171; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-screen p { color: #f87171; margin-top: 20px; font-size: 18px; }
+.interstitial-ad { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 9999; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.interstitial-ad .ad-content { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; text-align: center; min-width: 280px; max-width: 400px; }
+.interstitial-ad .skip-btn { padding: 8px 28px; background: rgba(255,215,0,0.15); border: 1px solid rgba(255,215,0,0.3); border-radius: 20px; color: #ffd700; font-weight: bold; font-size: 15px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="loading-screen">
+  <div class="loading-icon"></div>
+  <p>加载中...</p>
+</div>
+
+<div class="sponsor-btn" onclick="showSponsor()">☕</div>
+<div class="sponsor-panel" id="sponsor-panel" onclick="hideSponsor()">
+  <div class="sponsor-content" onclick="event.stopPropagation()">
+    <h3>支持开发者</h3>
+    <p>感谢您的支持！</p>
+  </div>
+  <div class="sponsor-close" onclick="hideSponsor()">×</div>
+</div>
+
+<div class="interstitial-ad" id="interstitialAd">
+  <div class="ad-content">
+    <p>📢 赞助商广告</p>
+    <div style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;">广告加载中...</div>
+  </div>
+  <button class="skip-btn" onclick="closeInterstitial()">跳过广告 ▶</button>
+</div>
+
+<div id="start-screen">
+  <h1>⚔️ 回合制战斗</h1>
+  <p>操作说明：选择攻击、技能、治疗或防御<br>合理利用资源击败敌人<br>目标：击败所有敌人获得胜利！</p>
+  <button class="btn" onclick="startGame()">开始战斗</button>
+</div>
+
+<div id="game-container">
+  <div id="game-ui">
+    <h1>⚔️ 回合制战斗</h1>
+    <div id="turn-indicator">玩家回合</div>
+  </div>
+  
+  <div id="battle-area">
+    <div class="character-card active" id="player-card">
+      <div class="emoji">🧙‍♂️</div>
+      <div class="name">勇者</div>
+      <div class="health-bar"><div class="health-fill" id="player-health"></div></div>
+      <div class="health-text" id="player-health-text">100/100</div>
+      <div class="mana-bar"><div class="mana-fill" id="player-mana"></div></div>
+    </div>
+    
+    <div class="character-card enemy" id="enemy-card">
+      <div class="emoji">👹</div>
+      <div class="name">怪物</div>
+      <div class="health-bar"><div class="health-fill" id="enemy-health"></div></div>
+      <div class="health-text" id="enemy-health-text">100/100</div>
+    </div>
+  </div>
+  
+  <div id="action-buttons">
+    <button class="action-btn attack" onclick="playerAction('attack')">⚔️ 攻击</button>
+    <button class="action-btn skill" onclick="playerAction('skill')">✨ 技能</button>
+    <button class="action-btn heal" onclick="playerAction('heal')">💚 治疗</button>
+    <button class="action-btn defend" onclick="playerAction('defend')">🛡️ 防御</button>
+  </div>
+  
+  <div id="battle-log"></div>
+</div>
+
+<div id="game-over">
+  <h2 id="result-title">战斗结束</h2>
+  <p id="result-message">胜负已分</p>
+  <button class="btn" onclick="restartGame()">再来一局</button>
+</div>
+
+<script>
+// ==================== 游戏说明 ====================
+// 操作说明: 点击按钮选择战斗行动（攻击/技能/治疗/防御）
+// 游戏目标: 击败敌人获得胜利
+// 存档系统: 自动保存胜利次数到本地
+// ==================== 模块说明 ====================
+// 1. 游戏初始化模块 - 初始化角色状态和游戏状态
+// 2. 战斗逻辑模块 - 处理玩家行动和敌人行动
+// 3. 渲染模块 - 更新UI显示
+// 4. 音效模块 - 播放战斗音效
+// 5. 存档模块 - 管理胜利记录
+
+const GAME_NAME = '回合制战斗';
+
+class GameCore {
+  static init(options) {
+    if (options && options.highScore) {
+      this.highScoreKey = options.highScore;
+    }
+  }
+  
+  static getHighScore() {
+    try {
+      return parseInt(localStorage.getItem(this.highScoreKey)) || 0;
+    } catch (error) {
+      console.warn('读取最高分失败:', error);
+      return 0;
+    }
+  }
+  
+  static setHighScore(value) {
+    try {
+      const current = this.getHighScore();
+      if (value > current) {
+        localStorage.setItem(this.highScoreKey, value.toString());
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn('保存最高分失败:', error);
+      return false;
+    }
+  }
+}
+
+GameCore.init({ highScore: GAME_NAME });
+
+let player = { hp: 100, maxHp: 100, mp: 100, maxMp: 100, attack: 15, defense: 5, isDefending: false };
+let enemy = { hp: 120, maxHp: 120, attack: 12, defense: 3 };
+let isPlayerTurn = true;
+let battleLog = [];
+let victories = 0;
+
+function addLog(message, type = 'normal') {
+  battleLog.unshift({ message, type });
+  if (battleLog.length > 20) battleLog.pop();
+  renderLog();
+}
+
+function renderLog() {
+  const logEl = document.getElementById('battle-log');
+  logEl.innerHTML = battleLog.map(entry => 
+    `<p class="${entry.type}">${entry.message}</p>`
+  ).join('');
+}
+
+function updateUI() {
+  document.getElementById('player-health').style.width = `${(player.hp / player.maxHp) * 100}%`;
+  document.getElementById('player-health-text').textContent = `${player.hp}/${player.maxHp}`;
+  document.getElementById('player-mana').style.width = `${(player.mp / player.maxMp) * 100}%`;
+  
+  document.getElementById('enemy-health').style.width = `${(enemy.hp / enemy.maxHp) * 100}%`;
+  document.getElementById('enemy-health-text').textContent = `${enemy.hp}/${enemy.maxHp}`;
+  
+  document.getElementById('turn-indicator').textContent = isPlayerTurn ? '玩家回合' : '敌人回合';
+  
+  const buttons = document.querySelectorAll('.action-btn');
+  buttons.forEach(btn => btn.disabled = !isPlayerTurn);
+  
+  document.getElementById('player-card').classList.toggle('active', isPlayerTurn);
+  document.getElementById('enemy-card').classList.toggle('active', !isPlayerTurn);
+}
+
+function calculateDamage(attackerAtk, defenderDef, isCritical = false) {
+  const baseDamage = Math.max(1, attackerAtk - defenderDef * 0.5);
+  const criticalMultiplier = isCritical ? 1.5 : 1;
+  const randomFactor = 0.8 + Math.random() * 0.4;
+  return Math.floor(baseDamage * criticalMultiplier * randomFactor);
+}
+
+function playerAction(action) {
+  if (!isPlayerTurn) return;
+  
+  isPlayerTurn = false;
+  player.isDefending = false;
+  
+  switch (action) {
+    case 'attack': {
+      const isCritical = Math.random() < 0.2;
+      const damage = calculateDamage(player.attack, enemy.defense, isCritical);
+      enemy.hp = Math.max(0, enemy.hp - damage);
+      addLog(`你使用攻击，对怪物造成 ${damage} 点伤害！${isCritical ? '暴击！' : ''}`, 'player');
+      playSound(220, 0.15, 'square');
+      break;
+    }
+    case 'skill': {
+      if (player.mp < 30) {
+        addLog('魔力不足！', 'player');
+        isPlayerTurn = true;
+        updateUI();
+        return;
+      }
+      player.mp -= 30;
+      const damage = calculateDamage(player.attack * 2, enemy.defense);
+      enemy.hp = Math.max(0, enemy.hp - damage);
+      addLog(`你使用技能，对怪物造成 ${damage} 点伤害！`, 'player');
+      playSound(440, 0.2, 'sine');
+      break;
+    }
+    case 'heal': {
+      if (player.mp < 20) {
+        addLog('魔力不足！', 'player');
+        isPlayerTurn = true;
+        updateUI();
+        return;
+      }
+      player.mp -= 20;
+      const healAmount = Math.min(player.maxHp - player.hp, 30);
+      player.hp += healAmount;
+      addLog(`你使用治疗，恢复 ${healAmount} 点生命！`, 'player');
+      playSound(330, 0.2, 'triangle');
+      break;
+    }
+    case 'defend': {
+      player.isDefending = true;
+      addLog('你进入防御姿态，下回合受到的伤害减少！', 'player');
+      playSound(110, 0.1, 'sine');
+      break;
+    }
+  }
+  
+  updateUI();
+  
+  if (enemy.hp <= 0) {
+    gameOver(true);
+    return;
+  }
+  
+  setTimeout(enemyTurn, 1000);
+}
+
+function enemyTurn() {
+  const isCritical = Math.random() < 0.15;
+  let damage = calculateDamage(enemy.attack, player.defense, isCritical);
+  
+  if (player.isDefending) {
+    damage = Math.floor(damage * 0.5);
+    addLog('怪物攻击，但你的防御抵挡了部分伤害！', 'enemy');
+  }
+  
+  player.hp = Math.max(0, player.hp - damage);
+  addLog(`怪物攻击你，造成 ${damage} 点伤害！${isCritical ? '暴击！' : ''}`, 'enemy');
+  playSound(165, 0.15, 'sawtooth');
+  
+  updateUI();
+  
+  if (player.hp <= 0) {
+    gameOver(false);
+    return;
+  }
+  
+  player.mp = Math.min(player.maxMp, player.mp + 10);
+  isPlayerTurn = true;
+  updateUI();
+}
+
+function gameOver(win) {
+  setTimeout(() => {
+    const resultTitle = document.getElementById('result-title');
+    const resultMessage = document.getElementById('result-message');
+    
+    if (win) {
+      victories++;
+      resultTitle.textContent = '🎉 胜利！';
+      resultTitle.style.color = '#4ade80';
+      resultMessage.textContent = `你击败了怪物！胜利次数: ${victories}`;
+      playSound(523, 0.3, 'sine');
+      setTimeout(() => playSound(659, 0.3, 'sine'), 300);
+      setTimeout(() => playSound(784, 0.4, 'sine'), 600);
+    } else {
+      resultTitle.textContent = '💀 失败';
+      resultTitle.style.color = '#f5576c';
+      resultMessage.textContent = '你被击败了...';
+      playSound(150, 0.5, 'sawtooth');
+    }
+    
+    GameCore.setHighScore(victories);
+    document.getElementById('game-over').style.display = 'flex';
+  }, 500);
+}
+
+function startGame() {
+  try {
+    document.getElementById('start-screen').style.display = 'none';
+    document.getElementById('game-over').style.display = 'none';
+    
+    player = { hp: 100, maxHp: 100, mp: 100, maxMp: 100, attack: 15, defense: 5, isDefending: false };
+    enemy = { hp: 120, maxHp: 120, attack: 12, defense: 3 };
+    isPlayerTurn = true;
+    battleLog = [];
+    
+    addLog('战斗开始！', 'normal');
+    updateUI();
+  } catch (error) {
+    console.error('开始游戏失败:', error);
+    alert('游戏启动失败，请重试');
+  }
+}
+
+function restartGame() {
+  startGame();
+}
+
+function showSponsor() {
+  try {
+    document.getElementById('sponsor-panel').classList.add('show');
+  } catch (error) {
+    console.error('显示赞助面板失败:', error);
+  }
+}
+
+function hideSponsor() {
+  try {
+    document.getElementById('sponsor-panel').classList.remove('show');
+  } catch (error) {
+    console.error('隐藏赞助面板失败:', error);
+  }
+}
+
+function closeInterstitial() {
+  try {
+    document.getElementById('interstitialAd').style.display = 'none';
+  } catch (error) {
+    console.error('关闭广告失败:', error);
+  }
+}
+
+let audioCtx = null;
+function initAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch (error) {
+    console.warn('音频初始化失败:', error);
+  }
+}
+function playSound(freq, dur, type, vol) {
+  try {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.value = vol || 0.15;
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  } catch (error) {
+    console.warn('音效播放失败:', error);
+  }
+}
+
+window.addEventListener('load', () => {
+  try {
+    setTimeout(() => {
+      document.getElementById('loading-screen').style.display = 'none';
+    }, 1500);
+  } catch (error) {
+    console.error('初始化失败:', error);
+  }
+});
+</script>
+</body>
+</html>

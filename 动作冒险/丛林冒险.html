@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>丛林冒险</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #2d5a27 0%, #56ab2f 50%, #a8e063 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; overflow: hidden; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #fff; }
+        .stats { display: flex; gap: 20px; font-size: 14px; }
+        
+        .canvas-area { flex: 1; background: rgba(255,255,255,0.1); border-radius: 15px; overflow: hidden; position: relative; }
+        canvas { width: 100%; height: 100%; }
+        
+        .controls { display: flex; justify-content: center; gap: 15px; margin-top: 15px; }
+        .control-btn { padding: 15px 30px; border: none; border-radius: 15px; font-size: 18px; font-weight: bold; cursor: pointer; background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🌴 丛林冒险</div>
+            <div class="stats">
+                <span>💰 金币: <span id="score">0</span></span>
+                <span>🏃 距离: <span id="distance">0</span></span>
+            </div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" onclick="jump()">🐾 跳跃</button>
+            <button class="control-btn" onclick="resetGame()">🔄 重新开始</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '丛林冒险';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameRunning = true;
+        let score = 0;
+        let distance = 0;
+        let player = { x: 50, y: 0, width: 40, height: 40, velocityY: 0, onGround: false };
+        let obstacles = [];
+        let coins = [];
+        let groundY = 0;
+        let scrollSpeed = 3;
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            groundY = canvas.height - 60;
+            player.y = groundY - player.height;
+        }
+        
+        function initGame() {
+            resizeCanvas();
+            gameRunning = true;
+            score = 0;
+            distance = 0;
+            player = { x: 50, y: groundY - 40, width: 40, height: 40, velocityY: 0, onGround: true };
+            obstacles = [];
+            coins = [];
+            updateUI();
+            gameLoop();
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('distance').textContent = Math.floor(distance);
+            
+            GameCore.highScore.set(GAME_NAME, score);
+        }
+        
+        function jump() {
+            if (player.onGround && gameRunning) {
+                player.velocityY = -12;
+                player.onGround = false;
+            }
+        }
+        
+        function generateObstacle() {
+            const type = Math.random() > 0.5 ? 'tree' : 'rock';
+            obstacles.push({
+                x: canvas.width,
+                y: type === 'tree' ? groundY - 80 : groundY - 30,
+                width: type === 'tree' ? 30 : 40,
+                height: type === 'tree' ? 80 : 30,
+                type: type,
+                passed: false
+            });
+        }
+        
+        function generateCoin() {
+            coins.push({
+                x: canvas.width,
+                y: groundY - 50 - Math.random() * 50,
+                radius: 15,
+                collected: false
+            });
+        }
+        
+        function update() {
+            if (!gameRunning) return;
+            
+            player.velocityY += 0.5;
+            player.y += player.velocityY;
+            
+            if (player.y >= groundY - player.height) {
+                player.y = groundY - player.height;
+                player.velocityY = 0;
+                player.onGround = true;
+            }
+            
+            if (player.y < 0) {
+                player.y = 0;
+                player.velocityY = 0;
+            }
+            
+            obstacles.forEach(obs => {
+                obs.x -= scrollSpeed;
+            });
+            
+            coins.forEach(coin => {
+                coin.x -= scrollSpeed;
+            });
+            
+            obstacles = obstacles.filter(obs => obs.x + obs.width > -50);
+            coins = coins.filter(coin => coin.x + coin.radius > -50);
+            
+            if (Math.random() < 0.015) {
+                generateObstacle();
+            }
+            
+            if (Math.random() < 0.02) {
+                generateCoin();
+            }
+            
+            obstacles.forEach(obs => {
+                if (player.x < obs.x + obs.width &&
+                    player.x + player.width > obs.x &&
+                    player.y < obs.y + obs.height &&
+                    player.y + player.height > obs.y) {
+                    gameOver();
+                }
+            });
+            
+            coins.forEach(coin => {
+                if (!coin.collected) {
+                    const dx = (player.x + player.width / 2) - coin.x;
+                    const dy = (player.y + player.height / 2) - coin.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < coin.radius + player.width / 2) {
+                        coin.collected = true;
+                        score += 10;
+                        updateUI();
+                    }
+                }
+            });
+            
+            distance += scrollSpeed / 10;
+            updateUI();
+            
+            scrollSpeed += 0.001;
+        }
+        
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#4a7c23';
+            ctx.fillRect(0, groundY, canvas.width, 60);
+            
+            ctx.fillStyle = '#3d6b20';
+            ctx.fillRect(0, groundY, canvas.width, 10);
+            
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.arc(player.x + player.width / 2, player.y + player.height / 2, player.width / 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            obstacles.forEach(obs => {
+                if (obs.type === 'tree') {
+                    ctx.fillStyle = '#8b4513';
+                    ctx.fillRect(obs.x + 5, obs.y + 40, 20, 40);
+                    ctx.fillStyle = '#2d5a27';
+                    ctx.beginPath();
+                    ctx.arc(obs.x + obs.width / 2, obs.y + 20, 35, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = '#666';
+                    ctx.beginPath();
+                    ctx.moveTo(obs.x, obs.y + obs.height);
+                    ctx.lineTo(obs.x + obs.width / 2, obs.y);
+                    ctx.lineTo(obs.x + obs.width, obs.y + obs.height);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            });
+            
+            coins.forEach(coin => {
+                if (!coin.collected) {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.beginPath();
+                    ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ff8c00';
+                    ctx.font = '14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('$', coin.x, coin.y + 5);
+                }
+            });
+        }
+        
+        function gameLoop() {
+            update();
+            render();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            GameCore.hints.show('💥 游戏结束！');
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏结束', canvas.width / 2, canvas.height / 2 - 20);
+            ctx.font = '20px Arial';
+            ctx.fillText(`金币: ${score}`, canvas.width / 2, canvas.height / 2 + 20);
+        }
+        
+        function resetGame() {
+            initGame();
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        initGame();
+        GameCore.touch.enableAllButtons();
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') jump();
+        });
+        
+        canvas.addEventListener('touchstart', () => {
+            jump();
+        });
+    </script>
+</body>
+</html>

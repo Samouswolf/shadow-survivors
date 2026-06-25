@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>篮球运球</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #c94b4b 0%, #4b134f 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .score-display { color: #ffd700; font-size: 24px; font-weight: bold; }
+        .time-display { color: #ef4444; font-size: 18px; }
+        
+        .court { flex: 1; background: linear-gradient(135deg, #8b4513, #654321); border-radius: 20px; position: relative; overflow: hidden; }
+        .court-lines { position: absolute; inset: 0; border: 3px solid rgba(255,255,255,0.3); border-radius: 20px; }
+        
+        .player { position: absolute; bottom: 50px; width: 50px; height: 50px; background: #3b82f6; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; transition: left 0.1s; }
+        
+        .ball { position: absolute; bottom: 80px; width: 30px; height: 30px; background: radial-gradient(circle at 30% 30%, #ff6b35, #c94b4b); border-radius: 50%; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+        
+        .obstacle { position: absolute; width: 60px; height: 40px; background: #ef4444; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        
+        .coin { position: absolute; width: 25px; height: 25px; background: #ffd700; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        
+        .stats { display: flex; justify-content: space-around; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .stat-item { text-align: center; color: #fff; }
+        .stat-value { font-size: 20px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        
+        .controls { display: flex; gap: 10px; margin-top: 10px; }
+        .btn { flex: 1; padding: 15px; border: none; border-radius: 15px; font-size: 18px; font-weight: bold; cursor: pointer; }
+        .btn-left { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; }
+        .btn-right { background: linear-gradient(135deg, #ef4444, #dc2626); color: #fff; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="score-display">🏀 <span id="score">0</span></div>
+            <div class="time-display">⏱️ <span id="time">60</span>s</div>
+        </div>
+        
+        <div class="court" id="court">
+            <div class="court-lines"></div>
+            <div class="player" id="player">🏃</div>
+            <div class="ball" id="ball">🏀</div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="coins">0</div>
+                <div class="stat-label">金币</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="distance">0</div>
+                <div class="stat-label">距离</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-left" id="btnLeft">◀️ 左移</button>
+            <button class="btn btn-right" id="btnRight">▶️ 右移</button>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const COURT_WIDTH = 100; // percentage
+        const PLAYER_WIDTH = 50;
+        const OBSTACLE_TYPES = ['🧱', '🚧', '🛑', '⚠️'];
+        
+        let score = 0;
+        let timeLeft = 60;
+        let coins = 0;
+        let distance = 0;
+        let playerX = 50;
+        let obstacles = [];
+        let coinItems = [];
+        let gameRunning = true;
+        let gameLoop = null;
+        let timerInterval = null;
+        
+        function loadData() {
+            const saved = GameCore.storage.get('basketball_dribble_data', null);
+            if (saved) {
+                score = saved.score;
+            }
+            updateUI();
+            startGame();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('basketball_dribble_data', { score });
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('time').textContent = timeLeft;
+            document.getElementById('coins').textContent = coins;
+            document.getElementById('distance').textContent = distance;
+        }
+        
+        function startGame() {
+            gameRunning = true;
+            
+            // Timer
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                updateUI();
+                if (timeLeft <= 0) {
+                    endGame();
+                }
+            }, 1000);
+            
+            // Game loop
+            gameLoop = setInterval(() => {
+                if (!gameRunning) return;
+                
+                // Move obstacles down
+                obstacles.forEach(obs => {
+                    obs.y += 2;
+                    if (obs.y > 100) {
+                        obstacles = obstacles.filter(o => o !== obs);
+                        distance += 10;
+                        score += 5;
+                    }
+                });
+                
+                // Move coins down
+                coinItems.forEach(coin => {
+                    coin.y += 2;
+                    if (coin.y > 100) {
+                        coinItems = coinItems.filter(c => c !== coin);
+                    }
+                });
+                
+                // Spawn new obstacles
+                if (Math.random() < 0.05) {
+                    spawnObstacle();
+                }
+                
+                // Spawn coins
+                if (Math.random() < 0.03) {
+                    spawnCoin();
+                }
+                
+                // Check collisions
+                checkCollisions();
+                
+                renderGame();
+                updateUI();
+            }, 50);
+        }
+        
+        function spawnObstacle() {
+            const x = Math.random() * 80 + 10;
+            obstacles.push({ x, y: -10, type: OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)] });
+        }
+        
+        function spawnCoin() {
+            const x = Math.random() * 80 + 10;
+            coinItems.push({ x, y: -10 });
+        }
+        
+        function checkCollisions() {
+            // Check obstacle collision
+            obstacles.forEach(obs => {
+                if (obs.y > 40 && obs.y < 60) {
+                    if (Math.abs(obs.x - playerX) < 15) {
+                        endGame();
+                    }
+                }
+            });
+            
+            // Check coin collection
+            coinItems.forEach(coin => {
+                if (coin.y > 40 && coin.y < 60) {
+                    if (Math.abs(coin.x - playerX) < 15) {
+                        coins++;
+                        score += 10;
+                        coinItems = coinItems.filter(c => c !== coin);
+                    }
+                }
+            });
+        }
+        
+        function renderGame() {
+            const court = document.getElementById('court');
+            
+            // Remove old elements
+            court.querySelectorAll('.obstacle, .coin').forEach(el => el.remove());
+            
+            // Render obstacles
+            obstacles.forEach(obs => {
+                const el = document.createElement('div');
+                el.className = 'obstacle';
+                el.style.left = obs.x + '%';
+                el.style.top = obs.y + '%';
+                el.textContent = obs.type;
+                court.appendChild(el);
+            });
+            
+            // Render coins
+            coinItems.forEach(coin => {
+                const el = document.createElement('div');
+                el.className = 'coin';
+                el.style.left = coin.x + '%';
+                el.style.top = coin.y + '%';
+                el.textContent = '💰';
+                court.appendChild(el);
+            });
+            
+            // Update player position
+            const player = document.getElementById('player');
+            player.style.left = `calc(${playerX}% - 25px)`;
+            
+            // Update ball position (follows player)
+            const ball = document.getElementById('ball');
+            ball.style.left = `calc(${playerX}% - 15px)`;
+        }
+        
+        function moveLeft() {
+            playerX = Math.max(10, playerX - 10);
+            renderGame();
+        }
+        
+        function moveRight() {
+            playerX = Math.min(90, playerX + 10);
+            renderGame();
+        }
+        
+        function endGame() {
+            gameRunning = false;
+            clearInterval(gameLoop);
+            clearInterval(timerInterval);
+            
+            showMessage(`游戏结束！得分: ${score}`);
+            saveData();
+            
+            setTimeout(() => {
+                resetGame();
+            }, 2000);
+        }
+        
+        function resetGame() {
+            score = 0;
+            timeLeft = 60;
+            coins = 0;
+            distance = 0;
+            playerX = 50;
+            obstacles = [];
+            coinItems = [];
+            updateUI();
+            startGame();
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 2000);
+        }
+        
+        document.getElementById('btnLeft').addEventListener('click', moveLeft);
+        document.getElementById('btnRight').addEventListener('click', moveRight);
+        
+        // Touch controls
+        document.getElementById('court').addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            const courtRect = document.getElementById('court').getBoundingClientRect();
+            const touchX = touch.clientX - courtRect.left;
+            if (touchX < courtRect.width / 2) {
+                moveLeft();
+            } else {
+                moveRight();
+            }
+        });
+        
+        GameCore.init({ highScore: 'basketball_dribble' });
+        loadData();
+    </script>
+</body>
+</html>

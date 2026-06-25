@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>拳击比赛</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #2d1b4e 0%, #4a2c7a 50%, #6b3fa0 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; overflow: hidden; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ff6b6b; }
+        .stats { display: flex; gap: 20px; font-size: 14px; }
+        
+        .canvas-area { flex: 1; background: rgba(0,0,0,0.5); border-radius: 15px; overflow: hidden; position: relative; }
+        canvas { width: 100%; height: 100%; }
+        
+        .controls { display: flex; justify-content: center; gap: 15px; margin-top: 15px; }
+        .control-btn { padding: 15px 30px; border: none; border-radius: 15px; font-size: 18px; font-weight: bold; cursor: pointer; background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .health-bars { display: flex; justify-content: space-between; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 15px; }
+        .health-bar { width: 45%; }
+        .health-label { font-size: 14px; margin-bottom: 5px; }
+        .health-fill { height: 20px; border-radius: 10px; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🥊 拳击比赛</div>
+            <div class="stats">
+                <span>🆚 回合: <span id="round">1</span></span>
+                <span>⏱️ 时间: <span id="time">60</span></span>
+            </div>
+        </div>
+        
+        <div class="health-bars">
+            <div class="health-bar">
+                <div class="health-label">👤 玩家</div>
+                <div class="health-fill" id="playerHealth" style="width: 100%; background: #48c78e;"></div>
+            </div>
+            <div class="health-bar">
+                <div class="health-label">🤖 对手</div>
+                <div class="health-fill" id="enemyHealth" style="width: 100%; background: #ff6b6b;"></div>
+            </div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" onclick="punchLeft()">👊 左拳</button>
+            <button class="control-btn" onclick="punchRight()">🤜 右拳</button>
+            <button class="control-btn" onclick="block()">🛡️ 格挡</button>
+            <button class="control-btn" onclick="resetGame()">🔄 重新开始</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '拳击比赛';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameRunning = true;
+        let round = 1;
+        let timeLeft = 60;
+        let playerHealth = 100;
+        let enemyHealth = 100;
+        let playerBlocking = false;
+        let enemyBlocking = false;
+        let playerPunching = null;
+        let enemyPunching = null;
+        let punchTimer = 0;
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        
+        function initGame() {
+            resizeCanvas();
+            gameRunning = true;
+            round = 1;
+            timeLeft = 60;
+            playerHealth = 100;
+            enemyHealth = 100;
+            updateUI();
+            
+            const timer = setInterval(() => {
+                if (!gameRunning) {
+                    clearInterval(timer);
+                    return;
+                }
+                
+                timeLeft--;
+                updateUI();
+                
+                if (timeLeft <= 0) {
+                    round++;
+                    if (round > 3) {
+                        gameOver();
+                        clearInterval(timer);
+                    } else {
+                        timeLeft = 60;
+                        GameCore.hints.show(`第${round}回合开始！`);
+                    }
+                }
+            }, 1000);
+            
+            gameLoop();
+        }
+        
+        function updateUI() {
+            document.getElementById('round').textContent = round;
+            document.getElementById('time').textContent = timeLeft;
+            document.getElementById('playerHealth').style.width = playerHealth + '%';
+            document.getElementById('enemyHealth').style.width = enemyHealth + '%';
+            
+            GameCore.highScore.set(GAME_NAME, round);
+        }
+        
+        function punchLeft() {
+            if (playerPunching || !gameRunning) return;
+            playerPunching = 'left';
+            punchTimer = 15;
+            
+            if (!enemyBlocking) {
+                enemyHealth = Math.max(0, enemyHealth - 15);
+                GameCore.hints.show('👊 左拳命中！');
+            } else {
+                GameCore.hints.show('🛡️ 对手格挡！');
+            }
+            
+            checkGameOver();
+            updateUI();
+        }
+        
+        function punchRight() {
+            if (playerPunching || !gameRunning) return;
+            playerPunching = 'right';
+            punchTimer = 15;
+            
+            if (!enemyBlocking) {
+                enemyHealth = Math.max(0, enemyHealth - 20);
+                GameCore.hints.show('🤜 右拳命中！');
+            } else {
+                GameCore.hints.show('🛡️ 对手格挡！');
+            }
+            
+            checkGameOver();
+            updateUI();
+        }
+        
+        function block() {
+            if (playerPunching || !gameRunning) return;
+            playerBlocking = true;
+            setTimeout(() => {
+                playerBlocking = false;
+            }, 500);
+        }
+        
+        function enemyAttack() {
+            if (Math.random() < 0.02 && !enemyPunching && gameRunning) {
+                const attackType = Math.random() > 0.5 ? 'left' : 'right';
+                enemyPunching = attackType;
+                punchTimer = 15;
+                
+                if (!playerBlocking) {
+                    const damage = attackType === 'left' ? 10 : 15;
+                    playerHealth = Math.max(0, playerHealth - damage);
+                    GameCore.hints.show(`🤕 被${attackType === 'left' ? '左拳' : '右拳'}击中！`);
+                } else {
+                    GameCore.hints.show('🛡️ 格挡成功！');
+                }
+                
+                checkGameOver();
+                updateUI();
+            }
+        }
+        
+        function checkGameOver() {
+            if (playerHealth <= 0) {
+                gameOver(false);
+            } else if (enemyHealth <= 0) {
+                gameOver(true);
+            }
+        }
+        
+        function update() {
+            if (!gameRunning) return;
+            
+            if (playerPunching) {
+                punchTimer--;
+                if (punchTimer <= 0) {
+                    playerPunching = null;
+                }
+            }
+            
+            if (enemyPunching) {
+                punchTimer--;
+                if (punchTimer <= 0) {
+                    enemyPunching = null;
+                }
+            }
+            
+            enemyAttack();
+        }
+        
+        function render() {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#4a7c23';
+            ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+            
+            ctx.fillStyle = '#4ecdc4';
+            const playerX = canvas.width * 0.25;
+            const playerY = canvas.height / 2;
+            
+            ctx.beginPath();
+            ctx.arc(playerX, playerY - 30, 25, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillRect(playerX - 20, playerY, 40, 50);
+            
+            if (playerPunching === 'left') {
+                ctx.fillRect(playerX - 40, playerY + 10, 30, 15);
+            } else {
+                ctx.fillRect(playerX - 20, playerY + 10, 20, 15);
+            }
+            
+            if (playerPunching === 'right') {
+                ctx.fillRect(playerX + 30, playerY + 10, 30, 15);
+            } else {
+                ctx.fillRect(playerX + 20, playerY + 10, 20, 15);
+            }
+            
+            if (playerBlocking) {
+                ctx.fillStyle = '#ffd700';
+                ctx.fillRect(playerX - 10, playerY, 20, 30);
+            }
+            
+            ctx.fillStyle = '#ff6b6b';
+            const enemyX = canvas.width * 0.75;
+            const enemyY = canvas.height / 2;
+            
+            ctx.beginPath();
+            ctx.arc(enemyX, enemyY - 30, 25, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillRect(enemyX - 20, enemyY, 40, 50);
+            
+            if (enemyPunching === 'right') {
+                ctx.fillRect(enemyX + 30, enemyY + 10, 30, 15);
+            } else {
+                ctx.fillRect(enemyX + 20, enemyY + 10, 20, 15);
+            }
+            
+            if (enemyPunching === 'left') {
+                ctx.fillRect(enemyX - 40, enemyY + 10, 30, 15);
+            } else {
+                ctx.fillRect(enemyX - 20, enemyY + 10, 20, 15);
+            }
+            
+            if (enemyBlocking) {
+                ctx.fillStyle = '#ffd700';
+                ctx.fillRect(enemyX, enemyY, 20, 30);
+            }
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('VS', canvas.width / 2, playerY);
+        }
+        
+        function gameLoop() {
+            update();
+            render();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        function gameOver(playerWon) {
+            gameRunning = false;
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            
+            if (playerWon) {
+                GameCore.hints.show('🎉 胜利！');
+                ctx.fillText('胜利！', canvas.width / 2, canvas.height / 2);
+            } else {
+                GameCore.hints.show('💀 失败！');
+                ctx.fillText('失败！', canvas.width / 2, canvas.height / 2);
+            }
+        }
+        
+        function resetGame() {
+            initGame();
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

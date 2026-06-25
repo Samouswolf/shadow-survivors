@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>密码破解</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); min-height: 100vh; }
+        .game-container { padding: 15px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .header-title { color: #ffd700; font-size: 20px; font-weight: bold; }
+        .timer { color: #ef4444; font-size: 18px; font-weight: bold; }
+        
+        .cipher-panel { background: rgba(255,255,255,0.1); border-radius: 15px; padding: 20px; margin-bottom: 15px; }
+        .cipher-text { color: #fff; font-size: 24px; text-align: center; letter-spacing: 3px; margin-bottom: 15px; }
+        .cipher-hint { color: #4ecdc4; font-size: 14px; text-align: center; }
+        
+        .input-area { margin-bottom: 15px; }
+        .input-box { width: 100%; padding: 15px; font-size: 20px; text-align: center; background: rgba(74,85,104,0.5); border: 2px solid #4a5568; border-radius: 15px; color: #fff; outline: none; }
+        .input-box:focus { border-color: #4ecdc4; }
+        
+        .keyboard { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; margin-bottom: 15px; }
+        .key { aspect-ratio: 1; background: rgba(74,85,104,0.5); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; cursor: pointer; }
+        .key:hover { background: rgba(74,85,104,0.8); }
+        .key.special { grid-column: span 2; }
+        
+        .stats { display: flex; justify-content: space-around; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .stat-item { text-align: center; color: #fff; }
+        .stat-value { font-size: 24px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        
+        .actions { display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 15px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-submit { background: linear-gradient(135deg, #4ecdc4, #44a08d); color: #fff; }
+        .btn-hint { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #fff; }
+        .btn-new { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+        
+        .message { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="header-title">🔐 密码破解</div>
+            <div class="timer" id="timer">60s</div>
+        </div>
+        
+        <div class="cipher-panel">
+            <div class="cipher-text" id="cipherText">KHOOR ZRUOG</div>
+            <div class="cipher-hint" id="cipherHint">提示：凯撒密码，偏移量为3</div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" class="input-box" id="answerInput" placeholder="输入解密后的明文" maxlength="20">
+        </div>
+        
+        <div class="keyboard" id="keyboard"></div>
+        
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="score">0</div>
+                <div class="stat-label">得分</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="level">1</div>
+                <div class="stat-label">关卡</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="streak">0</div>
+                <div class="stat-label">连击</div>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <button class="btn btn-hint" id="btnHint">💡 提示</button>
+            <button class="btn btn-submit" id="btnSubmit">✅ 提交</button>
+            <button class="btn btn-new" id="btnNew">🔄 新密码</button>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const CIPHERS = [
+            { cipher: 'KHOOR ZRUOG', plain: 'HELLO WORLD', hint: '凯撒密码，每个字母后移3位', type: 'caesar', shift: 3 },
+            { cipher: 'BMMFMP XPSME', plain: 'ALLOWE WORLD', hint: '凯撒密码，每个字母后移1位', type: 'caesar', shift: 1 },
+            { cipher: 'MAX YMNX', plain: 'HOW ARE', hint: '凯撒密码，每个字母前移3位', type: 'caesar', shift: -3 },
+            { cipher: 'XYLZW XLMY', plain: 'WHICH WAY', hint: '凯撒密码，每个字母后移1位', type: 'caesar', shift: 1 },
+            { cipher: '14 25 22 5 18 4', plain: 'NOWHERE', hint: '字母表顺序，A=1, B=2...', type: 'numeric' },
+            { cipher: '20 8 5 12 15 22 5 18 14', plain: 'THELOVERN', hint: '字母表顺序', type: 'numeric' },
+            { cipher: 'YMNX YB', plain: 'WHAT IS', hint: '凯撒密码，后移1位', type: 'caesar', shift: 1 },
+            { cipher: '23 8 1 20', plain: 'WHAT', hint: '字母表顺序', type: 'numeric' },
+            { cipher: 'KYPLO OLXP', plain: 'HELLO WORLD'.slice(0, 10), hint: '凯撒密码，后移3位', type: 'caesar', shift: 3 },
+            { cipher: 'FDB DCB', plain: 'ABC DEF', hint: '倒序字母表，A=Z, B=Y...', type: 'reverse' }
+        ];
+        
+        const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        const NUMBERS = '1234567890';
+        
+        let currentCipher = 0;
+        let score = 0;
+        let level = 1;
+        let streak = 0;
+        let timeLeft = 60;
+        let timerInterval = null;
+        
+        function initKeyboard() {
+            const keyboard = document.getElementById('keyboard');
+            keyboard.innerHTML = '';
+            
+            ALPHABET.split('').forEach(char => {
+                const key = document.createElement('div');
+                key.className = 'key';
+                key.textContent = char;
+                key.onclick = () => addChar(char);
+                keyboard.appendChild(key);
+            });
+            
+            const spaceKey = document.createElement('div');
+            spaceKey.className = 'key special';
+            spaceKey.textContent = '空格';
+            spaceKey.onclick = () => addChar(' ');
+            keyboard.appendChild(spaceKey);
+            
+            const backKey = document.createElement('div');
+            backKey.className = 'key special';
+            backKey.textContent = '⌫';
+            backKey.onclick = () => backspace();
+            keyboard.appendChild(backKey);
+        }
+        
+        function addChar(char) {
+            const input = document.getElementById('answerInput');
+            if (input.value.length < 20) {
+                input.value += char;
+            }
+        }
+        
+        function backspace() {
+            const input = document.getElementById('answerInput');
+            input.value = input.value.slice(0, -1);
+        }
+        
+        function loadData() {
+            const saved = GameCore.storage.get('code_breaker_data', null);
+            if (saved) {
+                score = saved.score;
+                level = saved.level;
+                streak = saved.streak;
+            }
+            updateStats();
+            initKeyboard();
+            startNewCipher();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('code_breaker_data', { score, level, streak });
+        }
+        
+        function updateStats() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('level').textContent = level;
+            document.getElementById('streak').textContent = streak;
+        }
+        
+        function startNewCipher() {
+            const cipher = CIPHERS[currentCipher];
+            document.getElementById('cipherText').textContent = cipher.cipher;
+            document.getElementById('cipherHint').textContent = '提示：' + cipher.hint;
+            document.getElementById('answerInput').value = '';
+            
+            resetTimer();
+            startTimer();
+        }
+        
+        function resetTimer() {
+            timeLeft = 60;
+            document.getElementById('timer').textContent = '60s';
+            document.getElementById('timer').style.color = '#ef4444';
+        }
+        
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                document.getElementById('timer').textContent = timeLeft + 's';
+                
+                if (timeLeft <= 10) {
+                    document.getElementById('timer').style.color = '#fbbf24';
+                }
+                
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    showMessage('⏱️ 时间到！正确答案：' + CIPHERS[currentCipher].plain);
+                    streak = 0;
+                    updateStats();
+                    saveData();
+                    setTimeout(() => nextCipher(), 2000);
+                }
+            }, 1000);
+        }
+        
+        function submitAnswer() {
+            const input = document.getElementById('answerInput').value.toUpperCase().trim();
+            const cipher = CIPHERS[currentCipher];
+            
+            if (input === cipher.plain) {
+                clearInterval(timerInterval);
+                streak++;
+                const bonus = Math.floor(timeLeft / 10);
+                const points = 10 + bonus + streak * 2;
+                score += points;
+                level++;
+                
+                showMessage(`🎉 破解成功！+${points}分`);
+                updateStats();
+                saveData();
+                setTimeout(() => nextCipher(), 2000);
+            } else {
+                showMessage('❌ 密码错误，请重试');
+                streak = 0;
+                updateStats();
+                saveData();
+            }
+        }
+        
+        function nextCipher() {
+            currentCipher++;
+            if (currentCipher >= CIPHERS.length) {
+                currentCipher = 0;
+                level++;
+            }
+            startNewCipher();
+            saveData();
+        }
+        
+        function showHint() {
+            const cipher = CIPHERS[currentCipher];
+            let hint = cipher.hint;
+            
+            if (cipher.type === 'caesar') {
+                hint += '\n例如：A→' + ALPHABET[(ALPHABET.indexOf('A') + cipher.shift + 26) % 26];
+            } else if (cipher.type === 'numeric') {
+                hint += '\nA=1, B=2, C=3...';
+            }
+            
+            showMessage(hint);
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 3000);
+        }
+        
+        document.getElementById('btnSubmit').addEventListener('click', submitAnswer);
+        document.getElementById('btnHint').addEventListener('click', showHint);
+        document.getElementById('btnNew').addEventListener('click', () => {
+            clearInterval(timerInterval);
+            nextCipher();
+        });
+        document.getElementById('answerInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submitAnswer();
+        });
+        
+        GameCore.init({ highScore: 'code_breaker' });
+        loadData();
+    </script>
+</body>
+</html>

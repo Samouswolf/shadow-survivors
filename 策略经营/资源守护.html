@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>资源守护</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0d1b2a 0%, #1b263b 50%, #2d3a4b 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; overflow: hidden; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #fff; }
+        .stats { display: flex; gap: 20px; font-size: 14px; }
+        
+        .canvas-area { flex: 1; background: rgba(0,0,0,0.5); border-radius: 15px; overflow: hidden; position: relative; }
+        canvas { width: 100%; height: 100%; }
+        
+        .resources { display: flex; gap: 10px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; }
+        
+        .resource-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 14px; cursor: pointer; background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">💎 资源守护</div>
+            <div class="stats">
+                <span>💎 宝石: <span id="gems">0</span></span>
+                <span>⚔️ 战士: <span id="warriors">0</span></span>
+                <span>🧟 敌人: <span id="enemies">0</span></span>
+            </div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="resources">
+            <button class="resource-btn" onclick="buildCollector()">⛏️ 收集器 (50)</button>
+            <button class="resource-btn" onclick="hireWarrior()">⚔️ 战士 (80)</button>
+            <button class="resource-btn" onclick="buildTower()">🏰 防御塔 (120)</button>
+            <button class="resource-btn" onclick="useSpell()">✨ 魔法 (200)</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '资源守护';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameRunning = true;
+        let gems = 0;
+        let collectors = [];
+        let warriors = [];
+        let towers = [];
+        let enemies = [];
+        let gemParticles = [];
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        
+        function initGame() {
+            resizeCanvas();
+            gameRunning = true;
+            gems = 0;
+            collectors = [];
+            warriors = [];
+            towers = [];
+            enemies = [];
+            gemParticles = [];
+            updateUI();
+            gameLoop();
+            
+            startSpawning();
+        }
+        
+        function updateUI() {
+            document.getElementById('gems').textContent = gems;
+            document.getElementById('warriors').textContent = warriors.length;
+            document.getElementById('enemies').textContent = enemies.length;
+            
+            GameCore.highScore.set(GAME_NAME, gems);
+        }
+        
+        function startSpawning() {
+            if (!gameRunning) return;
+            
+            setTimeout(() => {
+                if (Math.random() > 0.5) {
+                    enemies.push({
+                        x: canvas.width,
+                        y: canvas.height / 2 + (Math.random() - 0.5) * 150,
+                        hp: 40 + Math.floor(gems / 100) * 15,
+                        speed: 1.5 + Math.floor(gems / 200) * 0.5,
+                        type: Math.random() > 0.8 ? 'boss' : 'normal'
+                    });
+                } else {
+                    spawnGem();
+                }
+                
+                startSpawning();
+            }, 1500);
+        }
+        
+        function spawnGem() {
+            gemParticles.push({
+                x: Math.random() * (canvas.width - 100) + 50,
+                y: Math.random() * (canvas.height - 100) + 50,
+                value: 10 + Math.floor(Math.random() * 20)
+            });
+        }
+        
+        function buildCollector() {
+            if (gems >= 50) {
+                gems -= 50;
+                collectors.push({
+                    x: canvas.width * 0.2 + collectors.length * 80,
+                    y: canvas.height * 0.8,
+                    range: 100,
+                    lastCollect: 0
+                });
+                updateUI();
+                GameCore.hints.show('⛏️ 建造收集器！');
+            } else {
+                GameCore.hints.show('宝石不足！');
+            }
+        }
+        
+        function hireWarrior() {
+            if (gems >= 80) {
+                gems -= 80;
+                warriors.push({
+                    x: canvas.width * 0.3 + warriors.length * 60,
+                    y: canvas.height * 0.7,
+                    hp: 100,
+                    damage: 25,
+                    lastAttack: 0
+                });
+                updateUI();
+                GameCore.hints.show('⚔️ 招募战士！');
+            } else {
+                GameCore.hints.show('宝石不足！');
+            }
+        }
+        
+        function buildTower() {
+            if (gems >= 120) {
+                gems -= 120;
+                towers.push({
+                    x: canvas.width * 0.4 + towers.length * 100,
+                    y: canvas.height * 0.6,
+                    range: 150,
+                    damage: 35,
+                    lastShot: 0
+                });
+                updateUI();
+                GameCore.hints.show('🏰 建造防御塔！');
+            } else {
+                GameCore.hints.show('宝石不足！');
+            }
+        }
+        
+        function useSpell() {
+            if (gems >= 200) {
+                gems -= 200;
+                enemies.forEach(enemy => {
+                    enemy.hp -= 100;
+                    if (enemy.hp <= 0) {
+                        gems += enemy.type === 'boss' ? 50 : 20;
+                    }
+                });
+                enemies = enemies.filter(e => e.hp > 0);
+                updateUI();
+                GameCore.hints.show('✨ 魔法爆发！消灭所有敌人！');
+            } else {
+                GameCore.hints.show('宝石不足！');
+            }
+        }
+        
+        function update() {
+            if (!gameRunning) return;
+            
+            enemies.forEach(enemy => {
+                enemy.x -= enemy.speed;
+                
+                if (enemy.x < 30) {
+                    gems = Math.max(0, gems - 20);
+                    updateUI();
+                    enemy.x = canvas.width + 100;
+                    
+                    if (gems < 0) {
+                        gameOver();
+                    }
+                }
+            });
+            
+            enemies = enemies.filter(e => e.x < canvas.width + 50);
+            
+            collectors.forEach(collector => {
+                if (Date.now() - collector.lastCollect > 500) {
+                    gemParticles.forEach(gem => {
+                        const dx = gem.x - collector.x;
+                        const dy = gem.y - collector.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < collector.range) {
+                            gems += gem.value;
+                            updateUI();
+                            gem.x = -100;
+                        }
+                    });
+                    collector.lastCollect = Date.now();
+                }
+            });
+            
+            gemParticles = gemParticles.filter(g => g.x >= 0);
+            
+            warriors.forEach(warrior => {
+                if (Date.now() - warrior.lastAttack > 800) {
+                    let closestEnemy = null;
+                    let closestDist = Infinity;
+                    
+                    enemies.forEach(enemy => {
+                        const dx = enemy.x - warrior.x;
+                        const dy = enemy.y - warrior.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < 60 && dist < closestDist) {
+                            closestDist = dist;
+                            closestEnemy = enemy;
+                        }
+                    });
+                    
+                    if (closestEnemy) {
+                        closestEnemy.hp -= warrior.damage;
+                        warrior.lastAttack = Date.now();
+                        
+                        if (closestEnemy.hp <= 0) {
+                            gems += closestEnemy.type === 'boss' ? 50 : 20;
+                            updateUI();
+                            closestEnemy.x = canvas.width + 100;
+                        }
+                    }
+                }
+            });
+            
+            towers.forEach(tower => {
+                if (Date.now() - tower.lastShot > 1000) {
+                    let closestEnemy = null;
+                    let closestDist = Infinity;
+                    
+                    enemies.forEach(enemy => {
+                        const dx = enemy.x - tower.x;
+                        const dy = enemy.y - tower.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < tower.range && dist < closestDist) {
+                            closestDist = dist;
+                            closestEnemy = enemy;
+                        }
+                    });
+                    
+                    if (closestEnemy) {
+                        closestEnemy.hp -= tower.damage;
+                        tower.lastShot = Date.now();
+                        
+                        if (closestEnemy.hp <= 0) {
+                            gems += closestEnemy.type === 'boss' ? 50 : 20;
+                            updateUI();
+                            closestEnemy.x = canvas.width + 100;
+                        }
+                    }
+                }
+            });
+        }
+        
+        function render() {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#4a7c23';
+            ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+            
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height - 60);
+            ctx.lineTo(50, canvas.height - 60);
+            ctx.lineTo(25, canvas.height - 80);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('基地', 25, canvas.height - 55);
+            
+            collectors.forEach(collector => {
+                ctx.fillStyle = '#4ecdc4';
+                ctx.beginPath();
+                ctx.arc(collector.x, collector.y, 20, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                ctx.fillText('⛏️', collector.x, collector.y + 6);
+                
+                ctx.strokeStyle = 'rgba(78, 205, 196, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(collector.x, collector.y, collector.range, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            warriors.forEach(warrior => {
+                ctx.fillStyle = '#ff6b6b';
+                ctx.beginPath();
+                ctx.arc(warrior.x, warrior.y, 20, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                ctx.fillText('⚔️', warrior.x, warrior.y + 6);
+                
+                ctx.fillStyle = '#48c78e';
+                ctx.fillRect(warrior.x - 15, warrior.y - 25, 30 * (warrior.hp / 100), 5);
+            });
+            
+            towers.forEach(tower => {
+                ctx.fillStyle = '#667eea';
+                ctx.fillRect(tower.x - 20, tower.y - 25, 40, 50);
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                ctx.fillText('🏰', tower.x, tower.y + 5);
+            });
+            
+            gemParticles.forEach(gem => {
+                ctx.fillStyle = '#ffd700';
+                ctx.beginPath();
+                ctx.moveTo(gem.x, gem.y - 10);
+                ctx.lineTo(gem.x + 7, gem.y);
+                ctx.lineTo(gem.x, gem.y + 10);
+                ctx.lineTo(gem.x - 7, gem.y);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.fillText(gem.value, gem.x, gem.y + 18);
+            });
+            
+            enemies.forEach(enemy => {
+                ctx.fillStyle = enemy.type === 'boss' ? '#ff4757' : '#ff6b6b';
+                ctx.beginPath();
+                ctx.arc(enemy.x, enemy.y, enemy.type === 'boss' ? 25 : 15, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.fillText(enemy.hp, enemy.x, enemy.y + 4);
+                
+                if (enemy.type === 'boss') {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.font = '16px Arial';
+                    ctx.fillText('👹', enemy.x, enemy.y - 20);
+                }
+            });
+        }
+        
+        function gameLoop() {
+            update();
+            render();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            GameCore.hints.show('💀 资源耗尽！');
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏结束', canvas.width / 2, canvas.height / 2);
+        }
+        
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

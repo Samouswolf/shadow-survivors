@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>王国保卫战</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; overflow: hidden; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #fff; }
+        .stats { display: flex; gap: 20px; font-size: 14px; }
+        
+        .canvas-area { flex: 1; background: rgba(0,0,0,0.5); border-radius: 15px; overflow: hidden; position: relative; }
+        canvas { width: 100%; height: 100%; }
+        
+        .buildings { display: flex; gap: 10px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; }
+        
+        .build-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 14px; cursor: pointer; background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">👑 王国保卫战</div>
+            <div class="stats">
+                <span>💰 金币: <span id="gold">200</span></span>
+                <span>❤️ 生命: <span id="lives">30</span></span>
+                <span>🏰 建筑: <span id="buildings">0</span></span>
+            </div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="buildings">
+            <button class="build-btn" onclick="buildBarracks()">🏠 兵营 (60)</button>
+            <button class="build-btn" onclick="buildMagicTower()">🪄 魔法塔 (90)</button>
+            <button class="build-btn" onclick="buildCatapult()">🎯 投石机 (150)</button>
+            <button class="build-btn" onclick="summonHero()">🦸 英雄 (200)</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '王国保卫战';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameRunning = true;
+        let gold = 200;
+        let lives = 30;
+        let buildings = 0;
+        let barracks = [];
+        let magicTowers = [];
+        let catapults = [];
+        let heroes = [];
+        let enemies = [];
+        let soldiers = [];
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        
+        function initGame() {
+            resizeCanvas();
+            gameRunning = true;
+            gold = 200;
+            lives = 30;
+            buildings = 0;
+            barracks = [];
+            magicTowers = [];
+            catapults = [];
+            heroes = [];
+            enemies = [];
+            soldiers = [];
+            updateUI();
+            gameLoop();
+            
+            startEnemyWave();
+        }
+        
+        function updateUI() {
+            document.getElementById('gold').textContent = gold;
+            document.getElementById('lives').textContent = lives;
+            document.getElementById('buildings').textContent = buildings;
+            
+            GameCore.highScore.set(GAME_NAME, gold);
+        }
+        
+        function startEnemyWave() {
+            if (!gameRunning) return;
+            
+            const waveSize = 3 + Math.floor(gold / 100);
+            
+            for (let i = 0; i < waveSize; i++) {
+                setTimeout(() => {
+                    enemies.push({
+                        x: canvas.width,
+                        y: canvas.height / 3 + (Math.random() - 0.5) * 100,
+                        hp: 50 + Math.floor(gold / 50) * 20,
+                        speed: 1.2 + Math.floor(gold / 200) * 0.4,
+                        type: Math.random() > 0.85 ? 'elite' : 'normal'
+                    });
+                }, i * 400);
+            }
+            
+            setTimeout(startEnemyWave, waveSize * 400 + 8000);
+        }
+        
+        function buildBarracks() {
+            if (gold >= 60) {
+                gold -= 60;
+                barracks.push({
+                    x: canvas.width * 0.25 + barracks.length * 100,
+                    y: canvas.height * 0.75,
+                    lastSpawn: 0
+                });
+                buildings++;
+                updateUI();
+                GameCore.hints.show('🏠 建造兵营！');
+            } else {
+                GameCore.hints.show('金币不足！');
+            }
+        }
+        
+        function buildMagicTower() {
+            if (gold >= 90) {
+                gold -= 90;
+                magicTowers.push({
+                    x: canvas.width * 0.4 + magicTowers.length * 120,
+                    y: canvas.height * 0.6,
+                    damage: 40,
+                    range: 180,
+                    lastShot: 0
+                });
+                buildings++;
+                updateUI();
+                GameCore.hints.show('🪄 建造魔法塔！');
+            } else {
+                GameCore.hints.show('金币不足！');
+            }
+        }
+        
+        function buildCatapult() {
+            if (gold >= 150) {
+                gold -= 150;
+                catapults.push({
+                    x: canvas.width * 0.5 + catapults.length * 150,
+                    y: canvas.height * 0.5,
+                    damage: 80,
+                    range: 250,
+                    lastShot: 0
+                });
+                buildings++;
+                updateUI();
+                GameCore.hints.show('🎯 建造投石机！');
+            } else {
+                GameCore.hints.show('金币不足！');
+            }
+        }
+        
+        function summonHero() {
+            if (gold >= 200) {
+                gold -= 200;
+                heroes.push({
+                    x: canvas.width * 0.3,
+                    y: canvas.height / 2,
+                    hp: 200,
+                    damage: 50,
+                    speed: 2,
+                    target: null
+                });
+                buildings++;
+                updateUI();
+                GameCore.hints.show('🦸 召唤英雄！');
+            } else {
+                GameCore.hints.show('金币不足！');
+            }
+        }
+        
+        function update() {
+            if (!gameRunning) return;
+            
+            enemies.forEach(enemy => {
+                enemy.x -= enemy.speed;
+                
+                if (enemy.x < 50) {
+                    lives -= enemy.type === 'elite' ? 3 : 1;
+                    updateUI();
+                    enemy.x = canvas.width + 100;
+                    
+                    if (lives <= 0) {
+                        gameOver();
+                    }
+                }
+            });
+            
+            enemies = enemies.filter(e => e.x < canvas.width + 50);
+            
+            barracks.forEach(barrack => {
+                if (Date.now() - barrack.lastSpawn > 3000 && soldiers.length < 10) {
+                    soldiers.push({
+                        x: barrack.x,
+                        y: barrack.y,
+                        hp: 60,
+                        damage: 15,
+                        target: null
+                    });
+                    barrack.lastSpawn = Date.now();
+                }
+            });
+            
+            soldiers.forEach(soldier => {
+                if (!soldier.target) {
+                    soldiers.forEach(s => {
+                        enemies.forEach(enemy => {
+                            const dx = enemy.x - s.x;
+                            const dy = enemy.y - s.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            
+                            if (dist < 200 && !s.target) {
+                                s.target = enemy;
+                            }
+                        });
+                    });
+                }
+                
+                if (soldier.target) {
+                    const dx = soldier.target.x - soldier.x;
+                    const dy = soldier.target.y - soldier.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 40) {
+                        soldier.target.hp -= soldier.damage;
+                        
+                        if (soldier.target.hp <= 0) {
+                            gold += soldier.target.type === 'elite' ? 40 : 20;
+                            updateUI();
+                            soldier.target.x = canvas.width + 100;
+                            soldier.target = null;
+                        }
+                    } else {
+                        soldier.x += (dx / dist) * 1;
+                        soldier.y += (dy / dist) * 1;
+                    }
+                }
+            });
+            
+            soldiers = soldiers.filter(s => s.hp > 0);
+            
+            magicTowers.forEach(tower => {
+                if (Date.now() - tower.lastShot > 800) {
+                    let closestEnemy = null;
+                    let closestDist = Infinity;
+                    
+                    enemies.forEach(enemy => {
+                        const dx = enemy.x - tower.x;
+                        const dy = enemy.y - tower.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < tower.range && dist < closestDist) {
+                            closestDist = dist;
+                            closestEnemy = enemy;
+                        }
+                    });
+                    
+                    if (closestEnemy) {
+                        closestEnemy.hp -= tower.damage;
+                        tower.lastShot = Date.now();
+                        
+                        if (closestEnemy.hp <= 0) {
+                            gold += closestEnemy.type === 'elite' ? 40 : 20;
+                            updateUI();
+                            closestEnemy.x = canvas.width + 100;
+                        }
+                    }
+                }
+            });
+            
+            catapults.forEach(catapult => {
+                if (Date.now() - catapult.lastShot > 2000) {
+                    let farthestEnemy = null;
+                    let farthestDist = 0;
+                    
+                    enemies.forEach(enemy => {
+                        const dx = enemy.x - catapult.x;
+                        const dy = enemy.y - catapult.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < catapult.range && dist > farthestDist) {
+                            farthestDist = dist;
+                            farthestEnemy = enemy;
+                        }
+                    });
+                    
+                    if (farthestEnemy) {
+                        farthestEnemy.hp -= catapult.damage;
+                        catapult.lastShot = Date.now();
+                        
+                        if (farthestEnemy.hp <= 0) {
+                            gold += farthestEnemy.type === 'elite' ? 40 : 20;
+                            updateUI();
+                            farthestEnemy.x = canvas.width + 100;
+                        }
+                    }
+                }
+            });
+            
+            heroes.forEach(hero => {
+                if (!hero.target) {
+                    let closestEnemy = null;
+                    let closestDist = Infinity;
+                    
+                    enemies.forEach(enemy => {
+                        const dx = enemy.x - hero.x;
+                        const dy = enemy.y - hero.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                            closestEnemy = enemy;
+                        }
+                    });
+                    hero.target = closestEnemy;
+                }
+                
+                if (hero.target) {
+                    const dx = hero.target.x - hero.x;
+                    const dy = hero.target.y - hero.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 30) {
+                        hero.target.hp -= hero.damage;
+                        
+                        if (hero.target.hp <= 0) {
+                            gold += hero.target.type === 'elite' ? 50 : 30;
+                            updateUI();
+                            hero.target.x = canvas.width + 100;
+                            hero.target = null;
+                        }
+                    } else {
+                        hero.x += (dx / dist) * hero.speed;
+                        hero.y += (dy / dist) * hero.speed;
+                    }
+                }
+            });
+        }
+        
+        function render() {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#4a7c23';
+            ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+            
+            ctx.fillStyle = '#8b4513';
+            ctx.fillRect(30, canvas.height / 2 - 40, 40, 80);
+            
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.moveTo(10, canvas.height / 2 - 50);
+            ctx.lineTo(90, canvas.height / 2 - 50);
+            ctx.lineTo(50, canvas.height / 2 - 80);
+            ctx.closePath();
+            ctx.fill();
+            
+            barracks.forEach(barrack => {
+                ctx.fillStyle = '#8b7355';
+                ctx.fillRect(barrack.x - 25, barrack.y - 20, 50, 40);
+                
+                ctx.fillStyle = '#5d4e37';
+                ctx.fillRect(barrack.x - 20, barrack.y - 25, 40, 10);
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🏠', barrack.x, barrack.y + 5);
+            });
+            
+            magicTowers.forEach(tower => {
+                ctx.fillStyle = '#9b59b6';
+                ctx.beginPath();
+                ctx.arc(tower.x, tower.y, 25, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                ctx.fillText('🪄', tower.x, tower.y + 6);
+                
+                ctx.strokeStyle = 'rgba(155, 89, 182, 0.3)';
+                ctx.beginPath();
+                ctx.arc(tower.x, tower.y, tower.range, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            catapults.forEach(catapult => {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.fillRect(catapult.x - 30, catapult.y - 15, 60, 30);
+                
+                ctx.fillStyle = '#2c3e50';
+                ctx.fillRect(catapult.x + 20, catapult.y - 10, 20, 20);
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🎯', catapult.x, catapult.y + 6);
+            });
+            
+            heroes.forEach(hero => {
+                ctx.fillStyle = '#e74c3c';
+                ctx.beginPath();
+                ctx.arc(hero.x, hero.y, 25, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🦸', hero.x, hero.y + 7);
+                
+                ctx.fillStyle = '#48c78e';
+                ctx.fillRect(hero.x - 20, hero.y - 35, 40 * (hero.hp / 200), 5);
+            });
+            
+            soldiers.forEach(soldier => {
+                ctx.fillStyle = '#3498db';
+                ctx.beginPath();
+                ctx.arc(soldier.x, soldier.y, 12, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('⚔️', soldier.x, soldier.y + 4);
+            });
+            
+            enemies.forEach(enemy => {
+                ctx.fillStyle = enemy.type === 'elite' ? '#e74c3c' : '#ff6b6b';
+                ctx.beginPath();
+                ctx.arc(enemy.x, enemy.y, enemy.type === 'elite' ? 20 : 15, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(enemy.hp, enemy.x, enemy.y + 4);
+                
+                if (enemy.type === 'elite') {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.font = '14px Arial';
+                    ctx.fillText('⭐', enemy.x, enemy.y - 20);
+                }
+            });
+        }
+        
+        function gameLoop() {
+            update();
+            render();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            GameCore.hints.show('💀 王国沦陷！');
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏结束', canvas.width / 2, canvas.height / 2);
+        }
+        
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

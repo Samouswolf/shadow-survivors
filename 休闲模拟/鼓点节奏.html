@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>鼓点节奏</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #4a1a1a 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .score-display { color: #ffd700; font-size: 24px; font-weight: bold; }
+        .combo-display { color: #4ecdc4; font-size: 16px; }
+        
+        .drum-set { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+        
+        .drum-row { display: flex; gap: 20px; }
+        
+        .drum { width: 100px; height: 100px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 40px; cursor: pointer; transition: transform 0.1s; border: 5px solid; }
+        .drum:active { transform: scale(0.9); }
+        .drum.hit { animation: drumHit 0.2s ease; }
+        
+        .drum-kick { background: linear-gradient(135deg, #3b82f6, #1d4ed8); border-color: #1d4ed8; }
+        .drum-snare { background: linear-gradient(135deg, #ef4444, #b91c1c); border-color: #b91c1c; }
+        .drum-hihat { background: linear-gradient(135deg, #fbbf24, #d97706); border-color: #d97706; }
+        .drum-tom { background: linear-gradient(135deg, #22c55e, #15803d); border-color: #15803d; }
+        
+        .rhythm-display { height: 80px; background: rgba(255,255,255,0.1); border-radius: 15px; margin: 10px 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .beat { width: 20px; height: 20px; background: rgba(255,255,255,0.3); border-radius: 50%; }
+        .beat.active { background: #ffd700; animation: beatPulse 0.3s ease; }
+        
+        .stats { display: flex; justify-content: space-around; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .stat-item { text-align: center; color: #fff; }
+        .stat-value { font-size: 20px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+        
+        @keyframes drumHit {
+            0% { transform: scale(1); }
+            50% { transform: scale(0.85); }
+            100% { transform: scale(1); }
+        }
+        
+        @keyframes beatPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="score-display">🥁 <span id="score">0</span></div>
+            <div class="combo-display">连击: <span id="combo">0</span></div>
+        </div>
+        
+        <div class="rhythm-display" id="rhythmDisplay"></div>
+        
+        <div class="drum-set">
+            <div class="drum-row">
+                <div class="drum drum-kick" id="kick" data-drum="kick">🥁</div>
+                <div class="drum drum-snare" id="snare" data-drum="snare">🪘</div>
+            </div>
+            <div class="drum-row">
+                <div class="drum drum-hihat" id="hihat" data-drum="hihat">🔔</div>
+                <div class="drum drum-tom" id="tom" data-drum="tom">🛢️</div>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="hits">0</div>
+                <div class="stat-label">击打</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="perfect">0</div>
+                <div class="stat-label">完美</div>
+            </div>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const BEAT_INTERVAL = 500; // ms
+        const RHYTHM_LENGTH = 8;
+        
+        let score = 0;
+        let combo = 0;
+        let hits = 0;
+        let perfect = 0;
+        let currentBeat = 0;
+        let beatLoop = null;
+        
+        function loadData() {
+            const saved = GameCore.storage.get('drum_beat_data', null);
+            if (saved) {
+                score = saved.score;
+            }
+            updateUI();
+            setupRhythm();
+            startBeat();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('drum_beat_data', { score });
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('combo').textContent = combo;
+            document.getElementById('hits').textContent = hits;
+            document.getElementById('perfect').textContent = perfect;
+        }
+        
+        function setupRhythm() {
+            const display = document.getElementById('rhythmDisplay');
+            display.innerHTML = '';
+            
+            for (let i = 0; i < RHYTHM_LENGTH; i++) {
+                const beat = document.createElement('div');
+                beat.className = 'beat';
+                beat.id = 'beat' + i;
+                display.appendChild(beat);
+            }
+        }
+        
+        function startBeat() {
+            beatLoop = setInterval(() => {
+                // Clear previous beat
+                document.querySelectorAll('.beat').forEach(el => el.classList.remove('active'));
+                
+                // Highlight current beat
+                currentBeat = (currentBeat + 1) % RHYTHM_LENGTH;
+                document.getElementById('beat' + currentBeat).classList.add('active');
+            }, BEAT_INTERVAL);
+        }
+        
+        function hitDrum(drumType) {
+            const drum = document.getElementById(drumType);
+            drum.classList.add('hit');
+            setTimeout(() => drum.classList.remove('hit'), 200);
+            
+            hits++;
+            combo++;
+            
+            // Check if hit on beat
+            const isPerfect = document.getElementById('beat' + currentBeat).classList.contains('active');
+            
+            if (isPerfect) {
+                perfect++;
+                score += 20 + combo * 2;
+                showMessage('✨ 完美！');
+            } else {
+                score += 10;
+            }
+            
+            updateUI();
+            saveData();
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 500);
+        }
+        
+        // Setup drum clicks
+        document.querySelectorAll('.drum').forEach(drum => {
+            drum.addEventListener('click', () => {
+                hitDrum(drum.dataset.drum);
+            });
+        });
+        
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '1') hitDrum('kick');
+            if (e.key === '2') hitDrum('snare');
+            if (e.key === '3') hitDrum('hihat');
+            if (e.key === '4') hitDrum('tom');
+        });
+        
+        GameCore.init({ highScore: 'drum_beat' });
+        loadData();
+    </script>
+</body>
+</html>

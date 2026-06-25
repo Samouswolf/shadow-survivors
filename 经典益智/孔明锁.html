@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>孔明锁</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ffd700; }
+        .hints { font-size: 14px; opacity: 0.7; }
+        
+        .puzzle-area { flex: 1; display: flex; justify-content: center; align-items: center; }
+        .puzzle { position: relative; width: 250px; height: 250px; }
+        
+        .piece { position: absolute; cursor: grab; transition: all 0.3s; }
+        .piece.horizontal { height: 40px; background: linear-gradient(135deg, #ffa502, #ffd700); }
+        .piece.vertical { width: 40px; background: linear-gradient(135deg, #4ecdc4, #48c78e); }
+        .piece.diagonal { background: linear-gradient(135deg, #f093fb, #f5576c); }
+        .piece.selected { box-shadow: 0 0 20px rgba(255,215,0,0.5); }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; }
+        .btn { padding: 12px 25px; border: none; border-radius: 15px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🔩 孔明锁</div>
+            <div class="hints">提示: 移动木块解锁</div>
+        </div>
+        
+        <div class="puzzle-area">
+            <div class="puzzle" id="puzzle"></div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-secondary" onclick="resetPuzzle()">🔄 重置</button>
+            <button class="btn btn-primary" onclick="showHint()">💡 提示</button>
+            <button class="btn btn-secondary" onclick="solvePuzzle()">🎯 自动解决</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '孔明锁';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const pieces = [
+            { id: 1, type: 'horizontal', x: 60, y: 50, width: 150, height: 40, direction: 'horizontal' },
+            { id: 2, type: 'horizontal', x: 60, y: 160, width: 150, height: 40, direction: 'horizontal' },
+            { id: 3, type: 'vertical', x: 50, y: 60, width: 40, height: 150, direction: 'vertical' },
+            { id: 4, type: 'vertical', x: 160, y: 60, width: 40, height: 150, direction: 'vertical' },
+            { id: 5, type: 'diagonal', x: 105, y: 105, width: 40, height: 40, direction: 'diagonal' }
+        ];
+        
+        let selectedPiece = null;
+        let startX = 0;
+        let startY = 0;
+        let startPieceX = 0;
+        let startPieceY = 0;
+        
+        function initGame() {
+            renderPieces();
+        }
+        
+        function renderPieces() {
+            const puzzle = document.getElementById('puzzle');
+            puzzle.innerHTML = '';
+            
+            pieces.forEach(piece => {
+                const el = document.createElement('div');
+                el.className = `piece ${piece.type} ${selectedPiece === piece.id ? 'selected' : ''}`;
+                el.style.left = piece.x + 'px';
+                el.style.top = piece.y + 'px';
+                el.style.width = piece.width + 'px';
+                el.style.height = piece.height + 'px';
+                el.id = 'piece-' + piece.id;
+                
+                el.addEventListener('mousedown', (e) => startDrag(piece.id, e.clientX, e.clientY));
+                el.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    startDrag(piece.id, e.touches[0].clientX, e.touches[0].clientY);
+                });
+                
+                puzzle.appendChild(el);
+            });
+        }
+        
+        function startDrag(pieceId, clientX, clientY) {
+            selectedPiece = pieceId;
+            
+            const piece = pieces.find(p => p.id === pieceId);
+            startX = clientX;
+            startY = clientY;
+            startPieceX = piece.x;
+            startPieceY = piece.y;
+            
+            renderPieces();
+            
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('mouseup', stopDrag);
+            document.addEventListener('touchmove', onTouchDrag);
+            document.addEventListener('touchend', stopDrag);
+        }
+        
+        function onDrag(e) {
+            if (!selectedPiece) return;
+            
+            const piece = pieces.find(p => p.id === selectedPiece);
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            
+            if (piece.direction === 'horizontal') {
+                piece.x = Math.max(0, Math.min(210, startPieceX + dx));
+            } else if (piece.direction === 'vertical') {
+                piece.y = Math.max(0, Math.min(210, startPieceY + dy));
+            } else {
+                piece.x = Math.max(0, Math.min(210, startPieceX + dx));
+                piece.y = Math.max(0, Math.min(210, startPieceY + dy));
+            }
+            
+            updatePiecePosition(piece.id, piece.x, piece.y);
+            checkWin();
+        }
+        
+        function onTouchDrag(e) {
+            e.preventDefault();
+            if (!selectedPiece) return;
+            
+            const piece = pieces.find(p => p.id === selectedPiece);
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+            
+            if (piece.direction === 'horizontal') {
+                piece.x = Math.max(0, Math.min(210, startPieceX + dx));
+            } else if (piece.direction === 'vertical') {
+                piece.y = Math.max(0, Math.min(210, startPieceY + dy));
+            } else {
+                piece.x = Math.max(0, Math.min(210, startPieceX + dx));
+                piece.y = Math.max(0, Math.min(210, startPieceY + dy));
+            }
+            
+            updatePiecePosition(piece.id, piece.x, piece.y);
+            checkWin();
+        }
+        
+        function updatePiecePosition(pieceId, x, y) {
+            const el = document.getElementById('piece-' + pieceId);
+            if (el) {
+                el.style.left = x + 'px';
+                el.style.top = y + 'px';
+            }
+        }
+        
+        function stopDrag() {
+            selectedPiece = null;
+            
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mouseup', stopDrag);
+            document.removeEventListener('touchmove', onTouchDrag);
+            document.removeEventListener('touchend', stopDrag);
+            
+            renderPieces();
+        }
+        
+        function checkWin() {
+            const centerPiece = pieces.find(p => p.id === 5);
+            
+            if (centerPiece.x < 50 || centerPiece.x > 160 || 
+                centerPiece.y < 50 || centerPiece.y > 160) {
+                
+                GameCore.hints.show('🎉 恭喜解锁！');
+                GameCore.highScore.set(GAME_NAME, 1);
+            }
+        }
+        
+        function resetPuzzle() {
+            pieces[0].x = 60; pieces[0].y = 50;
+            pieces[1].x = 60; pieces[1].y = 160;
+            pieces[2].x = 50; pieces[2].y = 60;
+            pieces[3].x = 160; pieces[3].y = 60;
+            pieces[4].x = 105; pieces[4].y = 105;
+            
+            renderPieces();
+        }
+        
+        function showHint() {
+            GameCore.hints.show('💡 先移动底部横木向右！');
+        }
+        
+        function solvePuzzle() {
+            pieces[1].x = 160;
+            
+            setTimeout(() => {
+                pieces[4].y = 160;
+                
+                setTimeout(() => {
+                    GameCore.hints.show('🎉 解锁完成！');
+                    GameCore.highScore.set(GAME_NAME, 1);
+                }, 300);
+            }, 300);
+            
+            renderPieces();
+        }
+        
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

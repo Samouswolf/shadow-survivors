@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>游泳比赛</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0077be 0%, #00a8e8 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .score-display { color: #ffd700; font-size: 24px; font-weight: bold; }
+        .lap-display { color: #4ecdc4; font-size: 16px; }
+        
+        .pool { flex: 1; background: linear-gradient(180deg, #0077be, #005a8c); border-radius: 20px; position: relative; overflow: hidden; }
+        .pool-lanes { position: absolute; inset: 10px; display: flex; gap: 5px; }
+        .lane { flex: 1; border-right: 2px solid rgba(255,255,255,0.3); }
+        .lane:last-child { border-right: none; }
+        
+        .swimmer { position: absolute; width: 40px; height: 30px; background: #ffd700; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .swimmer.player { background: #22c55e; }
+        .swimmer.ai { background: #ef4444; }
+        
+        .finish-line { position: absolute; top: 10px; left: 10px; right: 10px; height: 5px; background: #fff; }
+        
+        .energy-bar { height: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; margin: 10px 0; }
+        .energy-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #4ade80); border-radius: 10px; transition: width 0.2s; }
+        
+        .stats { display: flex; justify-content: space-around; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .stat-item { text-align: center; color: #fff; }
+        .stat-value { font-size: 20px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        
+        .controls { display: flex; gap: 10px; margin-top: 10px; }
+        .btn { flex: 1; padding: 15px; border: none; border-radius: 15px; font-size: 18px; font-weight: bold; cursor: pointer; }
+        .btn-swim { background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff; }
+        .btn-rest { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="score-display">🏅 <span id="score">0</span></div>
+            <div class="lap-display">第 <span id="lap">1</span> 泳道</div>
+        </div>
+        
+        <div class="pool" id="pool">
+            <div class="pool-lanes">
+                <div class="lane"></div>
+                <div class="lane"></div>
+                <div class="lane"></div>
+                <div class="lane"></div>
+            </div>
+            <div class="finish-line"></div>
+        </div>
+        
+        <div class="energy-bar">
+            <div class="energy-fill" id="energyFill" style="width: 100%"></div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="wins">0</div>
+                <div class="stat-label">胜利</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="time">0</div>
+                <div class="stat-label">用时</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-swim" id="btnSwim">🏊 加速游泳</button>
+            <button class="btn btn-rest" id="btnRest">💤 休息恢复</button>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const LANE_COUNT = 4;
+        const POOL_LENGTH = 100; // percentage
+        
+        let score = 0;
+        let lap = 1;
+        let wins = 0;
+        let raceTime = 0;
+        let energy = 100;
+        let playerY = 90;
+        let aiSwimmers = [];
+        let raceRunning = false;
+        let raceLoop = null;
+        
+        function loadData() {
+            const saved = GameCore.storage.get('swimming_race_data', null);
+            if (saved) {
+                score = saved.score;
+                wins = saved.wins;
+            }
+            updateUI();
+            setupRace();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('swimming_race_data', { score, wins });
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('lap').textContent = lap;
+            document.getElementById('wins').textContent = wins;
+            document.getElementById('time').textContent = raceTime.toFixed(1);
+            document.getElementById('energyFill').style.width = energy + '%';
+        }
+        
+        function setupRace() {
+            const pool = document.getElementById('pool');
+            
+            // Remove old swimmers
+            pool.querySelectorAll('.swimmer').forEach(el => el.remove());
+            
+            // Create player swimmer
+            const player = document.createElement('div');
+            player.className = 'swimmer player';
+            player.id = 'playerSwimmer';
+            player.textContent = '🏊';
+            player.style.left = '5%';
+            player.style.top = '90%';
+            pool.appendChild(player);
+            
+            // Create AI swimmers
+            aiSwimmers = [];
+            for (let i = 1; i < LANE_COUNT; i++) {
+                const ai = document.createElement('div');
+                ai.className = 'swimmer ai';
+                ai.textContent = '🏊';
+                ai.style.left = `${5 + i * 23}%`;
+                ai.style.top = '90%';
+                pool.appendChild(ai);
+                aiSwimmers.push({ el: ai, y: 90, speed: 0.5 + Math.random() * 0.5 });
+            }
+            
+            playerY = 90;
+            energy = 100;
+            raceTime = 0;
+            raceRunning = true;
+            
+            startRace();
+        }
+        
+        function startRace() {
+            raceLoop = setInterval(() => {
+                if (!raceRunning) return;
+                
+                raceTime += 0.1;
+                
+                // Move AI swimmers
+                aiSwimmers.forEach(ai => {
+                    ai.y -= ai.speed;
+                    ai.el.style.top = ai.y + '%';
+                    
+                    if (ai.y <= 10) {
+                        endRace(false);
+                    }
+                });
+                
+                // Check player position
+                if (playerY <= 10) {
+                    endRace(true);
+                }
+                
+                updateUI();
+            }, 100);
+        }
+        
+        function swim() {
+            if (!raceRunning || energy < 10) return;
+            
+            energy -= 5;
+            playerY -= 3;
+            
+            const player = document.getElementById('playerSwimmer');
+            player.style.top = playerY + '%';
+            
+            updateUI();
+        }
+        
+        function rest() {
+            if (!raceRunning) return;
+            
+            energy = Math.min(100, energy + 10);
+            updateUI();
+        }
+        
+        function endRace(playerWon) {
+            raceRunning = false;
+            clearInterval(raceLoop);
+            
+            if (playerWon) {
+                wins++;
+                const bonus = Math.floor(100 - raceTime);
+                score += 50 + bonus;
+                showMessage(`🎉 获胜！用时 ${raceTime.toFixed(1)}s，得分 +${50 + bonus}`);
+            } else {
+                showMessage('❌ 比赛失败，AI获胜');
+            }
+            
+            lap++;
+            updateUI();
+            saveData();
+            
+            setTimeout(() => {
+                setupRace();
+            }, 2000);
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 2000);
+        }
+        
+        document.getElementById('btnSwim').addEventListener('click', swim);
+        document.getElementById('btnRest').addEventListener('click', rest);
+        
+        // Touch controls
+        document.getElementById('pool').addEventListener('touchstart', swim);
+        
+        GameCore.init({ highScore: 'swimming_race' });
+        loadData();
+    </script>
+</body>
+</html>

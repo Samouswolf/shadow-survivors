@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>推理解谜</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; }
+        .game-container { padding: 15px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .level-display { color: #ffd700; font-size: 20px; font-weight: bold; }
+        .score-display { color: #4ecdc4; font-size: 16px; }
+        
+        .puzzle-card { background: rgba(255,255,255,0.1); border-radius: 15px; padding: 20px; margin-bottom: 15px; }
+        .puzzle-text { color: #fff; font-size: 16px; line-height: 1.8; margin-bottom: 20px; }
+        
+        .options { display: flex; flex-direction: column; gap: 10px; }
+        .option-btn { padding: 15px; background: rgba(74,85,104,0.5); border: 2px solid transparent; border-radius: 12px; color: #fff; font-size: 14px; text-align: left; cursor: pointer; transition: all 0.2s; }
+        .option-btn:hover { background: rgba(74,85,104,0.8); }
+        .option-btn.selected { border-color: #4ecdc4; }
+        .option-btn.correct { border-color: #22c55e; background: rgba(34,197,94,0.2); }
+        .option-btn.wrong { border-color: #ef4444; background: rgba(239,68,68,0.2); }
+        
+        .hint-panel { background: rgba(251,191,36,0.1); border-radius: 15px; padding: 15px; margin-bottom: 15px; display: none; }
+        .hint-panel.show { display: block; }
+        .hint-text { color: #fbbf24; font-size: 14px; }
+        
+        .actions { display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 15px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-hint { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #fff; }
+        .btn-next { background: linear-gradient(135deg, #4ecdc4, #44a08d); color: #fff; display: none; }
+        
+        .message { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="level-display">📝 第 <span id="level">1</span> 关</div>
+            <div class="score-display">⭐ <span id="score">0</span></div>
+        </div>
+        
+        <div class="puzzle-card">
+            <div class="puzzle-text" id="puzzleText"></div>
+        </div>
+        
+        <div class="options" id="options"></div>
+        
+        <div class="hint-panel" id="hintPanel">
+            <div class="hint-text" id="hintText"></div>
+        </div>
+        
+        <div class="actions">
+            <button class="btn btn-hint" id="btnHint">💡 提示</button>
+            <button class="btn btn-next" id="btnNext">➡️ 下一关</button>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const PUZZLES = [
+            {
+                text: '有一天，甲、乙、丙三人在一起聊天。甲说："我从来不说假话。"乙说："甲在说谎。"丙说："甲和乙都在说谎。"请问谁在说真话？',
+                options: ['甲', '乙', '丙', '没有人'],
+                answer: 1,
+                hint: '如果甲说的是真话，那么乙就在说谎，丙也在说谎...'
+            },
+            {
+                text: '一个房间里有四盏灯，房间外有四个开关，每个开关对应一盏灯。你只能进入房间一次，如何确定每个开关对应哪盏灯？',
+                options: ['随便开一个', '先开两个，等几分钟再开一个', '全部打开', '无法确定'],
+                answer: 1,
+                hint: '灯不仅会发光，还会发热...'
+            },
+            {
+                text: '一只蜗牛从井底往上爬，白天爬3米，晚上下滑2米。井深10米，请问蜗牛几天能爬出井口？',
+                options: ['10天', '8天', '7天', '9天'],
+                answer: 2,
+                hint: '最后一天爬出井口后就不会下滑了...'
+            },
+            {
+                text: '有两根一样的蜡烛，一根能烧4小时，另一根能烧3小时。同时点燃，什么时候一根是另一根的两倍长？',
+                options: ['2小时', '1.5小时', '1.2小时', '2.4小时'],
+                answer: 3,
+                hint: '设时间为x小时，蜡烛长度为1，燃烧速度分别为1/4和1/3...'
+            },
+            {
+                text: '三个人去住旅馆，每人交10元，共30元。老板优惠后收25元，让服务员退5元。服务员私吞2元，退给每人1元。现在每人花了9元，共27元，加上服务员的2元是29元，那1元去哪了？',
+                options: ['老板拿走了', '服务员藏了', '计算错误', '不存在'],
+                answer: 2,
+                hint: '27元已经包含了服务员私吞的2元，应该加上退给每人的1元...'
+            },
+            {
+                text: '一个人带着一只狼、一只羊和一棵白菜过河。小船只能载一人一物。狼会吃羊，羊会吃白菜。如何安全过河？',
+                options: ['先带狼', '先带白菜', '先带羊', '无法过河'],
+                answer: 2,
+                hint: '先带中间的那个...'
+            },
+            {
+                text: '有12个球，其中一个质量不同（可能更重或更轻）。用天平称3次，如何找出这个球？',
+                options: ['分3组各4个', '分2组各6个', '分4组各3个', '无法做到'],
+                answer: 0,
+                hint: '第一次称4个对4个，如果平衡就在剩下的4个里...'
+            },
+            {
+                text: '一位父亲对儿子说："我像你这么大时，你才4岁；你像我这么大时，我就79岁了。"请问父子现在各多少岁？',
+                options: ['父54子29', '父56子30', '父52子28', '父58子31'],
+                answer: 0,
+                hint: '设年龄差为x，儿子现在x+4岁，父亲现在2x+4岁...'
+            },
+            {
+                text: '一个人在沙漠中迷路，有两个瓶子，一个装5升水，一个装3升水。如何精确量出4升水？',
+                options: ['无法做到', '装满5升倒入3升剩2升', '装满3升倒入5升两次', '装满5升倒空3升'],
+                answer: 2,
+                hint: '装满3升倒入5升，再装满3升倒入5升，3升瓶剩1升...'
+            },
+            {
+                text: 'ABC三人中只有一人会开车。A说："我会开车。"B说："我不会开车。"C说："A不会开车。"如果只有一人说真话，谁会开车？',
+                options: ['A', 'B', 'C', '无法确定'],
+                answer: 1,
+                hint: '如果A说真话，C就在说谎，但这样B也在说真话...'
+            }
+        ];
+        
+        let currentLevel = 0;
+        let score = 0;
+        let hasAnswered = false;
+        
+        function loadData() {
+            const saved = GameCore.storage.get('logic_puzzle_data', null);
+            if (saved) {
+                currentLevel = saved.level;
+                score = saved.score;
+            }
+            showPuzzle();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('logic_puzzle_data', { level: currentLevel, score: score });
+        }
+        
+        function showPuzzle() {
+            const puzzle = PUZZLES[currentLevel];
+            document.getElementById('level').textContent = currentLevel + 1;
+            document.getElementById('score').textContent = score;
+            document.getElementById('puzzleText').textContent = puzzle.text;
+            document.getElementById('hintPanel').classList.remove('show');
+            document.getElementById('btnNext').style.display = 'none';
+            hasAnswered = false;
+            
+            const optionsEl = document.getElementById('options');
+            optionsEl.innerHTML = '';
+            
+            puzzle.options.forEach((opt, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.textContent = opt;
+                btn.onclick = () => selectOption(index);
+                optionsEl.appendChild(btn);
+            });
+        }
+        
+        function selectOption(index) {
+            if (hasAnswered) return;
+            hasAnswered = true;
+            
+            const puzzle = PUZZLES[currentLevel];
+            const buttons = document.querySelectorAll('.option-btn');
+            
+            buttons.forEach((btn, i) => {
+                if (i === puzzle.answer) {
+                    btn.classList.add('correct');
+                } else if (i === index) {
+                    btn.classList.add('wrong');
+                }
+                btn.disabled = true;
+            });
+            
+            if (index === puzzle.answer) {
+                score += 10;
+                showMessage('✅ 回答正确！+10分');
+            } else {
+                showMessage('❌ 回答错误');
+            }
+            
+            document.getElementById('btnNext').style.display = 'block';
+            saveData();
+        }
+        
+        function showHint() {
+            const puzzle = PUZZLES[currentLevel];
+            document.getElementById('hintText').textContent = puzzle.hint;
+            document.getElementById('hintPanel').classList.add('show');
+        }
+        
+        function nextLevel() {
+            currentLevel++;
+            if (currentLevel >= PUZZLES.length) {
+                showMessage('🎉 恭喜通关！');
+                setTimeout(() => {
+                    currentLevel = 0;
+                    score = 0;
+                    saveData();
+                    showPuzzle();
+                }, 2000);
+            } else {
+                showPuzzle();
+                saveData();
+            }
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 2000);
+        }
+        
+        document.getElementById('btnHint').addEventListener('click', showHint);
+        document.getElementById('btnNext').addEventListener('click', nextLevel);
+        
+        GameCore.init({ highScore: 'logic_puzzle' });
+        loadData();
+    </script>
+</body>
+</html>

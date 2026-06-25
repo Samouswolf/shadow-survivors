@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>动物园模拟</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1e3a2f 0%, #0d1f16 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .resource { display: flex; align-items: center; gap: 5px; color: #fff; font-size: 14px; }
+        .resource span { font-weight: bold; }
+        
+        .zoo { flex: 1; background: rgba(46,204,113,0.2); border-radius: 15px; position: relative; overflow: hidden; border: 2px solid rgba(255,255,255,0.2); }
+        .enclosure { position: absolute; width: 90px; height: 90px; background: rgba(255,255,255,0.1); border-radius: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border: 2px dashed rgba(255,255,255,0.3); }
+        .enclosure.has-animal { background: rgba(46,204,113,0.3); border-style: solid; }
+        
+        .animal { font-size: 32px; }
+        .animal-name { font-size: 10px; color: #fff; margin-top: 5px; }
+        
+        .panel { width: 100%; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-top: 10px; }
+        .shop { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        .shop-item { padding: 10px 15px; background: rgba(255,255,255,0.1); border-radius: 10px; color: #fff; cursor: pointer; transition: all 0.3s; text-align: center; }
+        .shop-item:hover { background: rgba(255,255,255,0.2); }
+        
+        .actions { display: flex; gap: 10px; justify-content: center; margin-top: 15px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 20px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #4ecdc4, #44a08d); color: #fff; }
+        .btn-danger { background: linear-gradient(135deg, #e74c3c, #c0392b); color: #fff; }
+        
+        .stats { display: flex; justify-content: space-around; margin-top: 15px; color: #fff; font-size: 14px; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="resource">💰 <span id="money">3000</span></div>
+            <div class="resource">🦁 <span id="animals">0</span></div>
+            <div class="resource">👥 <span id="visitors">0</span></div>
+            <div class="resource">⭐ <span id="popularity">50</span></div>
+        </div>
+        
+        <div class="zoo" id="zoo"></div>
+        
+        <div class="panel">
+            <div class="shop">
+                <div class="shop-item" data-animal="lion">🦁 狮子<br><span style="font-size: 12px;">💰 500 | 收入50</span></div>
+                <div class="shop-item" data-animal="tiger">🐯 老虎<br><span style="font-size: 12px;">💰 600 | 收入60</span></div>
+                <div class="shop-item" data-animal="elephant">🐘 大象<br><span style="font-size: 12px;">💰 800 | 收入80</span></div>
+                <div class="shop-item" data-animal="monkey">🐒 猴子<br><span style="font-size: 12px;">💰 200 | 收入20</span></div>
+                <div class="shop-item" data-animal="panda">🐼 熊猫<br><span style="font-size: 12px;">💰 1000 | 收入100</span></div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" id="btnFeed">🍖 喂食</button>
+                <button class="btn btn-danger" id="btnClean">🧹 清洁</button>
+            </div>
+            <div class="stats">
+                <div>动物种类: <span id="species">0</span></div>
+                <div>门票收入: <span id="income">0</span></div>
+                <div>满意度: <span id="satisfaction">0</span>%</div>
+            </div>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const ANIMALS = {
+            lion: { emoji: '🦁', name: '狮子', cost: 500, income: 50, popularity: 10 },
+            tiger: { emoji: '🐯', name: '老虎', cost: 600, income: 60, popularity: 12 },
+            elephant: { emoji: '🐘', name: '大象', cost: 800, income: 80, popularity: 15 },
+            monkey: { emoji: '🐒', name: '猴子', cost: 200, income: 20, popularity: 5 },
+            panda: { emoji: '🐼', name: '熊猫', cost: 1000, income: 100, popularity: 20 }
+        };
+        
+        const ENCLOSURE_COUNT = 6;
+        let enclosures = Array(ENCLOSURE_COUNT).fill(null).map(() => ({ animal: null, hunger: 100, cleanliness: 100 }));
+        let money = 3000;
+        let animals = 0;
+        let visitors = 0;
+        let popularity = 50;
+        let species = 0;
+        let totalIncome = 0;
+        let selectedAnimal = 'lion';
+        
+        const zoo = document.getElementById('zoo');
+        const messageEl = document.getElementById('message');
+        
+        function renderEnclosures() {
+            zoo.innerHTML = '';
+            zoo.appendChild(messageEl);
+            
+            const cols = 3;
+            const rows = 2;
+            
+            enclosures.forEach((enclosure, index) => {
+                const col = index % cols;
+                const row = Math.floor(index / cols);
+                
+                const el = document.createElement('div');
+                el.className = `enclosure ${enclosure.animal ? 'has-animal' : ''}`;
+                el.style.left = (col * 110 + 20) + 'px';
+                el.style.top = (row * 110 + 20) + 'px';
+                
+                if (enclosure.animal) {
+                    const animal = ANIMALS[enclosure.animal];
+                    el.innerHTML = `
+                        <div class="animal">${animal.emoji}</div>
+                        <div class="animal-name">${animal.name}</div>
+                        <div style="font-size: 9px; color: #ffeaa7;">🍖 ${enclosure.hunger}%</div>
+                        <div style="font-size: 9px; color: #81ecec;">🧹 ${enclosure.cleanliness}%</div>
+                    `;
+                    el.onclick = () => interact(index);
+                } else {
+                    el.innerHTML = '<div class="animal">🏠</div><div class="animal-name">空场地</div>';
+                    el.onclick = () => buyAnimal(index);
+                }
+                
+                zoo.appendChild(el);
+            });
+        }
+        
+        function buyAnimal(index) {
+            if (enclosures[index].animal) return;
+            
+            const animal = ANIMALS[selectedAnimal];
+            if (money < animal.cost) {
+                showMessage('资金不足！');
+                return;
+            }
+            
+            money -= animal.cost;
+            enclosures[index].animal = selectedAnimal;
+            animals++;
+            popularity = Math.min(100, popularity + animal.popularity);
+            
+            const uniqueAnimals = new Set(enclosures.filter(e => e.animal).map(e => e.animal));
+            species = uniqueAnimals.size;
+            
+            updateStats();
+            renderEnclosures();
+            showMessage(`购买了${animal.emoji}${animal.name}！`);
+        }
+        
+        function interact(index) {
+            const enclosure = enclosures[index];
+            if (!enclosure.animal) return;
+            
+            enclosure.hunger = Math.min(100, enclosure.hunger + 30);
+            enclosure.cleanliness = Math.min(100, enclosure.cleanliness + 20);
+            
+            renderEnclosures();
+            showMessage('照顾了动物！');
+        }
+        
+        function feedAll() {
+            const cost = animals * 10;
+            if (money < cost) {
+                showMessage('资金不足！');
+                return;
+            }
+            
+            money -= cost;
+            enclosures.forEach(e => {
+                if (e.animal) e.hunger = 100;
+            });
+            
+            updateStats();
+            renderEnclosures();
+            showMessage('所有动物吃饱了！');
+        }
+        
+        function cleanAll() {
+            const cost = animals * 15;
+            if (money < cost) {
+                showMessage('资金不足！');
+                return;
+            }
+            
+            money -= cost;
+            enclosures.forEach(e => {
+                if (e.animal) e.cleanliness = 100;
+            });
+            
+            updateStats();
+            renderEnclosures();
+            showMessage('动物园干净了！');
+        }
+        
+        function updateStats() {
+            document.getElementById('money').textContent = money;
+            document.getElementById('animals').textContent = animals;
+            document.getElementById('visitors').textContent = visitors;
+            document.getElementById('popularity').textContent = popularity;
+            document.getElementById('species').textContent = species;
+            document.getElementById('income').textContent = totalIncome;
+            
+            let avgHealth = 0;
+            const hasAnimals = enclosures.filter(e => e.animal).length;
+            if (hasAnimals > 0) {
+                avgHealth = enclosures.reduce((sum, e) => {
+                    return sum + (e.animal ? (e.hunger + e.cleanliness) / 2 : 0);
+                }, 0) / hasAnimals;
+            }
+            document.getElementById('satisfaction').textContent = Math.round((popularity + avgHealth) / 2);
+        }
+        
+        function showMessage(msg) {
+            messageEl.textContent = msg;
+            messageEl.classList.add('show');
+            setTimeout(() => {
+                messageEl.classList.remove('show');
+            }, 2000);
+        }
+        
+        document.querySelectorAll('.shop-item').forEach(el => {
+            el.addEventListener('click', () => {
+                selectedAnimal = el.dataset.animal;
+                document.querySelectorAll('.shop-item').forEach(e => e.classList.remove('selected'));
+                el.classList.add('selected');
+            });
+        });
+        
+        document.getElementById('btnFeed').addEventListener('click', feedAll);
+        document.getElementById('btnClean').addEventListener('click', cleanAll);
+        
+        setInterval(() => {
+            enclosures.forEach(e => {
+                if (e.animal) {
+                    e.hunger = Math.max(0, e.hunger - 5);
+                    e.cleanliness = Math.max(0, e.cleanliness - 3);
+                }
+            });
+            
+            visitors = Math.floor(popularity * (animals / ENCLOSURE_COUNT) * 0.5 + Math.random() * 10);
+            
+            enclosures.forEach(e => {
+                if (e.animal) {
+                    const animal = ANIMALS[e.animal];
+                    const efficiency = (e.hunger + e.cleanliness) / 200;
+                    money += Math.floor(animal.income * efficiency);
+                    totalIncome += Math.floor(animal.income * efficiency);
+                }
+            });
+            
+            updateStats();
+            renderEnclosures();
+        }, 2000);
+        
+        renderEnclosures();
+        updateStats();
+    </script>
+</body>
+</html>

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>绳索摆荡</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; overflow: hidden; color: #fff; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .stat { display: flex; flex-direction: column; align-items: center; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #ffd700; }
+        
+        .game-area { flex: 1; position: relative; background: rgba(0,0,0,0.3); border-radius: 15px; overflow: hidden; }
+        #gameCanvas { width: 100%; height: 100%; display: block; }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 25px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">关卡</div>
+                <div class="stat-value" id="level">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">分数</div>
+                <div class="stat-value" id="score">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">最高</div>
+                <div class="stat-value" id="highScore">0</div>
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="btnStart">▶️ 开始游戏</button>
+        </div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const GAME_NAME = '绳索摆荡';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        let level = 1;
+        let score = 0;
+        let gameRunning = false;
+        
+        let player = { x: 0, y: 0, vx: 0, vy: 0, radius: 12 };
+        let anchor = { x: 0, y: 0 };
+        let ropeLength = 150;
+        let attached = false;
+        let swinging = false;
+        
+        let platforms = [];
+        let anchors = [];
+        let goals = [];
+        let particles = [];
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            initLevel();
+        }
+        
+        function initLevel() {
+            player.x = 100;
+            player.y = canvas.height - 100;
+            player.vx = 0;
+            player.vy = 0;
+            attached = false;
+            swinging = false;
+            
+            platforms = [];
+            anchors = [];
+            goals = [];
+            particles = [];
+            
+            platforms.push({ x: 0, y: canvas.height - 50, width: 200, height: 50, color: '#4a5568' });
+            
+            const platformCount = 3 + level;
+            for (let i = 0; i < platformCount; i++) {
+                const x = 150 + i * (canvas.width - 300) / platformCount;
+                const y = canvas.height - 150 - i * 80;
+                platforms.push({
+                    x: x,
+                    y: y,
+                    width: 80 + Math.random() * 40,
+                    height: 20,
+                    color: '#4a5568',
+                    moving: i % 2 === 1,
+                    moveDir: 1
+                });
+            }
+            
+            anchors.push({ x: 200, y: 100 });
+            for (let i = 1; i < platformCount; i++) {
+                anchors.push({
+                    x: 100 + i * (canvas.width - 200) / platformCount + (Math.random() - 0.5) * 60,
+                    y: canvas.height - 200 - i * 80
+                });
+            }
+            
+            goals.push({
+                x: canvas.width - 100,
+                y: 50,
+                width: 40,
+                height: 40,
+                color: '#48c78e'
+            });
+        }
+        
+        function attachToAnchor() {
+            let closestAnchor = null;
+            let closestDist = Infinity;
+            
+            anchors.forEach(a => {
+                const dx = player.x - a.x;
+                const dy = player.y - a.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < ropeLength + 50 && dist < closestDist) {
+                    closestDist = dist;
+                    closestAnchor = a;
+                }
+            });
+            
+            if (closestAnchor) {
+                anchor = { ...closestAnchor };
+                ropeLength = closestDist;
+                attached = true;
+                swinging = true;
+                
+                for (let i = 0; i < 10; i++) {
+                    particles.push({
+                        x: player.x,
+                        y: player.y,
+                        vx: (Math.random() - 0.5) * 5,
+                        vy: (Math.random() - 0.5) * 5,
+                        life: 1,
+                        color: '#ffd700'
+                    });
+                }
+            }
+        }
+        
+        function detach() {
+            attached = false;
+            swinging = false;
+            
+            for (let i = 0; i < 15; i++) {
+                particles.push({
+                    x: player.x,
+                    y: player.y,
+                    vx: player.vx * 0.5 + (Math.random() - 0.5) * 3,
+                    vy: player.vy * 0.5 + (Math.random() - 0.5) * 3,
+                    life: 1,
+                    color: '#4ecdc4'
+                });
+            }
+        }
+        
+        function updatePlayer() {
+            if (attached && swinging) {
+                const dx = player.x - anchor.x;
+                const dy = player.y - anchor.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist > ropeLength) {
+                    const ratio = ropeLength / dist;
+                    player.x = anchor.x + dx * ratio;
+                    player.y = anchor.y + dy * ratio;
+                    
+                    const normalX = dx / dist;
+                    const normalY = dy / dist;
+                    
+                    const dot = player.vx * normalX + player.vy * normalY;
+                    player.vx = (player.vx - dot * normalX) * 0.9;
+                    player.vy = (player.vy - dot * normalY) * 0.9;
+                }
+                
+                const perpX = -dy / dist;
+                const perpY = dx / dist;
+                const angularAcc = 0.002 * perpY;
+                const angularVel = player.vx * perpX + player.vy * perpY;
+                
+                player.vx += perpX * angularAcc * dist;
+                player.vy += perpY * angularAcc * dist;
+                player.vx *= 0.99;
+                player.vy *= 0.99;
+                
+                player.x += player.vx;
+                player.y += player.vy;
+            } else {
+                player.vy += 0.5;
+                player.x += player.vx;
+                player.y += player.vy;
+                player.vx *= 0.98;
+            }
+            
+            if (player.y > canvas.height) {
+                player.y = canvas.height - 50;
+                player.vy = -player.vy * 0.3;
+                player.x = 100;
+                
+                for (let i = 0; i < 20; i++) {
+                    particles.push({
+                        x: player.x,
+                        y: player.y,
+                        vx: (Math.random() - 0.5) * 10,
+                        vy: -Math.random() * 10,
+                        life: 1,
+                        color: '#ff6b6b'
+                    });
+                }
+            }
+            
+            if (player.x < 0) player.x = 0;
+            if (player.x > canvas.width) player.x = canvas.width;
+            
+            platforms.forEach(platform => {
+                if (platform.moving) {
+                    platform.x += platform.moveDir * 2;
+                    if (platform.x < 50 || platform.x > canvas.width - platform.width - 50) {
+                        platform.moveDir *= -1;
+                    }
+                }
+                
+                if (player.y + player.radius >= platform.y &&
+                    player.y + player.radius <= platform.y + platform.height + 10 &&
+                    player.x >= platform.x &&
+                    player.x <= platform.x + platform.width &&
+                    player.vy >= 0) {
+                    player.y = platform.y - player.radius;
+                    player.vy = 0;
+                    player.vx *= 0.9;
+                    
+                    if (!attached) {
+                        player.x += platform.moveDir * 2;
+                    }
+                }
+            });
+            
+            goals.forEach(g => {
+                const dx = player.x - (g.x + g.width / 2);
+                const dy = player.y - (g.y + g.height / 2);
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < g.width / 2 + player.radius) {
+                    level++;
+                    score += level * 500;
+                    GameCore.hints.show('关卡完成！');
+                    initLevel();
+                }
+            });
+        }
+        
+        function updateParticles() {
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.2;
+                p.life -= 0.02;
+                return p.life > 0;
+            });
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 30) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 30) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            
+            platforms.forEach(platform => {
+                const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+                gradient.addColorStop(0, '#5a6578');
+                gradient.addColorStop(1, '#3a4558');
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                
+                ctx.fillStyle = '#6a7588';
+                ctx.fillRect(platform.x, platform.y, platform.width, 3);
+            });
+            
+            anchors.forEach(a => {
+                ctx.fillStyle = '#ffa502';
+                ctx.shadowColor = '#ffa502';
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.arc(a.x, a.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                
+                ctx.strokeStyle = 'rgba(255,165,2,0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(a.x, a.y, ropeLength, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            if (attached) {
+                ctx.strokeStyle = '#ffa502';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(anchor.x, anchor.y);
+                ctx.lineTo(player.x, player.y);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#ffa502';
+                ctx.beginPath();
+                ctx.arc(anchor.x, anchor.y, 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            goals.forEach(g => {
+                ctx.fillStyle = g.color;
+                ctx.shadowColor = g.color;
+                ctx.shadowBlur = 20;
+                ctx.beginPath();
+                ctx.arc(g.x + g.width / 2, g.y + g.height / 2, 20, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🏁', g.x + g.width / 2, g.y + g.height / 2 + 5);
+            });
+            
+            ctx.fillStyle = '#4ecdc4';
+            ctx.shadowColor = '#4ecdc4';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(player.x - 3, player.y - 3, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+        }
+        
+        function updateStats() {
+            document.getElementById('level').textContent = level;
+            document.getElementById('score').textContent = score;
+            document.getElementById('highScore').textContent = GameCore.highScore.get(GAME_NAME);
+            
+            if (GameCore.highScore.set(GAME_NAME, score)) {
+                GameCore.hints.show('新纪录！分数: ' + score);
+            }
+        }
+        
+        function gameLoop() {
+            draw();
+            
+            if (gameRunning) {
+                updatePlayer();
+                updateParticles();
+            }
+            
+            updateStats();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        canvas.addEventListener('mousedown', attachToAnchor);
+        canvas.addEventListener('mouseup', detach);
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            attachToAnchor();
+        }, { passive: false });
+        
+        canvas.addEventListener('touchend', e => {
+            e.preventDefault();
+            detach();
+        }, { passive: false });
+        
+        document.getElementById('btnStart').onclick = () => {
+            gameRunning = true;
+            level = 1;
+            score = 0;
+            initLevel();
+        };
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        gameLoop();
+    </script>
+</body>
+</html>

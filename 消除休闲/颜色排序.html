@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>颜色排序</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); min-height: 100vh; }
+        .game-container { padding: 15px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .score-display { color: #ffd700; font-size: 24px; font-weight: bold; }
+        .level-display { color: #4ecdc4; font-size: 16px; }
+        
+        .tubes { display: flex; gap: 15px; margin-bottom: 15px; }
+        .tube { width: 60px; height: 200px; background: rgba(255,255,255,0.1); border-radius: 15px; display: flex; flex-direction: column; justify-content: flex-end; padding: 5px; gap: 5px; cursor: pointer; border: 2px solid transparent; transition: border-color 0.2s; }
+        .tube.selected { border-color: #4ecdc4; }
+        
+        .ball { width: 50px; height: 40px; border-radius: 50%; }
+        
+        .stats { display: flex; justify-content: space-around; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .stat-item { text-align: center; color: #fff; }
+        .stat-value { font-size: 20px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.7; }
+        
+        .message { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="score-display">🎨 <span id="score">0</span></div>
+            <div class="level-display">第 <span id="level">1</span> 关</div>
+        </div>
+        
+        <div class="tubes" id="tubes"></div>
+        
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="moves">0</div>
+                <div class="stat-label">步数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="sorted">0</div>
+                <div class="stat-label">完成</div>
+            </div>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#fbbf24', '#a855f7'];
+        const TUBE_COUNT = 5;
+        const BALL_COUNT = 4;
+        
+        let score = 0;
+        let level = 1;
+        let moves = 0;
+        let sorted = 0;
+        let tubes = [];
+        let selectedTube = null;
+        
+        function loadData() {
+            const saved = GameCore.storage.get('color_sort_data', null);
+            if (saved) {
+                score = saved.score;
+                level = saved.level;
+            }
+            updateUI();
+            initGame();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('color_sort_data', { score, level });
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('level').textContent = level;
+            document.getElementById('moves').textContent = moves;
+            document.getElementById('sorted').textContent = sorted;
+        }
+        
+        function initGame() {
+            tubes = [];
+            moves = 0;
+            sorted = 0;
+            selectedTube = null;
+            
+            // Create tubes with balls
+            const allBalls = [];
+            for (let i = 0; i < TUBE_COUNT - 1; i++) {
+                for (let j = 0; j < BALL_COUNT; j++) {
+                    allBalls.push(COLORS[i]);
+                }
+            }
+            
+            // Shuffle balls
+            allBalls.sort(() => Math.random() - 0.5);
+            
+            // Distribute balls to tubes
+            for (let i = 0; i < TUBE_COUNT - 1; i++) {
+                tubes.push(allBalls.slice(i * BALL_COUNT, (i + 1) * BALL_COUNT));
+            }
+            tubes.push([]); // Empty tube
+            
+            renderTubes();
+        }
+        
+        function renderTubes() {
+            const tubesEl = document.getElementById('tubes');
+            tubesEl.innerHTML = '';
+            
+            tubes.forEach((tube, index) => {
+                const tubeEl = document.createElement('div');
+                tubeEl.className = `tube ${selectedTube === index ? 'selected' : ''}`;
+                tubeEl.dataset.index = index;
+                tubeEl.onclick = () => selectTube(index);
+                
+                tube.forEach(color => {
+                    const ball = document.createElement('div');
+                    ball.className = 'ball';
+                    ball.style.background = color;
+                    tubeEl.appendChild(ball);
+                });
+                
+                tubesEl.appendChild(tubeEl);
+            });
+        }
+        
+        function selectTube(index) {
+            if (selectedTube === null) {
+                if (tubes[index].length > 0) {
+                    selectedTube = index;
+                    renderTubes();
+                }
+            } else {
+                if (index === selectedTube) {
+                    selectedTube = null;
+                    renderTubes();
+                } else {
+                    moveBall(selectedTube, index);
+                }
+            }
+        }
+        
+        function moveBall(from, to) {
+            if (tubes[to].length >= BALL_COUNT) {
+                showMessage('试管已满！');
+                selectedTube = null;
+                renderTubes();
+                return;
+            }
+            
+            const ballColor = tubes[from][tubes[from].length - 1];
+            
+            if (tubes[to].length > 0 && tubes[to][tubes[to].length - 1] !== ballColor) {
+                showMessage('颜色不同，无法移动！');
+                selectedTube = null;
+                renderTubes();
+                return;
+            }
+            
+            tubes[from].pop();
+            tubes[to].push(ballColor);
+            moves++;
+            
+            selectedTube = null;
+            renderTubes();
+            updateUI();
+            
+            checkWin();
+            saveData();
+        }
+        
+        function checkWin() {
+            let completedTubes = 0;
+            tubes.forEach(tube => {
+                if (tube.length === BALL_COUNT) {
+                    const allSame = tube.every(b => b === tube[0]);
+                    if (allSame) completedTubes++;
+                }
+            });
+            
+            sorted = completedTubes;
+            updateUI();
+            
+            if (completedTubes === TUBE_COUNT - 1) {
+                showMessage('🎉 完成！');
+                score += 50;
+                level++;
+                setTimeout(() => initGame(), 2000);
+            }
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 1500);
+        }
+        
+        GameCore.init({ highScore: 'color_sort' });
+        loadData();
+    </script>
+</body>
+</html>

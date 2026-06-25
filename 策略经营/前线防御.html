@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>前线防御</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; overflow: hidden; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #fff; }
+        .stats { display: flex; gap: 20px; font-size: 14px; }
+        
+        .canvas-area { flex: 1; background: rgba(0,0,0,0.5); border-radius: 15px; overflow: hidden; position: relative; }
+        canvas { width: 100%; height: 100%; }
+        
+        .defenses { display: flex; gap: 10px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; }
+        
+        .defense-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 14px; cursor: pointer; background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">⚔️ 前线防御</div>
+            <div class="stats">
+                <span>💰 资金: <span id="money">300</span></span>
+                <span>🛡️ 防线: <span id="defense">100</span></span>
+                <span>⚔️ 击杀: <span id="kills">0</span></span>
+            </div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="defenses">
+            <button class="defense-btn" onclick="buildTurret()">🔫 炮塔 (80)</button>
+            <button class="defense-btn" onclick="buildMortar()">💥 迫击炮 (120)</button>
+            <button class="defense-btn" onclick="buildBarrier()">🛡️ 屏障 (60)</button>
+            <button class="defense-btn" onclick="callAirStrike()">✈️ 空袭 (300)</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '前线防御';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameRunning = true;
+        let money = 300;
+        let defense = 100;
+        let kills = 0;
+        let turrets = [];
+        let mortars = [];
+        let barriers = [];
+        let enemies = [];
+        let projectiles = [];
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        
+        function initGame() {
+            resizeCanvas();
+            gameRunning = true;
+            money = 300;
+            defense = 100;
+            kills = 0;
+            turrets = [];
+            mortars = [];
+            barriers = [];
+            enemies = [];
+            projectiles = [];
+            updateUI();
+            gameLoop();
+            
+            startEnemyInvasion();
+        }
+        
+        function updateUI() {
+            document.getElementById('money').textContent = money;
+            document.getElementById('defense').textContent = defense;
+            document.getElementById('kills').textContent = kills;
+            
+            GameCore.highScore.set(GAME_NAME, kills);
+        }
+        
+        function startEnemyInvasion() {
+            if (!gameRunning) return;
+            
+            const difficulty = 2 + Math.floor(kills / 50);
+            
+            for (let i = 0; i < difficulty; i++) {
+                setTimeout(() => {
+                    enemies.push({
+                        x: canvas.width,
+                        y: canvas.height / 2 + (Math.random() - 0.5) * 150,
+                        hp: 40 + Math.floor(kills / 20) * 15,
+                        speed: 1.5 + Math.floor(kills / 30) * 0.3,
+                        type: Math.random() > 0.8 ? 'tank' : (Math.random() > 0.9 ? 'scout' : 'infantry')
+                    });
+                }, i * 300);
+            }
+            
+            setTimeout(startEnemyInvasion, difficulty * 300 + 6000);
+        }
+        
+        function buildTurret() {
+            if (money >= 80) {
+                money -= 80;
+                turrets.push({
+                    x: canvas.width * 0.25 + turrets.length * 90,
+                    y: canvas.height * 0.7,
+                    damage: 30,
+                    range: 120,
+                    lastShot: 0
+                });
+                updateUI();
+                GameCore.hints.show('🔫 建造炮塔！');
+            } else {
+                GameCore.hints.show('资金不足！');
+            }
+        }
+        
+        function buildMortar() {
+            if (money >= 120) {
+                money -= 120;
+                mortars.push({
+                    x: canvas.width * 0.4 + mortars.length * 110,
+                    y: canvas.height * 0.6,
+                    damage: 60,
+                    range: 200,
+                    lastShot: 0,
+                    splashRadius: 50
+                });
+                updateUI();
+                GameCore.hints.show('💥 建造迫击炮！');
+            } else {
+                GameCore.hints.show('资金不足！');
+            }
+        }
+        
+        function buildBarrier() {
+            if (money >= 60) {
+                money -= 60;
+                barriers.push({
+                    x: canvas.width * 0.5 + barriers.length * 70,
+                    y: canvas.height * 0.75,
+                    hp: 150
+                });
+                updateUI();
+                GameCore.hints.show('🛡️ 建造屏障！');
+            } else {
+                GameCore.hints.show('资金不足！');
+            }
+        }
+        
+        function callAirStrike() {
+            if (money >= 300) {
+                money -= 300;
+                enemies.forEach(enemy => {
+                    enemy.hp -= 150;
+                    if (enemy.hp <= 0) {
+                        kills++;
+                        money += 30;
+                    }
+                });
+                enemies = enemies.filter(e => e.hp > 0);
+                updateUI();
+                GameCore.hints.show('✈️ 空袭成功！');
+            } else {
+                GameCore.hints.show('资金不足！');
+            }
+        }
+        
+        function update() {
+            if (!gameRunning) return;
+            
+            enemies.forEach(enemy => {
+                enemy.x -= enemy.speed * (enemy.type === 'scout' ? 2 : 1);
+                
+                if (enemy.x < 40) {
+                    defense -= enemy.type === 'tank' ? 20 : (enemy.type === 'scout' ? 5 : 10);
+                    updateUI();
+                    enemy.x = canvas.width + 100;
+                    
+                    if (defense <= 0) {
+                        gameOver();
+                    }
+                }
+            });
+            
+            enemies = enemies.filter(e => e.x < canvas.width + 50);
+            
+            barriers.forEach(barrier => {
+                enemies.forEach(enemy => {
+                    const dx = enemy.x - barrier.x;
+                    const dy = enemy.y - barrier.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 25) {
+                        barrier.hp -= enemy.type === 'tank' ? 2 : 1;
+                        
+                        if (barrier.hp <= 0) {
+                            barrier.x = -100;
+                            money += 30;
+                            updateUI();
+                        }
+                    }
+                });
+            });
+            
+            barriers = barriers.filter(b => b.x >= 0);
+            
+            turrets.forEach(turret => {
+                if (Date.now() - turret.lastShot > 400) {
+                    let closestEnemy = null;
+                    let closestDist = Infinity;
+                    
+                    enemies.forEach(enemy => {
+                        const dx = enemy.x - turret.x;
+                        const dy = enemy.y - turret.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < turret.range && dist < closestDist) {
+                            closestDist = dist;
+                            closestEnemy = enemy;
+                        }
+                    });
+                    
+                    if (closestEnemy) {
+                        projectiles.push({
+                            x: turret.x,
+                            y: turret.y,
+                            target: closestEnemy,
+                            damage: turret.damage,
+                            speed: 12,
+                            color: '#f39c12'
+                        });
+                        turret.lastShot = Date.now();
+                    }
+                }
+            });
+            
+            mortars.forEach(mortar => {
+                if (Date.now() - mortar.lastShot > 2500) {
+                    let closestEnemy = null;
+                    let closestDist = Infinity;
+                    
+                    enemies.forEach(enemy => {
+                        const dx = enemy.x - mortar.x;
+                        const dy = enemy.y - mortar.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist < mortar.range && dist < closestDist) {
+                            closestDist = dist;
+                            closestEnemy = enemy;
+                        }
+                    });
+                    
+                    if (closestEnemy) {
+                        projectiles.push({
+                            x: mortar.x,
+                            y: mortar.y,
+                            target: closestEnemy,
+                            damage: mortar.damage,
+                            speed: 6,
+                            color: '#e74c3c',
+                            splash: mortar.splashRadius,
+                            isMortar: true
+                        });
+                        mortar.lastShot = Date.now();
+                    }
+                }
+            });
+            
+            projectiles.forEach(proj => {
+                const dx = proj.target.x - proj.x;
+                const dy = proj.target.y - proj.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < 10) {
+                    if (proj.isMortar && proj.splash) {
+                        enemies.forEach(enemy => {
+                            const edx = enemy.x - proj.target.x;
+                            const edy = enemy.y - proj.target.y;
+                            const eDist = Math.sqrt(edx * edx + edy * edy);
+                            
+                            if (eDist < proj.splash) {
+                                enemy.hp -= proj.damage * (1 - eDist / proj.splash);
+                                if (enemy.hp <= 0) {
+                                    kills++;
+                                    money += enemy.type === 'tank' ? 30 : 15;
+                                }
+                            }
+                        });
+                    } else {
+                        proj.target.hp -= proj.damage;
+                        if (proj.target.hp <= 0) {
+                            kills++;
+                            money += proj.target.type === 'tank' ? 30 : 15;
+                        }
+                    }
+                    proj.x = -100;
+                } else {
+                    proj.x += (dx / dist) * proj.speed;
+                    proj.y += (dy / dist) * proj.speed;
+                }
+            });
+            
+            projectiles = projectiles.filter(p => p.x >= 0);
+            enemies = enemies.filter(e => e.hp > 0);
+        }
+        
+        function render() {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
+            
+            ctx.fillStyle = '#e74c3c';
+            ctx.fillRect(30, canvas.height / 2 - 25, 20, 50);
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(defense, 40, canvas.height / 2 + 8);
+            
+            turrets.forEach(turret => {
+                ctx.fillStyle = '#34495e';
+                ctx.fillRect(turret.x - 15, turret.y - 10, 30, 20);
+                
+                ctx.fillStyle = '#f39c12';
+                ctx.fillRect(turret.x + 10, turret.y - 8, 15, 16);
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🔫', turret.x, turret.y + 20);
+                
+                ctx.strokeStyle = 'rgba(243, 156, 18, 0.3)';
+                ctx.beginPath();
+                ctx.arc(turret.x, turret.y, turret.range, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            mortars.forEach(mortar => {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.beginPath();
+                ctx.arc(mortar.x, mortar.y, 20, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#2c3e50';
+                ctx.fillRect(mortar.x - 25, mortar.y - 5, 50, 10);
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('💥', mortar.x, mortar.y + 25);
+                
+                ctx.strokeStyle = 'rgba(231, 76, 60, 0.3)';
+                ctx.beginPath();
+                ctx.arc(mortar.x, mortar.y, mortar.range, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            barriers.forEach(barrier => {
+                ctx.fillStyle = '#3498db';
+                ctx.fillRect(barrier.x - 15, barrier.y - 20, 30, 40);
+                
+                ctx.fillStyle = '#2980b9';
+                ctx.fillRect(barrier.x - 12, barrier.y - 15, 24, 5);
+                ctx.fillRect(barrier.x - 12, barrier.y, 24, 5);
+                ctx.fillRect(barrier.x - 12, barrier.y + 15, 24, 5);
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(barrier.hp, barrier.x, barrier.y + 25);
+            });
+            
+            enemies.forEach(enemy => {
+                let color = '#ff6b6b';
+                let size = 12;
+                
+                if (enemy.type === 'tank') {
+                    color = '#95a5a6';
+                    size = 20;
+                } else if (enemy.type === 'scout') {
+                    color = '#f39c12';
+                    size = 10;
+                }
+                
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(enemy.x, enemy.y, size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(enemy.hp, enemy.x, enemy.y + 4);
+                
+                if (enemy.type === 'tank') {
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '12px Arial';
+                    ctx.fillText('🛡️', enemy.x, enemy.y - 18);
+                }
+            });
+            
+            projectiles.forEach(proj => {
+                ctx.fillStyle = proj.color;
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, proj.isMortar ? 8 : 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+        
+        function gameLoop() {
+            update();
+            render();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            GameCore.hints.show('💀 防线失守！');
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏结束', canvas.width / 2, canvas.height / 2);
+        }
+        
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>赛车漂移</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; overflow: hidden; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ff6b6b; }
+        .stats { display: flex; gap: 20px; font-size: 14px; }
+        
+        .canvas-area { flex: 1; background: rgba(0,0,0,0.5); border-radius: 15px; overflow: hidden; position: relative; }
+        canvas { width: 100%; height: 100%; }
+        
+        .controls { display: flex; justify-content: center; gap: 15px; margin-top: 15px; }
+        .control-btn { padding: 15px 30px; border: none; border-radius: 15px; font-size: 18px; font-weight: bold; cursor: pointer; background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🏎️ 赛车漂移</div>
+            <div class="stats">
+                <span>💨 速度: <span id="speed">0</span></span>
+                <span>🔥 漂移: <span id="drift">0</span></span>
+                <span>🏁 距离: <span id="distance">0</span></span>
+            </div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" onclick="accelerate()">⬆️ 加速</button>
+            <button class="control-btn" onclick="brake()">⬇️ 刹车</button>
+            <button class="control-btn" onclick="driftLeft()">↪️ 左漂</button>
+            <button class="control-btn" onclick="driftRight()">↩️ 右漂</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '赛车漂移';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameRunning = true;
+        let speed = 0;
+        let driftScore = 0;
+        let distance = 0;
+        let player = { x: 0, y: 0, angle: 0, drifting: null };
+        let trackOffset = 0;
+        let particles = [];
+        let obstacles = [];
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            player.x = canvas.width / 2;
+            player.y = canvas.height * 0.8;
+        }
+        
+        function initGame() {
+            resizeCanvas();
+            gameRunning = true;
+            speed = 0;
+            driftScore = 0;
+            distance = 0;
+            player = { x: canvas.width / 2, y: canvas.height * 0.8, angle: -Math.PI / 2, drifting: null };
+            trackOffset = 0;
+            particles = [];
+            obstacles = [];
+            updateUI();
+            gameLoop();
+        }
+        
+        function updateUI() {
+            document.getElementById('speed').textContent = Math.floor(speed * 10);
+            document.getElementById('drift').textContent = driftScore;
+            document.getElementById('distance').textContent = Math.floor(distance);
+            
+            GameCore.highScore.set(GAME_NAME, driftScore);
+        }
+        
+        function accelerate() {
+            speed = Math.min(15, speed + 0.5);
+        }
+        
+        function brake() {
+            speed = Math.max(0, speed - 0.5);
+        }
+        
+        function driftLeft() {
+            if (speed > 5) {
+                player.drifting = 'left';
+                player.angle -= 0.15;
+                createDriftParticles(player.x, player.y, '#fff');
+            }
+        }
+        
+        function driftRight() {
+            if (speed > 5) {
+                player.drifting = 'right';
+                player.angle += 0.15;
+                createDriftParticles(player.x, player.y, '#fff');
+            }
+        }
+        
+        function createDriftParticles(x, y, color) {
+            for (let i = 0; i < 3; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: Math.random() * 5,
+                    life: 1,
+                    color: color
+                });
+            }
+        }
+        
+        function update() {
+            if (!gameRunning) return;
+            
+            distance += speed;
+            
+            if (player.drifting && speed > 5) {
+                driftScore += 1;
+            }
+            
+            player.x += Math.cos(player.angle) * speed;
+            player.y += Math.sin(player.angle) * speed;
+            
+            if (player.x < 50 || player.x > canvas.width - 50) {
+                player.angle = Math.PI - player.angle;
+                GameCore.hints.show('💥 撞墙！');
+            }
+            
+            if (player.y < 50 || player.y > canvas.height - 50) {
+                player.angle = -player.angle;
+                GameCore.hints.show('💥 撞墙！');
+            }
+            
+            player.drifting = null;
+            
+            trackOffset += speed * 2;
+            
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.05;
+            });
+            
+            particles = particles.filter(p => p.life > 0);
+            
+            if (Math.random() < 0.02) {
+                obstacles.push({
+                    x: Math.random() * (canvas.width - 100) + 50,
+                    y: -50,
+                    width: 30,
+                    height: 30,
+                    speed: speed * 0.5 + 2
+                });
+            }
+            
+            obstacles.forEach(obs => {
+                obs.y += obs.speed;
+            });
+            
+            obstacles = obstacles.filter(obs => obs.y < canvas.height + 50);
+            
+            obstacles.forEach(obs => {
+                if (player.x > obs.x && player.x < obs.x + obs.width &&
+                    player.y > obs.y && player.y < obs.y + obs.height) {
+                    speed *= 0.5;
+                    GameCore.hints.show('💥 撞到障碍物！');
+                    obs.y = canvas.height + 100;
+                }
+            });
+            
+            updateUI();
+        }
+        
+        function render() {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const trackWidth = 80;
+            for (let i = 0; i < canvas.height; i += 100) {
+                const offset = (i + trackOffset) % 100;
+                ctx.fillStyle = '#4a7c23';
+                ctx.fillRect(canvas.width / 2 - trackWidth / 2, i, trackWidth, 100);
+                
+                ctx.fillStyle = '#ffd700';
+                ctx.fillRect(canvas.width / 2 - trackWidth / 2, i + offset, 5, 30);
+                ctx.fillRect(canvas.width / 2 + trackWidth / 2 - 5, i + offset, 5, 30);
+            }
+            
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2 - trackWidth / 2, 0);
+            ctx.lineTo(canvas.width / 2 - trackWidth / 2, canvas.height);
+            ctx.moveTo(canvas.width / 2 + trackWidth / 2, 0);
+            ctx.lineTo(canvas.width / 2 + trackWidth / 2, canvas.height);
+            ctx.stroke();
+            
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+            
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle + Math.PI / 2);
+            
+            ctx.fillStyle = '#ff6b6b';
+            ctx.fillRect(-15, -25, 30, 50);
+            
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(-8, -20, 16, 30);
+            
+            ctx.fillStyle = '#000';
+            ctx.fillRect(-5, -15, 10, 20);
+            
+            ctx.fillStyle = '#444';
+            ctx.beginPath();
+            ctx.arc(-15, 25, 8, 0, Math.PI * 2);
+            ctx.arc(15, 25, 8, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+            
+            obstacles.forEach(obs => {
+                ctx.fillStyle = '#ff6b6b';
+                ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+            });
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            for (let i = 0; i < 50; i++) {
+                const x = (i * 80 + trackOffset * 0.5) % canvas.width;
+                ctx.fillRect(x, 0, 40, canvas.height);
+            }
+        }
+        
+        function gameLoop() {
+            update();
+            render();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        initGame();
+        GameCore.touch.enableAllButtons();
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp') accelerate();
+            if (e.key === 'ArrowDown') brake();
+            if (e.key === 'ArrowLeft') driftLeft();
+            if (e.key === 'ArrowRight') driftRight();
+        });
+    </script>
+</body>
+</html>

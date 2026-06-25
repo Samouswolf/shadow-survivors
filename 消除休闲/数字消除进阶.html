@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>数字消除进阶</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%); min-height: 100vh; display: flex; flex-direction: column; align-items: center; overflow: hidden; }
+#game-container { position: relative; width: 100%; max-width: 450px; padding: 20px; }
+#game-header { text-align: center; color: #fff; margin-bottom: 20px; }
+#game-header h1 { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+#game-header .stats { display: flex; justify-content: center; gap: 30px; font-size: 16px; }
+#game-header .stats span { color: #4ade80; font-weight: bold; }
+#game-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 20px; }
+.tile { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; background: rgba(255,255,255,0.2); border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+.tile.selected { background: #fbbf24; box-shadow: 0 0 20px #fbbf24; }
+.tile.mergeable { background: #22c55e; }
+.tile-2 { background: #fef3c7; color: #92400e; }
+.tile-4 { background: #fde68a; color: #92400e; }
+.tile-8 { background: #fdba74; color: #fff; }
+.tile-16 { background: #fb923c; color: #fff; }
+.tile-32 { background: #f97316; color: #fff; }
+.tile-64 { background: #ef4444; color: #fff; }
+.tile-128 { background: #f472b6; color: #fff; }
+.tile-256 { background: #a78bfa; color: #fff; }
+.tile-512 { background: #60a5fa; color: #fff; }
+.tile-1024 { background: #34d399; color: #fff; }
+.tile-2048 { background: #fbbf24; color: #fff; }
+#controls { display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; }
+.btn { padding: 12px 25px; font-size: 16px; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+.btn-primary { background: linear-gradient(145deg, #6366f1, #4f46e5); color: #fff; }
+.btn-primary:hover { transform: translateY(-2px); }
+#message { text-align: center; font-size: 18px; font-weight: bold; color: #4ade80; min-height: 30px; }
+#loading-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #7c3aed; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; }
+#loading-screen .spinner { width: 50px; height: 50px; border: 4px solid rgba(99,102,241,0.3); border-top-color: #6366f1; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ad-banner-container { width: 100%; max-width: 728px; margin-top: auto; padding: 10px; }
+.sponsor-btn { position: fixed; top: 20px; right: 20px; width: 50px; height: 50px; background: rgba(255,165,0,0.9); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; z-index: 100; }
+.sponsor-panel { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; }
+.sponsor-panel.show { display: flex; }
+.sponsor-content { background: #fff; padding: 30px; border-radius: 20px; text-align: center; }
+.sponsor-close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; }
+.interstitial-ad { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 300; align-items: center; justify-content: center; flex-direction: column; }
+.interstitial-ad.show { display: flex; }
+</style>
+</head>
+<body>
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <p style="color:#fff;margin-top:20px;">游戏加载中...</p>
+</div>
+
+<div class="sponsor-btn" onclick="showSponsor()">☕</div>
+<div class="sponsor-panel" id="sponsor-panel" onclick="hideSponsor()">
+  <div class="sponsor-content" onclick="event.stopPropagation()">
+    <h3>支持开发者</h3>
+    <p>感谢您的支持！</p>
+  </div>
+  <div class="sponsor-close" onclick="hideSponsor()">×</div>
+</div>
+
+<div class="interstitial-ad" id="interstitial-ad">
+  <h2 style="color:#fff;margin-bottom:30px;">🎉 恭喜通关！</h2>
+  <button class="btn btn-primary" onclick="hideInterstitial()">继续游戏</button>
+</div>
+
+<div id="game-container">
+  <div id="game-header">
+    <h1>数字消除进阶</h1>
+    <div class="stats">
+      <span>分数: <span id="score">0</span></span>
+      <span>最高: <span id="best">--</span></span>
+      <span>目标: <span id="target">2048</span></span>
+    </div>
+  </div>
+  
+  <div id="message"></div>
+  
+  <div id="game-board"></div>
+  
+  <div id="controls">
+    <button class="btn btn-primary" onclick="newGame()">新游戏</button>
+    <button class="btn btn-primary" onclick="undo()">撤销</button>
+  </div>
+</div>
+
+<div class="ad-banner-container">
+  <div style="background:#f0f0f0;height:90px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#666;">广告位</div>
+</div>
+
+<script>
+class GameCore {
+  static init(options) {
+    if (options.loading) {
+      setTimeout(() => {
+        document.getElementById('loading-screen').style.display = 'none';
+      }, 800);
+    }
+    if (options.highScore) {
+      this.highScoreKey = options.highScore;
+    }
+  }
+  
+  static getHighScore() {
+    return localStorage.getItem(this.highScoreKey) || '--';
+  }
+  
+  static setHighScore(value) {
+    const current = localStorage.getItem(this.highScoreKey);
+    if (!current || value > parseInt(current)) {
+      localStorage.setItem(this.highScoreKey, value);
+      return true;
+    }
+    return false;
+  }
+}
+
+GameCore.init({ loading: true, highScore: '数字消除进阶' });
+
+class MergeGame {
+  constructor() {
+    this.gridSize = 5;
+    this.grid = [];
+    this.score = 0;
+    this.history = [];
+    this.selectedTile = null;
+    
+    this.board = document.getElementById('game-board');
+    this.scoreDisplay = document.getElementById('score');
+    this.bestDisplay = document.getElementById('best');
+    this.message = document.getElementById('message');
+    
+    this.init();
+  }
+  
+  init() {
+    this.bestDisplay.textContent = GameCore.getHighScore();
+    this.newGame();
+    this.setupControls();
+  }
+  
+  newGame() {
+    this.grid = Array(this.gridSize).fill(null).map(() => Array(this.gridSize).fill(0));
+    this.score = 0;
+    this.history = [];
+    this.selectedTile = null;
+    this.scoreDisplay.textContent = '0';
+    
+    this.addRandomTile();
+    this.addRandomTile();
+    this.render();
+  }
+  
+  addRandomTile() {
+    const emptyCells = [];
+    
+    for (let y = 0; y < this.gridSize; y++) {
+      for (let x = 0; x < this.gridSize; x++) {
+        if (this.grid[y][x] === 0) {
+          emptyCells.push({ x, y });
+        }
+      }
+    }
+    
+    if (emptyCells.length > 0) {
+      const { x, y } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+      this.grid[y][x] = Math.random() < 0.9 ? 2 : 4;
+    }
+  }
+  
+  render() {
+    this.board.innerHTML = '';
+    
+    for (let y = 0; y < this.gridSize; y++) {
+      for (let x = 0; x < this.gridSize; x++) {
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        
+        if (this.grid[y][x] !== 0) {
+          tile.textContent = this.grid[y][x];
+          tile.classList.add(`tile-${this.grid[y][x]}`);
+        }
+        
+        if (this.selectedTile && this.selectedTile.x === x && this.selectedTile.y === y) {
+          tile.classList.add('selected');
+        }
+        
+        tile.onclick = () => this.selectTile(x, y);
+        
+        this.board.appendChild(tile);
+      }
+    }
+  }
+  
+  selectTile(x, y) {
+    if (this.grid[y][x] === 0) return;
+    
+    if (!this.selectedTile) {
+      this.selectedTile = { x, y };
+      this.render();
+    } else {
+      if (this.selectedTile.x === x && this.selectedTile.y === y) {
+        this.selectedTile = null;
+        this.render();
+      } else {
+        const dx = Math.abs(this.selectedTile.x - x);
+        const dy = Math.abs(this.selectedTile.y - y);
+        
+        if ((dx === 1 && dy === 0) || (dx === 0 && dy === 1)) {
+          this.mergeTiles(this.selectedTile, { x, y });
+        }
+        
+        this.selectedTile = null;
+        this.render();
+      }
+    }
+  }
+  
+  mergeTiles(tile1, tile2) {
+    if (this.grid[tile1.y][tile1.x] === this.grid[tile2.y][tile2.x]) {
+      this.saveState();
+      
+      const newValue = this.grid[tile1.y][tile1.x] * 2;
+      this.grid[tile2.y][tile2.x] = newValue;
+      this.grid[tile1.y][tile1.x] = 0;
+      
+      this.score += newValue;
+      this.scoreDisplay.textContent = this.score;
+      
+      this.addRandomTile();
+      this.render();
+      
+      if (newValue === 2048) {
+        this.win();
+      }
+    }
+  }
+  
+  saveState() {
+    this.history.push({
+      grid: this.grid.map(row => [...row]),
+      score: this.score
+    });
+    
+    if (this.history.length > 10) {
+      this.history.shift();
+    }
+  }
+  
+  undo() {
+    if (this.history.length > 0) {
+      const state = this.history.pop();
+      this.grid = state.grid;
+      this.score = state.score;
+      this.scoreDisplay.textContent = this.score;
+      this.render();
+    }
+  }
+  
+  win() {
+    this.message.textContent = '🎉 恭喜通关！';
+    this.message.style.color = '#4ade80';
+    
+    if (GameCore.setHighScore(this.score)) {
+      this.bestDisplay.textContent = this.score;
+      this.message.textContent += ' 新纪录！';
+    }
+    
+    setTimeout(() => {
+      document.getElementById('interstitial-ad').classList.add('show');
+    }, 500);
+  }
+  
+  setupControls() {
+    document.addEventListener('keydown', (e) => {
+      if (!this.selectedTile) return;
+      
+      const { x, y } = this.selectedTile;
+      let nx = x, ny = y;
+      
+      switch(e.key) {
+        case 'ArrowUp': ny = Math.max(0, y - 1); break;
+        case 'ArrowDown': ny = Math.min(this.gridSize - 1, y + 1); break;
+        case 'ArrowLeft': nx = Math.max(0, x - 1); break;
+        case 'ArrowRight': nx = Math.min(this.gridSize - 1, x + 1); break;
+        default: return;
+      }
+      
+      e.preventDefault();
+      this.selectTile(nx, ny);
+    });
+  }
+}
+
+function showSponsor() {
+  document.getElementById('sponsor-panel').classList.add('show');
+}
+
+function hideSponsor() {
+  document.getElementById('sponsor-panel').classList.remove('show');
+}
+
+function hideInterstitial() {
+  document.getElementById('interstitial-ad').classList.remove('show');
+}
+
+const mergeGame = new MergeGame();
+</script>
+</body>
+</html>

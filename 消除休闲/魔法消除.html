@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>魔法消除</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ffd700; }
+        .score { font-size: 20px; color: #4ecdc4; }
+        
+        .board-area { flex: 1; display: flex; justify-content: center; align-items: center; }
+        .board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 15px; }
+        .cell { width: 45px; height: 45px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; transition: all 0.2s; }
+        .cell.selected { transform: scale(1.1); box-shadow: 0 0 20px rgba(255,215,0,0.5); }
+        .cell.matched { animation: matchAnim 0.3s; }
+        
+        @keyframes matchAnim {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.3); opacity: 0.5; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+        
+        .magic-bar { height: 10px; background: rgba(255,255,255,0.2); border-radius: 5px; overflow: hidden; margin-bottom: 15px; }
+        .magic-fill { height: 100%; background: linear-gradient(90deg, #f093fb, #f5576c); transition: width 0.3s; }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; }
+        .btn { padding: 12px 25px; border: none; border-radius: 15px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🔮 魔法消除</div>
+            <div class="score">分数: <span id="score">0</span></div>
+        </div>
+        
+        <div class="magic-bar">
+            <div class="magic-fill" id="magicFill" style="width: 0%;"></div>
+        </div>
+        
+        <div class="board-area">
+            <div class="board" id="board"></div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-secondary" onclick="restartGame()">🔄 重新开始</button>
+            <button class="btn btn-primary" onclick="useMagic()">✨ 魔法消除</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '魔法消除';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const items = ['🔴', '🟢', '🔵', '🟡', '🟣', '🟠', '🟤'];
+        const gridSize = 7;
+        let board = [];
+        let selected = null;
+        let score = 0;
+        let magicPower = 0;
+        
+        function initGame() {
+            score = 0;
+            magicPower = 0;
+            selected = null;
+            updateUI();
+            createBoard();
+            renderBoard();
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('magicFill').style.width = (magicPower / 100 * 100) + '%';
+        }
+        
+        function createBoard() {
+            board = [];
+            
+            for (let row = 0; row < gridSize; row++) {
+                board[row] = [];
+                for (let col = 0; col < gridSize; col++) {
+                    board[row][col] = items[Math.floor(Math.random() * items.length)];
+                }
+            }
+        }
+        
+        function renderBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.textContent = board[row][col];
+                    cell.onclick = () => selectCell(row, col);
+                    cell.id = `cell-${row}-${col}`;
+                    
+                    boardEl.appendChild(cell);
+                }
+            }
+        }
+        
+        function selectCell(row, col) {
+            if (!selected) {
+                selected = { row, col };
+                document.getElementById(`cell-${row}-${col}`).classList.add('selected');
+            } else if (selected.row === row && selected.col === col) {
+                document.getElementById(`cell-${row}-${col}`).classList.remove('selected');
+                selected = null;
+            } else if (isAdjacent(selected, { row, col })) {
+                swapCells(selected, { row, col });
+                selected = null;
+            } else {
+                document.getElementById(`cell-${selected.row}-${selected.col}`).classList.remove('selected');
+                selected = { row, col };
+                document.getElementById(`cell-${row}-${col}`).classList.add('selected');
+            }
+        }
+        
+        function isAdjacent(c1, c2) {
+            const rowDiff = Math.abs(c1.row - c2.row);
+            const colDiff = Math.abs(c1.col - c2.col);
+            return (rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1);
+        }
+        
+        function swapCells(c1, c2) {
+            const temp = board[c1.row][c1.col];
+            board[c1.row][c1.col] = board[c2.row][c2.col];
+            board[c2.row][c2.col] = temp;
+            
+            renderBoard();
+            
+            setTimeout(() => {
+                checkMatches();
+            }, 100);
+        }
+        
+        function checkMatches() {
+            const matches = [];
+            
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize - 2; col++) {
+                    if (board[row][col] && 
+                        board[row][col] === board[row][col + 1] && 
+                        board[row][col] === board[row][col + 2]) {
+                        matches.push({ row, col });
+                        matches.push({ row, col: col + 1 });
+                        matches.push({ row, col: col + 2 });
+                    }
+                }
+            }
+            
+            for (let col = 0; col < gridSize; col++) {
+                for (let row = 0; row < gridSize - 2; row++) {
+                    if (board[row][col] && 
+                        board[row][col] === board[row + 1][col] && 
+                        board[row][col] === board[row + 2][col]) {
+                        matches.push({ row, col });
+                        matches.push({ row: row + 1, col });
+                        matches.push({ row: row + 2, col });
+                    }
+                }
+            }
+            
+            if (matches.length > 0) {
+                score += matches.length * 10;
+                magicPower = Math.min(100, magicPower + matches.length * 2);
+                updateUI();
+                
+                matches.forEach(m => {
+                    const el = document.getElementById(`cell-${m.row}-${m.col}`);
+                    if (el) el.classList.add('matched');
+                });
+                
+                setTimeout(() => {
+                    removeMatches(matches);
+                }, 300);
+            }
+        }
+        
+        function removeMatches(matches) {
+            matches.forEach(m => {
+                board[m.row][m.col] = null;
+            });
+            
+            dropCells();
+            fillBoard();
+            
+            setTimeout(() => {
+                checkMatches();
+            }, 300);
+        }
+        
+        function dropCells() {
+            for (let col = 0; col < gridSize; col++) {
+                let writeRow = gridSize - 1;
+                
+                for (let row = gridSize - 1; row >= 0; row--) {
+                    if (board[row][col] !== null) {
+                        board[writeRow][col] = board[row][col];
+                        if (writeRow !== row) {
+                            board[row][col] = null;
+                        }
+                        writeRow--;
+                    }
+                }
+            }
+        }
+        
+        function fillBoard() {
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    if (board[row][col] === null) {
+                        board[row][col] = items[Math.floor(Math.random() * items.length)];
+                    }
+                }
+            }
+            
+            renderBoard();
+        }
+        
+        function useMagic() {
+            if (magicPower < 100) {
+                GameCore.hints.show('魔法能量不足！');
+                return;
+            }
+            
+            magicPower = 0;
+            updateUI();
+            
+            const randomType = items[Math.floor(Math.random() * items.length)];
+            
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    if (board[row][col] === randomType) {
+                        board[row][col] = null;
+                        score += 50;
+                    }
+                }
+            }
+            
+            updateUI();
+            dropCells();
+            fillBoard();
+            
+            GameCore.hints.show(`✨ 魔法消除！清除了所有 ${randomType}`);
+            GameCore.highScore.set(GAME_NAME, score);
+        }
+        
+        function restartGame() {
+            initGame();
+        }
+        
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

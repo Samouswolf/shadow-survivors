@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>卡牌合成</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; padding: 10px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .header-title { color: #ffd700; font-size: 20px; font-weight: bold; }
+        .level-display { color: #4ecdc4; font-size: 16px; }
+        
+        .grid-container { flex: 1; display: flex; justify-content: center; align-items: center; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; max-width: 400px; aspect-ratio: 1; }
+        .cell { background: rgba(74,85,104,0.3); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
+        .cell.selected { border-color: #4ecdc4; box-shadow: 0 0 15px rgba(78, 205, 196, 0.5); }
+        .cell.empty { cursor: default; }
+        .cell-card { font-size: 32px; }
+        .cell-level { font-size: 10px; color: #ccc; margin-top: 2px; }
+        
+        .inventory { padding: 10px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 10px; }
+        .inventory-title { color: #fff; font-size: 14px; margin-bottom: 8px; }
+        .inventory-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+        .inv-item { aspect-ratio: 1; background: rgba(74,85,104,0.5); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; }
+        .inv-item:hover { background: rgba(74,85,104,0.8); }
+        .inv-emoji { font-size: 20px; }
+        .inv-count { font-size: 10px; color: #ffd700; }
+        
+        .actions { display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 15px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-draw { background: linear-gradient(135deg, #4ecdc4, #44a08d); color: #fff; }
+        .btn-merge { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); color: #fff; }
+        .btn-reset { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+        
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: #fff; padding: 20px 40px; border-radius: 15px; font-size: 20px; display: none; z-index: 100; }
+        .message.show { display: block; animation: pulse 0.3s ease; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 10px; font-size: 14px; }
+        
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(0.9); }
+            50% { transform: translate(-50%, -50%) scale(1.05); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="header-title">🔮 卡牌合成</div>
+            <div class="level-display">最高等级: <span id="maxLevel">1</span></div>
+        </div>
+        
+        <div class="grid-container">
+            <div class="grid" id="gameGrid"></div>
+        </div>
+        
+        <div class="inventory">
+            <div class="inventory-title">卡牌库存</div>
+            <div class="inventory-grid" id="inventoryGrid"></div>
+        </div>
+        
+        <div class="actions">
+            <button class="btn btn-draw" id="btnDraw">🎴 抽卡</button>
+            <button class="btn btn-merge" id="btnMerge">⚡ 合成</button>
+            <button class="btn btn-reset" id="btnReset">🔄 重置</button>
+        </div>
+        
+        <div class="message" id="message"></div>
+        
+        <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+    </div>
+
+    <script>
+        const CARD_TYPES = [
+            { level: 1, emoji: '🟢', name: '精灵', color: '#22c55e' },
+            { level: 2, emoji: '🟡', name: '妖精', color: '#eab308' },
+            { level: 3, emoji: '🔵', name: '精灵王', color: '#3b82f6' },
+            { level: 4, emoji: '🟣', name: '法师', color: '#a855f7' },
+            { level: 5, emoji: '🔴', name: '炎魔', color: '#ef4444' },
+            { level: 6, emoji: '💠', name: '元素', color: '#06b6d4' },
+            { level: 7, emoji: '🐉', name: '幼龙', color: '#f97316' },
+            { level: 8, emoji: '🦄', name: '独角兽', color: '#ec4899' },
+            { level: 9, emoji: '👑', name: '帝王', color: '#f59e0b' },
+            { level: 10, emoji: '🌟', name: '星灵', color: '#8b5cf6' }
+        ];
+        
+        const GRID_SIZE = 4;
+        let grid = [];
+        let inventory = {};
+        let selectedCell = null;
+        let maxLevel = 1;
+        
+        function initGrid() {
+            grid = Array(GRID_SIZE * GRID_SIZE).fill(null);
+        }
+        
+        function loadData() {
+            const saved = GameCore.storage.get('card_fusion_data', null);
+            if (saved) {
+                grid = saved.grid;
+                inventory = saved.inventory;
+                maxLevel = saved.maxLevel;
+            } else {
+                initGrid();
+                inventory = { 1: 5 };
+            }
+            updateUI();
+        }
+        
+        function saveData() {
+            GameCore.storage.set('card_fusion_data', { grid, inventory, maxLevel });
+        }
+        
+        function updateUI() {
+            document.getElementById('maxLevel').textContent = maxLevel;
+            renderGrid();
+            renderInventory();
+        }
+        
+        function renderGrid() {
+            const gridEl = document.getElementById('gameGrid');
+            gridEl.innerHTML = '';
+            
+            grid.forEach((card, index) => {
+                const cell = document.createElement('div');
+                cell.className = `cell ${card ? '' : 'empty'} ${selectedCell === index ? 'selected' : ''}`;
+                
+                if (card) {
+                    const cardType = CARD_TYPES.find(c => c.level === card);
+                    cell.innerHTML = `
+                        <div class="cell-card">${cardType.emoji}</div>
+                        <div class="cell-level">Lv.${card}</div>
+                    `;
+                    cell.style.background = `rgba(${hexToRgb(cardType.color)}, 0.2)`;
+                }
+                
+                cell.onclick = () => handleCellClick(index);
+                gridEl.appendChild(cell);
+            });
+        }
+        
+        function renderInventory() {
+            const invEl = document.getElementById('inventoryGrid');
+            invEl.innerHTML = '';
+            
+            CARD_TYPES.forEach(card => {
+                const count = inventory[card.level] || 0;
+                const el = document.createElement('div');
+                el.className = 'inv-item';
+                el.innerHTML = `
+                    <div class="inv-emoji">${card.emoji}</div>
+                    <div class="inv-count">${count}</div>
+                `;
+                el.onclick = () => placeCard(card.level);
+                invEl.appendChild(el);
+            });
+        }
+        
+        function handleCellClick(index) {
+            if (!grid[index]) {
+                selectedCell = index;
+                renderGrid();
+                return;
+            }
+            
+            if (selectedCell === null) {
+                selectedCell = index;
+                renderGrid();
+                return;
+            }
+            
+            if (selectedCell !== index) {
+                tryMerge(selectedCell, index);
+            } else {
+                selectedCell = null;
+                renderGrid();
+            }
+        }
+        
+        function placeCard(level) {
+            if (inventory[level] <= 0) {
+                showMessage('库存不足！');
+                return;
+            }
+            
+            if (selectedCell === null) {
+                showMessage('请先选择一个空位！');
+                return;
+            }
+            
+            if (grid[selectedCell]) {
+                showMessage('该位置已有卡牌！');
+                return;
+            }
+            
+            grid[selectedCell] = level;
+            inventory[level]--;
+            selectedCell = null;
+            
+            updateUI();
+            saveData();
+        }
+        
+        function tryMerge(pos1, pos2) {
+            const card1 = grid[pos1];
+            const card2 = grid[pos2];
+            
+            if (card1 !== card2) {
+                showMessage('等级不同，无法合成！');
+                selectedCell = null;
+                renderGrid();
+                return;
+            }
+            
+            const newLevel = card1 + 1;
+            if (newLevel > CARD_TYPES.length) {
+                showMessage('已达到最高等级！');
+                selectedCell = null;
+                renderGrid();
+                return;
+            }
+            
+            grid[pos1] = newLevel;
+            grid[pos2] = null;
+            
+            if (newLevel > maxLevel) {
+                maxLevel = newLevel;
+                showMessage(`🎉 合成成功！Lv.${newLevel} ${CARD_TYPES.find(c => c.level === newLevel).name}`);
+            } else {
+                showMessage(`✨ 合成成功！Lv.${newLevel}`);
+            }
+            
+            selectedCell = null;
+            updateUI();
+            saveData();
+        }
+        
+        function drawCard() {
+            const emptySlots = grid.filter(c => c === null).length;
+            if (emptySlots === 0) {
+                showMessage('棋盘已满！');
+                return;
+            }
+            
+            const level = Math.ceil(Math.random() * 3);
+            inventory[level] = (inventory[level] || 0) + 1;
+            
+            showMessage(`🎴 获得 Lv.${level} 卡牌！`);
+            updateUI();
+            saveData();
+        }
+        
+        function resetGame() {
+            initGrid();
+            inventory = { 1: 5 };
+            maxLevel = 1;
+            selectedCell = null;
+            updateUI();
+            saveData();
+            showMessage('🔄 游戏已重置');
+        }
+        
+        function showMessage(msg) {
+            const el = document.getElementById('message');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 2000);
+        }
+        
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '0, 0, 0';
+        }
+        
+        document.getElementById('btnDraw').addEventListener('click', drawCard);
+        document.getElementById('btnMerge').addEventListener('click', () => {
+            showMessage('点击两张相同等级的卡牌进行合成');
+        });
+        document.getElementById('btnReset').addEventListener('click', resetGame);
+        
+        GameCore.init({ highScore: 'card_fusion' });
+        loadData();
+    </script>
+</body>
+</html>

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI音乐生成</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ffd700; }
+        .score-display { font-size: 18px; }
+        
+        .canvas-area { flex: 1; background: rgba(0,0,0,0.3); border-radius: 15px; margin-bottom: 15px; position: relative; }
+        #musicCanvas { width: 100%; height: 100%; display: block; }
+        
+        .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
+        .note-btn { padding: 15px 20px; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s; }
+        .note-btn.C { background: linear-gradient(135deg, #ff6b6b, #ffa502); color: #fff; }
+        .note-btn.D { background: linear-gradient(135deg, #ffa502, #ffd700); color: #fff; }
+        .note-btn.E { background: linear-gradient(135deg, #ffd700, #48c78e); color: #fff; }
+        .note-btn.F { background: linear-gradient(135deg, #48c78e, #4ecdc4); color: #fff; }
+        .note-btn.G { background: linear-gradient(135deg, #4ecdc4, #667eea); color: #fff; }
+        .note-btn.A { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+        .note-btn.B { background: linear-gradient(135deg, #764ba2, #f093fb); color: #fff; }
+        .note-btn:hover { transform: scale(1.1); }
+        
+        .ai-section { background: rgba(245,87,108,0.1); border-radius: 15px; padding: 15px; margin-bottom: 15px; }
+        .ai-title { font-size: 16px; font-weight: bold; color: #f5576c; margin-bottom: 10px; }
+        .ai-controls { display: flex; gap: 10px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 10px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🎵 AI音乐生成</div>
+            <div class="score-display">🎼 <span id="score">0</span></div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="musicCanvas"></canvas>
+        </div>
+        
+        <div class="controls" id="controls">
+            <button class="note-btn C" onclick="playNote('C')">Do</button>
+            <button class="note-btn D" onclick="playNote('D')">Re</button>
+            <button class="note-btn E" onclick="playNote('E')">Mi</button>
+            <button class="note-btn F" onclick="playNote('F')">Fa</button>
+            <button class="note-btn G" onclick="playNote('G')">Sol</button>
+            <button class="note-btn A" onclick="playNote('A')">La</button>
+            <button class="note-btn B" onclick="playNote('B')">Si</button>
+        </div>
+        
+        <div class="ai-section">
+            <div class="ai-title">🤖 AI音乐助手</div>
+            <div class="ai-controls">
+                <button class="btn btn-primary" onclick="aiCompose()">🎹 AI创作</button>
+                <button class="btn btn-secondary" onclick="clearMusic()">🗑️ 清空</button>
+                <button class="btn btn-secondary" onclick="playAll()">▶️ 播放全部</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = 'AI音乐生成';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('musicCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const notes = {
+            C: { freq: 261.63, color: '#ff6b6b', y: 6/7 },
+            D: { freq: 293.66, color: '#ffa502', y: 5/7 },
+            E: { freq: 329.63, color: '#ffd700', y: 4/7 },
+            F: { freq: 349.23, color: '#48c78e', y: 3/7 },
+            G: { freq: 392.00, color: '#4ecdc4', y: 2/7 },
+            A: { freq: 440.00, color: '#667eea', y: 1/7 },
+            B: { freq: 493.88, color: '#f093fb', y: 0/7 }
+        };
+        
+        let melody = [];
+        let score = 0;
+        let currentTime = 0;
+        
+        let audioContext = null;
+        
+        function getAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            return audioContext;
+        }
+        
+        function playTone(freq, duration = 0.3) {
+            const ctx = getAudioContext();
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            
+            oscillator.frequency.value = freq;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+            
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + duration);
+        }
+        
+        function playNote(note) {
+            const noteData = notes[note];
+            if (!noteData) return;
+            
+            playTone(noteData.freq);
+            
+            melody.push({ note, time: Date.now(), color: noteData.color });
+            score++;
+            
+            document.getElementById('score').textContent = score;
+            
+            if (GameCore.highScore.set(GAME_NAME, score)) {
+                GameCore.hints.show('新纪录！音符数: ' + score);
+            }
+            
+            drawNote(noteData, melody.length - 1);
+        }
+        
+        function aiCompose() {
+            if (melody.length === 0) {
+                GameCore.hints.show('请先弹奏几个音符作为灵感！');
+                return;
+            }
+            
+            const keyPattern = {};
+            melody.forEach(m => {
+                if (!keyPattern[m.note]) keyPattern[m.note] = 0;
+                keyPattern[m.note]++;
+            });
+            
+            const majorScale = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+            const minorScale = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+            
+            let scale = majorScale;
+            if (keyPattern['A'] && keyPattern['A'] > keyPattern['C']) {
+                scale = minorScale;
+            }
+            
+            const aiNotes = [];
+            const length = Math.floor(Math.random() * 4) + 2;
+            
+            for (let i = 0; i < length; i++) {
+                const randomNote = scale[Math.floor(Math.random() * scale.length)];
+                aiNotes.push(randomNote);
+            }
+            
+            let delay = 0;
+            aiNotes.forEach((note, i) => {
+                setTimeout(() => {
+                    playNote(note);
+                }, delay);
+                delay += 300;
+            });
+        }
+        
+        function playAll() {
+            if (melody.length === 0) return;
+            
+            let delay = 0;
+            melody.forEach((m, i) => {
+                setTimeout(() => {
+                    playTone(notes[m.note].freq);
+                    highlightNote(i);
+                }, delay);
+                delay += 300;
+            });
+        }
+        
+        function drawNote(noteData, index) {
+            const x = (index * 40) % (canvas.width - 40);
+            const y = canvas.height * (1 - noteData.y) - 20;
+            
+            ctx.fillStyle = noteData.color;
+            ctx.shadowColor = noteData.color;
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.ellipse(x + 20, y, 15, 20, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(noteData.y < 0.5 ? '♪' : '♫', x + 20, y + 5);
+        }
+        
+        function highlightNote(index) {
+            const x = (index * 40) % (canvas.width - 40);
+            const noteData = notes[melody[index].note];
+            const y = canvas.height * (1 - noteData.y) - 20;
+            
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.ellipse(x + 20, y, 20, 25, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            setTimeout(() => {
+                draw();
+            }, 200);
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= 7; i++) {
+                const y = (canvas.height / 7) * i;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            
+            Object.keys(notes).forEach((note, i) => {
+                const noteData = notes[note];
+                const y = canvas.height * (1 - noteData.y);
+                
+                ctx.fillStyle = noteData.color;
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'right';
+                ctx.fillText(note, 30, y + 5);
+            });
+            
+            melody.forEach((m, i) => {
+                const noteData = notes[m.note];
+                drawNote(noteData, i);
+            });
+        }
+        
+        function clearMusic() {
+            melody = [];
+            score = 0;
+            document.getElementById('score').textContent = score;
+            draw();
+        }
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            draw();
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        draw();
+        
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>合作塔防</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ffd700; }
+        .stats { display: flex; gap: 20px; }
+        .stat { display: flex; align-items: center; gap: 5px; font-size: 14px; }
+        
+        .map-area { flex: 1; background: rgba(0,0,0,0.3); border-radius: 15px; position: relative; margin-bottom: 15px; overflow: hidden; }
+        .path { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(90deg, rgba(100,100,100,0.3) 50%, transparent 50%); }
+        .enemy { position: absolute; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; transition: left 0.5s; }
+        .tower { position: absolute; width: 50px; height: 50px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 28px; cursor: pointer; }
+        
+        .build-area { display: flex; gap: 10px; overflow-x: auto; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 15px; margin-bottom: 15px; }
+        .tower-card { padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; cursor: pointer; min-width: 100px; text-align: center; }
+        .tower-card.selected { border: 2px solid #ffd700; }
+        
+        .team-area { display: flex; gap: 10px; justify-content: center; }
+        .team-btn { padding: 12px 20px; border: none; border-radius: 15px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .team-btn.attack { background: linear-gradient(135deg, #ff6b6b, #ffa502); color: #fff; }
+        .team-btn.defend { background: linear-gradient(135deg, #48c78e, #4ecdc4); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🏰 合作塔防</div>
+            <div class="stats">
+                <div class="stat">❤️ <span id="hp">100</span></div>
+                <div class="stat">💰 <span id="gold">200</span></div>
+                <div class="stat">👥 <span id="wave">第1波</span></div>
+            </div>
+        </div>
+        
+        <div class="map-area" id="mapArea">
+            <div class="path"></div>
+        </div>
+        
+        <div class="build-area">
+            <div class="tower-card" onclick="selectTower('archer')">🏹 弓箭塔</div>
+            <div class="tower-card" onclick="selectTower('cannon')">💣 炮塔</div>
+            <div class="tower-card" onclick="selectTower('magic')">🔮 魔法塔</div>
+        </div>
+        
+        <div class="team-area">
+            <button class="team-btn attack" onclick="teamAttack()">⚔️ 全体攻击</button>
+            <button class="team-btn defend" onclick="teamDefend()">🛡️ 全体防御</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '合作塔防';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const towers = {
+            archer: { emoji: '🏹', damage: 10, cost: 50, color: '#4ecdc4' },
+            cannon: { emoji: '💣', damage: 30, cost: 100, color: '#ff6b6b' },
+            magic: { emoji: '🔮', damage: 20, cost: 75, color: '#f093fb' }
+        };
+        
+        let hp = 100;
+        let gold = 200;
+        let wave = 1;
+        let selectedTower = null;
+        let placedTowers = [];
+        let enemies = [];
+        let gameLoop = null;
+        
+        function initGame() {
+            hp = 100;
+            gold = 200;
+            wave = 1;
+            placedTowers = [];
+            enemies = [];
+            
+            updateUI();
+            startWave();
+        }
+        
+        function updateUI() {
+            document.getElementById('hp').textContent = hp;
+            document.getElementById('gold').textContent = gold;
+            document.getElementById('wave').textContent = `第${wave}波`;
+        }
+        
+        function selectTower(type) {
+            selectedTower = type;
+            
+            document.querySelectorAll('.tower-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            
+            event.currentTarget.classList.add('selected');
+            
+            GameCore.hints.show(`选择了 ${towers[type].emoji} ${towers[type].damage}伤害`);
+        }
+        
+        function placeTower(x, y) {
+            if (!selectedTower) {
+                GameCore.hints.show('请先选择要建造的塔！');
+                return;
+            }
+            
+            const tower = towers[selectedTower];
+            
+            if (gold < tower.cost) {
+                GameCore.hints.show('金币不足！');
+                return;
+            }
+            
+            gold -= tower.cost;
+            
+            const newTower = {
+                id: Date.now(),
+                type: selectedTower,
+                x: x,
+                y: y,
+                damage: tower.damage
+            };
+            
+            placedTowers.push(newTower);
+            renderTower(newTower);
+            updateUI();
+        }
+        
+        function renderTower(tower) {
+            const el = document.createElement('div');
+            el.className = 'tower';
+            el.style.left = tower.x + 'px';
+            el.style.top = tower.y + 'px';
+            el.style.background = towers[tower.type].color;
+            el.textContent = towers[tower.type].emoji;
+            el.id = 'tower-' + tower.id;
+            
+            document.getElementById('mapArea').appendChild(el);
+        }
+        
+        function startWave() {
+            const enemyCount = wave * 3;
+            
+            for (let i = 0; i < enemyCount; i++) {
+                setTimeout(() => {
+                    spawnEnemy();
+                }, i * 1000);
+            }
+            
+            GameCore.hints.show(`⚔️ 第${wave}波敌人来袭！`);
+        }
+        
+        function spawnEnemy() {
+            const enemy = {
+                id: Date.now() + Math.random(),
+                hp: 20 + wave * 5,
+                x: -50,
+                y: 100
+            };
+            
+            enemies.push(enemy);
+            renderEnemy(enemy);
+        }
+        
+        function renderEnemy(enemy) {
+            const el = document.createElement('div');
+            el.className = 'enemy';
+            el.style.left = enemy.x + 'px';
+            el.style.top = enemy.y + 'px';
+            el.style.background = '#ff6b6b';
+            el.textContent = '👹';
+            el.id = 'enemy-' + enemy.id;
+            
+            document.getElementById('mapArea').appendChild(el);
+        }
+        
+        function gameUpdate() {
+            enemies.forEach((enemy, index) => {
+                enemy.x += 1;
+                
+                const el = document.getElementById('enemy-' + enemy.id);
+                if (el) {
+                    el.style.left = enemy.x + 'px';
+                }
+                
+                if (enemy.x > window.innerWidth) {
+                    hp -= 10;
+                    updateUI();
+                    
+                    if (el) el.remove();
+                    enemies.splice(index, 1);
+                    
+                    if (hp <= 0) {
+                        gameOver();
+                    }
+                }
+                
+                placedTowers.forEach(tower => {
+                    if (Math.abs(enemy.x - tower.x) < 60 && Math.abs(enemy.y - tower.y) < 30) {
+                        enemy.hp -= tower.damage;
+                        
+                        if (enemy.hp <= 0) {
+                            gold += 10;
+                            updateUI();
+                            
+                            if (el) el.remove();
+                            enemies.splice(index, 1);
+                        }
+                    }
+                });
+            });
+            
+            if (enemies.length === 0) {
+                wave++;
+                GameCore.hints.show(`🎉 第${wave - 1}波完成！准备第${wave}波`);
+                setTimeout(() => {
+                    startWave();
+                }, 3000);
+            }
+        }
+        
+        function teamAttack() {
+            enemies.forEach(enemy => {
+                enemy.hp -= 15;
+                
+                if (enemy.hp <= 0) {
+                    gold += 10;
+                    updateUI();
+                    
+                    const el = document.getElementById('enemy-' + enemy.id);
+                    if (el) el.remove();
+                }
+            });
+            
+            enemies = enemies.filter(e => e.hp > 0);
+            GameCore.hints.show('⚔️ 全体攻击！对所有敌人造成15点伤害');
+        }
+        
+        function teamDefend() {
+            hp = Math.min(100, hp + 20);
+            updateUI();
+            GameCore.hints.show('🛡️ 全体防御！恢复20点生命值');
+        }
+        
+        function gameOver() {
+            clearInterval(gameLoop);
+            GameCore.hints.show('💀 游戏结束！');
+            GameCore.highScore.set(GAME_NAME, wave);
+        }
+        
+        document.getElementById('mapArea').addEventListener('click', (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            placeTower(x, y);
+        });
+        
+        gameLoop = setInterval(gameUpdate, 50);
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

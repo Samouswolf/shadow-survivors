@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>音符连连看</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ffd700; }
+        .score { font-size: 18px; }
+        
+        .board-area { flex: 1; display: flex; justify-content: center; align-items: center; margin-bottom: 15px; }
+        .board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 15px; }
+        .cell { width: 50px; height: 50px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 28px; cursor: pointer; transition: all 0.2s; }
+        .cell.hidden { visibility: hidden; }
+        .cell.selected { box-shadow: 0 0 20px rgba(255,215,0,0.5); transform: scale(1.1); }
+        
+        .controls { display: flex; gap: 10px; justify-content: center; }
+        .btn { padding: 12px 25px; border: none; border-radius: 15px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🎶 音符连连看</div>
+            <div class="score">分数: <span id="score">0</span></div>
+        </div>
+        
+        <div class="board-area">
+            <div class="board" id="board"></div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-secondary" onclick="restartGame()">🔄 重新开始</button>
+            <button class="btn btn-primary" onclick="shuffleBoard()">🔀 洗牌</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '音符连连看';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const notes = ['🎵', '🎶', '🎹', '🎸', '🎺', '🎻', '🥁', '🎷'];
+        const gridSize = 6;
+        let board = [];
+        let selected = null;
+        let score = 0;
+        
+        function initGame() {
+            score = 0;
+            selected = null;
+            updateScore();
+            createBoard();
+            renderBoard();
+        }
+        
+        function createBoard() {
+            const pairs = [...notes, ...notes, ...notes, ...notes, ...notes, ...notes];
+            board = pairs.sort(() => Math.random() - 0.5);
+        }
+        
+        function renderBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            
+            board.forEach((note, index) => {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.textContent = note;
+                cell.onclick = () => selectCell(index);
+                cell.id = 'cell-' + index;
+                
+                if (note === null) {
+                    cell.classList.add('hidden');
+                }
+                
+                boardEl.appendChild(cell);
+            });
+        }
+        
+        function selectCell(index) {
+            if (board[index] === null) return;
+            
+            if (!selected) {
+                selected = index;
+                document.getElementById('cell-' + index).classList.add('selected');
+                playNote(board[index]);
+            } else if (selected === index) {
+                document.getElementById('cell-' + index).classList.remove('selected');
+                selected = null;
+            } else if (board[selected] === board[index]) {
+                if (canConnect(selected, index)) {
+                    board[selected] = null;
+                    board[index] = null;
+                    
+                    document.getElementById('cell-' + selected).classList.add('hidden');
+                    document.getElementById('cell-' + selected).classList.remove('selected');
+                    document.getElementById('cell-' + index).classList.add('hidden');
+                    
+                    score += 100;
+                    updateScore();
+                    selected = null;
+                    
+                    checkWin();
+                } else {
+                    GameCore.hints.show('无法连接！');
+                    document.getElementById('cell-' + selected).classList.remove('selected');
+                    selected = index;
+                    document.getElementById('cell-' + index).classList.add('selected');
+                }
+            } else {
+                document.getElementById('cell-' + selected).classList.remove('selected');
+                selected = index;
+                document.getElementById('cell-' + index).classList.add('selected');
+            }
+        }
+        
+        function canConnect(i1, i2) {
+            const row1 = Math.floor(i1 / gridSize);
+            const col1 = i1 % gridSize;
+            const row2 = Math.floor(i2 / gridSize);
+            const col2 = i2 % gridSize;
+            
+            if (Math.abs(row1 - row2) + Math.abs(col1 - col2) <= 2) {
+                return true;
+            }
+            
+            if (row1 === row2) {
+                const minCol = Math.min(col1, col2);
+                const maxCol = Math.max(col1, col2);
+                
+                let canPass = true;
+                for (let c = minCol + 1; c < maxCol; c++) {
+                    const idx = row1 * gridSize + c;
+                    if (board[idx] !== null) {
+                        canPass = false;
+                        break;
+                    }
+                }
+                
+                if (canPass) return true;
+            }
+            
+            if (col1 === col2) {
+                const minRow = Math.min(row1, row2);
+                const maxRow = Math.max(row1, row2);
+                
+                let canPass = true;
+                for (let r = minRow + 1; r < maxRow; r++) {
+                    const idx = r * gridSize + col1;
+                    if (board[idx] !== null) {
+                        canPass = false;
+                        break;
+                    }
+                }
+                
+                if (canPass) return true;
+            }
+            
+            return false;
+        }
+        
+        function playNote(note) {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            const noteFreqs = {
+                '🎵': 392.00, '🎶': 440.00, '🎹': 493.88,
+                '🎸': 523.25, '🎺': 587.33, '🎻': 659.25,
+                '🥁': 784.00, '🎷': 880.00
+            };
+            
+            oscillator.frequency.value = noteFreqs[note] || 440;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.2);
+        }
+        
+        function checkWin() {
+            if (board.every(n => n === null)) {
+                GameCore.hints.show('🎉 恭喜通关！');
+                GameCore.highScore.set(GAME_NAME, score);
+            }
+        }
+        
+        function updateScore() {
+            document.getElementById('score').textContent = score;
+        }
+        
+        function restartGame() {
+            initGame();
+        }
+        
+        function shuffleBoard() {
+            const nonNull = board.filter(n => n !== null);
+            nonNull.sort(() => Math.random() - 0.5);
+            
+            let idx = 0;
+            for (let i = 0; i < board.length; i++) {
+                if (board[i] !== null) {
+                    board[i] = nonNull[idx++];
+                }
+            }
+            
+            if (selected) {
+                document.getElementById('cell-' + selected).classList.remove('selected');
+                selected = null;
+            }
+            
+            renderBoard();
+            GameCore.hints.show('已洗牌！');
+        }
+        
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

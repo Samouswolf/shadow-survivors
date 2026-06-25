@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI绘画猜谜</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; display: flex; flex-direction: column; padding: 20px; color: #fff; }
+        
+        .game-container { width: 100%; flex: 1; display: flex; flex-direction: column; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; margin-bottom: 15px; }
+        .title { font-size: 24px; font-weight: bold; color: #ffd700; }
+        .score-display { font-size: 18px; }
+        
+        .canvas-area { flex: 1; position: relative; background: #fff; border-radius: 15px; margin-bottom: 15px; overflow: hidden; }
+        #drawCanvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+        
+        .word-display { text-align: center; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 15px; margin-bottom: 15px; }
+        .word-label { font-size: 14px; opacity: 0.7; margin-bottom: 10px; }
+        .word { font-size: 32px; font-weight: bold; color: #4ecdc4; }
+        
+        .ai-guess { text-align: center; padding: 15px; background: rgba(245,87,108,0.2); border-radius: 15px; margin-bottom: 15px; }
+        .guess-label { font-size: 14px; opacity: 0.7; margin-bottom: 10px; }
+        .guess { font-size: 24px; font-weight: bold; color: #f5576c; }
+        .confidence { font-size: 14px; color: #ffd700; }
+        
+        .controls { display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 15px; border: none; border-radius: 15px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.2); color: #fff; }
+        
+        .ad-banner { width: 100%; height: 60px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="title">🎨 AI绘画猜谜</div>
+            <div class="score-display">分数: <span id="score">0</span></div>
+        </div>
+        
+        <div class="canvas-area">
+            <canvas id="drawCanvas"></canvas>
+        </div>
+        
+        <div class="word-display">
+            <div class="word-label">请画出这个词</div>
+            <div class="word" id="targetWord">苹果</div>
+        </div>
+        
+        <div class="ai-guess">
+            <div class="guess-label">AI的猜测</div>
+            <div class="guess" id="aiGuess">正在观察...</div>
+            <div class="confidence" id="confidence">置信度: 0%</div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-secondary" onclick="clearCanvas()">🗑️ 清空</button>
+            <button class="btn btn-primary" onclick="submitDrawing()">✅ 提交</button>
+            <button class="btn btn-secondary" onclick="nextWord()">➡️ 下一个</button>
+        </div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = 'AI绘画猜谜';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('drawCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let score = 0;
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        
+        const words = ['苹果', '香蕉', '太阳', '房子', '汽车', '花朵', '小鸟', '树木', '月亮', '星星', 
+                       '鱼', '猫', '狗', '书', '电脑', '手机', '杯子', '椅子', '桌子', '雨伞',
+                       '帽子', '眼镜', '鞋子', '衣服', '笑脸', '爱心', '星星', '雪花', '云朵', '彩虹'];
+        
+        let currentWord = '';
+        let strokes = [];
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 5;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        }
+        
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            strokes = [];
+            document.getElementById('aiGuess').textContent = '正在观察...';
+            document.getElementById('confidence').textContent = '置信度: 0%';
+        }
+        
+        function nextWord() {
+            clearCanvas();
+            currentWord = words[Math.floor(Math.random() * words.length)];
+            document.getElementById('targetWord').textContent = currentWord;
+        }
+        
+        function getStrokeFeatures() {
+            const features = {
+                strokeCount: strokes.length,
+                totalLength: 0,
+                boundingBox: { minX: canvas.width, minY: canvas.height, maxX: 0, maxY: 0 },
+                symmetry: 0,
+                complexity: 0
+            };
+            
+            strokes.forEach(stroke => {
+                features.totalLength += stroke.length;
+                
+                stroke.forEach(point => {
+                    features.boundingBox.minX = Math.min(features.boundingBox.minX, point.x);
+                    features.boundingBox.minY = Math.min(features.boundingBox.minY, point.y);
+                    features.boundingBox.maxX = Math.max(features.boundingBox.maxX, point.x);
+                    features.boundingBox.maxY = Math.max(features.boundingBox.maxY, point.y);
+                });
+            });
+            
+            const width = features.boundingBox.maxX - features.boundingBox.minX;
+            const height = features.boundingBox.maxY - features.boundingBox.minY;
+            features.complexity = features.totalLength / (width + height + 1);
+            
+            return features;
+        }
+        
+        function aiGuess() {
+            const features = getStrokeFeatures();
+            
+            if (features.strokeCount === 0) {
+                return { word: '什么都没画', confidence: 0 };
+            }
+            
+            const wordFeatures = {
+                '苹果': { strokeCount: 2, complexity: 3, symmetry: 0.8 },
+                '香蕉': { strokeCount: 1, complexity: 2, symmetry: 0.3 },
+                '太阳': { strokeCount: 8, complexity: 5, symmetry: 0.9 },
+                '房子': { strokeCount: 5, complexity: 4, symmetry: 0.7 },
+                '汽车': { strokeCount: 4, complexity: 3.5, symmetry: 0.6 },
+                '花朵': { strokeCount: 6, complexity: 4.5, symmetry: 0.85 },
+                '小鸟': { strokeCount: 3, complexity: 2.5, symmetry: 0.5 },
+                '树木': { strokeCount: 2, complexity: 3, symmetry: 0.7 },
+                '月亮': { strokeCount: 1, complexity: 1.5, symmetry: 0.9 },
+                '星星': { strokeCount: 5, complexity: 3, symmetry: 0.95 },
+                '鱼': { strokeCount: 2, complexity: 2.5, symmetry: 0.75 },
+                '猫': { strokeCount: 4, complexity: 3, symmetry: 0.6 },
+                '狗': { strokeCount: 4, complexity: 3.2, symmetry: 0.55 },
+                '书': { strokeCount: 3, complexity: 2, symmetry: 0.8 },
+                '电脑': { strokeCount: 4, complexity: 2.5, symmetry: 0.85 },
+                '手机': { strokeCount: 2, complexity: 1.8, symmetry: 0.9 },
+                '杯子': { strokeCount: 2, complexity: 2, symmetry: 0.85 },
+                '椅子': { strokeCount: 4, complexity: 3, symmetry: 0.6 },
+                '桌子': { strokeCount: 4, complexity: 2.5, symmetry: 0.75 },
+                '雨伞': { strokeCount: 3, complexity: 3.5, symmetry: 0.8 },
+                '帽子': { strokeCount: 2, complexity: 2, symmetry: 0.7 },
+                '眼镜': { strokeCount: 3, complexity: 2.5, symmetry: 0.9 },
+                '鞋子': { strokeCount: 2, complexity: 2, symmetry: 0.6 },
+                '衣服': { strokeCount: 3, complexity: 2.5, symmetry: 0.7 },
+                '笑脸': { strokeCount: 3, complexity: 2, symmetry: 0.9 },
+                '爱心': { strokeCount: 1, complexity: 2.5, symmetry: 0.95 },
+                '雪花': { strokeCount: 6, complexity: 4, symmetry: 0.95 },
+                '云朵': { strokeCount: 3, complexity: 2, symmetry: 0.7 },
+                '彩虹': { strokeCount: 6, complexity: 3, symmetry: 0.8 }
+            };
+            
+            let bestMatch = null;
+            let bestScore = -Infinity;
+            
+            Object.keys(wordFeatures).forEach(word => {
+                const target = wordFeatures[word];
+                let match = 0;
+                
+                match += Math.exp(-Math.abs(features.strokeCount - target.strokeCount) * 0.5);
+                match += Math.exp(-Math.abs(features.complexity - target.complexity) * 0.3);
+                match += features.symmetry > 0.5 ? target.symmetry * 0.5 : 0.25;
+                
+                if (match > bestScore) {
+                    bestScore = match;
+                    bestMatch = word;
+                }
+            });
+            
+            const confidence = Math.min(95, Math.round(bestScore * 35 + Math.random() * 20));
+            
+            return { word: bestMatch || words[Math.floor(Math.random() * words.length)], confidence };
+        }
+        
+        function submitDrawing() {
+            const guess = aiGuess();
+            document.getElementById('aiGuess').textContent = guess.word;
+            document.getElementById('confidence').textContent = `置信度: ${guess.confidence}%`;
+            
+            if (guess.word === currentWord) {
+                score += 100;
+                GameCore.hints.show('🎉 AI猜对了！+100分');
+            } else {
+                score += 10;
+                GameCore.hints.show(`AI猜成了"${guess.word}"，+10分`);
+            }
+            
+            document.getElementById('score').textContent = score;
+            
+            if (GameCore.highScore.set(GAME_NAME, score)) {
+                GameCore.hints.show('新纪录！分数: ' + score);
+            }
+        }
+        
+        canvas.addEventListener('mousedown', e => {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            lastX = e.clientX - rect.left;
+            lastY = e.clientY - rect.top;
+            strokes.push([]);
+        });
+        
+        canvas.addEventListener('mousemove', e => {
+            if (!isDrawing) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            
+            strokes[strokes.length - 1].push({ x, y });
+            
+            lastX = x;
+            lastY = y;
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            isDrawing = false;
+            if (strokes.length > 0) {
+                const guess = aiGuess();
+                document.getElementById('aiGuess').textContent = guess.word;
+                document.getElementById('confidence').textContent = `置信度: ${guess.confidence}%`;
+            }
+        });
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            lastX = touch.clientX - rect.left;
+            lastY = touch.clientY - rect.top;
+            strokes.push([]);
+        }, { passive: false });
+        
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (!isDrawing) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            
+            strokes[strokes.length - 1].push({ x, y });
+            
+            lastX = x;
+            lastY = y;
+        }, { passive: false });
+        
+        canvas.addEventListener('touchend', e => {
+            e.preventDefault();
+            isDrawing = false;
+            if (strokes.length > 0) {
+                const guess = aiGuess();
+                document.getElementById('aiGuess').textContent = guess.word;
+                document.getElementById('confidence').textContent = `置信度: ${guess.confidence}%`;
+            }
+        }, { passive: false });
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        nextWord();
+        
+        GameCore.touch.enableAllButtons();
+    </script>
+</body>
+</html>

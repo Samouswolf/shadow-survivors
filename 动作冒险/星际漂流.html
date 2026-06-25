@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>星际漂流</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: #000; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        .ui-overlay { position: absolute; top: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; }
+        
+        .status { color: #fff; font-size: 18px; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        .status span { color: #4ecdc4; }
+        
+        .controls { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 100; }
+        .control-btn { width: 60px; height: 60px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); background: rgba(0,0,0,0.5); color: #fff; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .control-btn:active { background: rgba(255,255,255,0.2); }
+        
+        .ad-banner { position: absolute; bottom: 20px; left: 20px; right: 20px; height: 50px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; z-index: 100; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="ui-overlay">
+        <div class="status">距离: <span id="distance">0</span> | 燃料: <span id="fuel">100</span>%</div>
+    </div>
+    
+    <div class="controls">
+        <div class="control-btn" id="leftBtn">◀</div>
+        <div class="control-btn" id="upBtn">▲</div>
+        <div class="control-btn" id="rightBtn">▶</div>
+    </div>
+    
+    <div class="ad-banner">📺 游戏广告位 - 点击查看更多精彩游戏</div>
+
+    <script src="game_core.js"></script>
+    <script>
+        const GAME_NAME = '星际漂流';
+        GameCore.init({ highScore: GAME_NAME });
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let ship = { x: 0, y: 0, vx: 0, vy: 0, rotation: 0, fuel: 100, speed: 5 };
+        let stars = [];
+        let planets = [];
+        let distance = 0;
+        let keys = { left: false, right: false, up: false };
+        
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            ship.x = width / 2;
+            ship.y = height - 100;
+        }
+        
+        function initGame() {
+            ship = { x: width / 2, y: height - 100, vx: 0, vy: 0, rotation: 0, fuel: 100, speed: 5 };
+            distance = 0;
+            stars = [];
+            planets = [];
+            
+            for (let i = 0; i < 200; i++) {
+                stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 2 + 0.5,
+                    speed: Math.random() * 3 + 1
+                });
+            }
+            
+            for (let i = 0; i < 5; i++) {
+                planets.push({
+                    x: Math.random() * (width - 100) + 50,
+                    y: -100 - i * 300,
+                    radius: Math.random() * 30 + 20,
+                    color: `hsl(${Math.random() * 360}, 70%, 40%)`,
+                    speed: Math.random() * 2 + 1
+                });
+            }
+            
+            updateUI();
+        }
+        
+        function updateUI() {
+            document.getElementById('distance').textContent = Math.round(distance);
+            document.getElementById('fuel').textContent = Math.round(ship.fuel);
+        }
+        
+        function update() {
+            distance += 0.1;
+            
+            if (keys.left) {
+                ship.rotation -= 0.05;
+                ship.fuel -= 0.02;
+            }
+            if (keys.right) {
+                ship.rotation += 0.05;
+                ship.fuel -= 0.02;
+            }
+            if (keys.up) {
+                ship.vx += Math.sin(-ship.rotation) * 0.2;
+                ship.vy += Math.cos(-ship.rotation) * 0.2;
+                ship.fuel -= 0.05;
+            }
+            
+            ship.vy += 0.05;
+            
+            ship.vx *= 0.99;
+            ship.vy *= 0.99;
+            
+            ship.x += ship.vx;
+            ship.y += ship.vy;
+            
+            if (ship.x < 0) ship.x = width;
+            if (ship.x > width) ship.x = 0;
+            if (ship.y < 0) ship.y = height;
+            
+            if (ship.fuel <= 0) {
+                gameOver();
+                return;
+            }
+            
+            stars.forEach(s => {
+                s.y += s.speed;
+                if (s.y > height) {
+                    s.y = 0;
+                    s.x = Math.random() * width;
+                }
+            });
+            
+            planets.forEach((p, index) => {
+                p.y += p.speed;
+                
+                const dx = ship.x - p.x;
+                const dy = ship.y - p.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < ship.speed + p.radius) {
+                    gameOver();
+                    return;
+                }
+                
+                if (p.y > height + 100) {
+                    planets[index] = {
+                        x: Math.random() * (width - 100) + 50,
+                        y: -100,
+                        radius: Math.random() * 30 + 20,
+                        color: `hsl(${Math.random() * 360}, 70%, 40%)`,
+                        speed: Math.random() * 2 + 1
+                    };
+                }
+            });
+            
+            updateUI();
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#0a0a1a';
+            ctx.fillRect(0, 0, width, height);
+            
+            stars.forEach(s => {
+                ctx.fillStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.7})`;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            planets.forEach(p => {
+                const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
+                gradient.addColorStop(0, p.color);
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = p.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius + 5, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            ctx.save();
+            ctx.translate(ship.x, ship.y);
+            ctx.rotate(-ship.rotation);
+            
+            ctx.fillStyle = '#4ecdc4';
+            ctx.beginPath();
+            ctx.moveTo(0, -20);
+            ctx.lineTo(-10, 15);
+            ctx.lineTo(10, 15);
+            ctx.closePath();
+            ctx.fill();
+            
+            if (keys.up) {
+                ctx.fillStyle = '#ff6b6b';
+                ctx.beginPath();
+                ctx.moveTo(-5, 15);
+                ctx.lineTo(0, 30 + Math.random() * 10);
+                ctx.lineTo(5, 15);
+                ctx.closePath();
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
+        
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function gameOver() {
+            GameCore.hints.show(`😢 飞船坠毁！距离: ${Math.round(distance)}`);
+            GameCore.highScore.set(GAME_NAME, Math.round(distance));
+            initGame();
+        }
+        
+        document.getElementById('leftBtn').addEventListener('touchstart', () => keys.left = true);
+        document.getElementById('leftBtn').addEventListener('touchend', () => keys.left = false);
+        document.getElementById('rightBtn').addEventListener('touchstart', () => keys.right = true);
+        document.getElementById('rightBtn').addEventListener('touchend', () => keys.right = false);
+        document.getElementById('upBtn').addEventListener('touchstart', () => keys.up = true);
+        document.getElementById('upBtn').addEventListener('touchend', () => keys.up = false);
+        
+        document.getElementById('leftBtn').addEventListener('mousedown', () => keys.left = true);
+        document.getElementById('leftBtn').addEventListener('mouseup', () => keys.left = false);
+        document.getElementById('rightBtn').addEventListener('mousedown', () => keys.right = true);
+        document.getElementById('rightBtn').addEventListener('mouseup', () => keys.right = false);
+        document.getElementById('upBtn').addEventListener('mousedown', () => keys.up = true);
+        document.getElementById('upBtn').addEventListener('mouseup', () => keys.up = false);
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'ArrowUp') keys.up = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+            if (e.key === 'ArrowUp') keys.up = false;
+        });
+        
+        window.addEventListener('resize', resize);
+        resize();
+        initGame();
+        gameLoop();
+    </script>
+</body>
+</html>
