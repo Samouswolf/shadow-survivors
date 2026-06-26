@@ -1,4 +1,4 @@
-const CACHE_NAME = "game-studio-v2";
+const CACHE_NAME = "game-studio-v3";
 const STATIC_ASSETS = [
   "./launcher.html",
   "./manifest.json"
