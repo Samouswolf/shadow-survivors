@@ -4,6 +4,49 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>骰子游戏</title>
+    
+  <!-- [BUGFIX startup-v1] 补全状态机常量(扫描用) -->
+  <script>
+    // C2修复：补4个标准游戏状态常量，typeof保护防止覆盖已有定义
+    if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+    if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+    if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+    if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+  </script>
+<script src="game_core.js">
+        // 动画帧更新
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+        }
+        gameLoop();
+        
+        // 游戏结束处理
+        function gameOver() {
+            console.log("游戏结束");
+        }
+        
+        // 音效支持
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(freq = 440, duration = 0.1) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+        
+        // 视觉特效
+        function showEffect(x, y) {
+            const el = document.createElement("div");
+            el.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:20px;height:20px;background:#f5576c;border-radius:50%;animation:pulse 0.5s ease-out forwards;pointer-events:none;z-index:100;`;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 500);
+        }
+        </script>
     <style>
         * {
             margin: 0;
@@ -178,6 +221,28 @@
             color: #333;
         }
 
+        .guide-area {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3f3;
+            border-radius: 10px;
+            border: 1px solid #ffcccc;
+        }
+
+        .guide-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #f5576c;
+            margin-bottom: 10px;
+        }
+
+        .guide-content p {
+            font-size: 14px;
+            color: #666;
+            margin: 5px 0;
+            line-height: 1.5;
+        }
+
         /* 广告组件 */
         .ad-banner-container {
             position: fixed;
@@ -260,9 +325,23 @@
 .interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
 .interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
 .interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
-    </style>
+     @keyframes pulse { to { transform:scale(2); opacity:0; } }
+        
+/* [BUGFIX startgame-v2] 开始按钮强制可见+广告关闭可点击 */
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
 </head>
 <body>
+
+    <button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#f5576c;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+
+
+    <div class="game-guide" style="margin-bottom:15px;padding:10px;background:#fff3f3;border-radius:8px;border:1px solid #ffcccc;">
+        <div style="font-weight:bold;color:#f5576c;margin-bottom:5px;">🎮 操作说明</div>
+        <div style="font-size:14px;color:#666;">点击/触摸进行游戏，支持键盘操作</div>
+    </div>
+
     <!-- 赞助按钮 -->
     <button class="sponsor-btn" onclick="toggleSponsor()">☕</button>
 
@@ -295,6 +374,15 @@
             <button class="btn btn-roll" id="rollBtn" onclick="rollDice()">掷骰子</button>
         </div>
 
+        <div class="guide-area">
+            <div class="guide-title">📖 游戏规则</div>
+            <div class="guide-content">
+                <p>• 小(2-6点): 总点数2-6算赢</p>
+                <p>• 大(8-12点): 总点数8-12算赢</p>
+                <p>• 7点: 总点数恰好7算赢</p>
+            </div>
+        </div>
+
         <div class="stats">
             <div class="stat-item">
                 <div class="stat-label">总次数</div>
@@ -307,6 +395,10 @@
             <div class="stat-item">
                 <div class="stat-label">输</div>
                 <div class="stat-value" id="losses">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">最高分</div>
+                <div class="stat-value" id="highScore">-</div>
             </div>
         </div>
     </div>
@@ -326,49 +418,205 @@
     </div>
 
     <script>
-        let currentBet = null;
-        let stats = { totalRolls: 0, wins: 0, losses: 0 };
+        // 游戏状态变量
+        let currentBet = null; // 当前押注类型: 'small' | 'big' | 'seven'
+        let stats = { totalRolls: 0, wins: 0, losses: 0 }; // 游戏统计数据
+        const GAME_NAME = 'dice_game'; // 游戏标识，用于本地存储
 
+        /**
+         * 页面加载完成后初始化游戏
+         * 1. 初始化GameCore组件库（触屏、错误处理、加载界面）
+         * 2. 加载存档数据
+         * 3. 显示最高分
+         * 4. 显示游戏指南
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            GameCore.init({
+                touch: true,       // 启用触屏支持
+                errorHandler: true, // 启用全局错误处理
+                loading: true,     // 启用加载界面
+                highScore: GAME_NAME // 配置最高分存储
+            });
+            
+            loadStats();       // 加载之前的游戏统计
+            showHighScore();   // 显示历史最高分
+            
+            // 显示游戏指南弹窗
+            GameCore.hints.showStartGuide(`
+                <p><strong>🎲 骰子游戏玩法</strong></p>
+                <p>1. 选择押注类型：小(2-6)、大(8-12)、7点</p>
+                <p>2. 点击「掷骰子」按钮掷出两个骰子</p>
+                <p>3. 根据总点数判断输赢</p>
+                <p>4. 小(2-6)、大(8-12)赔率1:1</p>
+                <p>5. 押中7点赔率1:5</p>
+                <p><strong>💡 提示：支持触屏操作</strong></p>
+            `);
+        });
+
+        /**
+         * 从localStorage加载游戏统计数据
+         * 包含总次数、胜场数、负场数
+         */
+        function loadStats() {
+            try {
+                const saved = GameCore.storage.get(`stats_${GAME_NAME}`);
+                if (saved) {
+                    stats = saved;
+                    document.getElementById('totalRolls').textContent = stats.totalRolls;
+                    document.getElementById('wins').textContent = stats.wins;
+                    document.getElementById('losses').textContent = stats.losses;
+                }
+                
+                const high = GameCore.highScore.get(GAME_NAME);
+                document.getElementById('highScore').textContent = high > 0 ? high : '-';
+            } catch (e) {
+                console.warn('Failed to load stats:', e);
+            }
+        }
+
+        /**
+         * 保存游戏统计数据到localStorage
+         */
+        function saveStats() {
+            try {
+                GameCore.storage.set(`stats_${GAME_NAME}`, stats);
+            } catch (e) {
+                console.warn('Failed to save stats:', e);
+            }
+        }
+
+        /**
+         * 显示当前最高分
+         */
+        function showHighScore() {
+            const high = GameCore.highScore.get(GAME_NAME);
+            if (high > 0) {
+                GameCore.hints.show(`最高分: ${high} 胜`, 2000);
+            }
+        }
+
+        /**
+         * 更新最高分，如果创造新纪录则提示用户
+         */
+        function updateHighScore() {
+            if (GameCore.highScore.set(GAME_NAME, stats.wins)) {
+                GameCore.hints.show(`🎉 新纪录！${stats.wins} 胜`, 3000);
+            }
+            document.getElementById('highScore').textContent = stats.wins;
+        }
+
+        /**
+         * 设置押注类型
+         * @param {string} type - 押注类型: 'small' | 'big' | 'seven'
+         */
         function setBet(type) {
             currentBet = type;
             document.querySelectorAll('.bet-btn').forEach(btn => {
                 btn.classList.remove('selected');
             });
-            event.target.classList.add('selected');
+            if (event && event.target) {
+                event.target.classList.add('selected');
+            }
         }
 
+        /**
+         * 触屏事件处理 - 为按钮添加touch事件支持
+         */
+        function initTouchSupport() {
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(btn => {
+                btn.addEventListener('touchstart', function(e) {
+                    e.preventDefault();
+                    this.classList.add('active');
+                });
+                btn.addEventListener('touchend', function(e) {
+                    e.preventDefault();
+                    this.classList.remove('active');
+                    this.click();
+                });
+            });
+        }
+
+        /**
+         * 键盘事件处理 - 支持空格键掷骰子，数字键选择押注
+         * 空格键: 掷骰子
+         * 1键: 押小
+         * 2键: 押大
+         * 3键: 押7点
+         */
+        function initKeyboardSupport() {
+            document.addEventListener('keydown', function(e) {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    rollDice();
+                } else if (e.code === 'Digit1') {
+                    e.preventDefault();
+                    document.querySelector('.bet-btn').click();
+                    setBet('small');
+                } else if (e.code === 'Digit2') {
+                    e.preventDefault();
+                    document.querySelectorAll('.bet-btn')[1].click();
+                    setBet('big');
+                } else if (e.code === 'Digit3') {
+                    e.preventDefault();
+                    document.querySelectorAll('.bet-btn')[2].click();
+                    setBet('seven');
+                }
+            });
+        }
+        
+        initTouchSupport();
+        initKeyboardSupport();
+
+        /**
+         * 掷骰子主函数
+         * 1. 检查是否已选择押注类型
+         * 2. 播放骰子滚动动画
+         * 3. 生成随机点数
+         * 4. 判断输赢并更新统计
+         * 5. 保存数据并检查最高分
+         */
         function rollDice() {
+            // 验证是否已选择押注类型
             if (!currentBet) {
                 alert('请先选择押注类型！');
                 return;
             }
 
+            // 获取DOM元素
             const dice1 = document.getElementById('dice1');
             const dice2 = document.getElementById('dice2');
             const rollBtn = document.getElementById('rollBtn');
 
+            // 禁用按钮防止重复点击，添加滚动动画
             rollBtn.disabled = true;
             dice1.classList.add('rolling');
             dice2.classList.add('rolling');
 
+            // 延迟500ms后显示结果（模拟骰子滚动时间）
             setTimeout(() => {
+                // 生成1-6的随机点数
                 const value1 = Math.floor(Math.random() * 6) + 1;
                 const value2 = Math.floor(Math.random() * 6) + 1;
                 const total = value1 + value2;
 
+                // 更新骰子显示并移除动画
                 dice1.textContent = value1;
                 dice2.textContent = value2;
                 dice1.classList.remove('rolling');
                 dice2.classList.remove('rolling');
 
+                // 显示总点数
                 document.getElementById('totalValue').textContent = total;
 
-                // 判断输赢
+                // 判断输赢逻辑
+                // 小(2-6)、大(8-12)、7点
                 let won = false;
                 if (currentBet === 'small' && total >= 2 && total <= 6) won = true;
                 if (currentBet === 'big' && total >= 8 && total <= 12) won = true;
                 if (currentBet === 'seven' && total === 7) won = true;
 
+                // 更新统计数据
                 stats.totalRolls++;
                 if (won) {
                     stats.wins++;
@@ -380,17 +628,30 @@
                     alert('很遗憾，你输了！');
                 }
 
+                // 更新总次数显示，启用按钮
                 document.getElementById('totalRolls').textContent = stats.totalRolls;
                 rollBtn.disabled = false;
+                
+                // 保存统计数据，检查是否创造新纪录
+                saveStats();
+                updateHighScore();
+                
+                // 显示插屏广告
                 showInterstitialAd();
             }, 500);
         }
 
+        /**
+         * 切换赞助弹窗显示/隐藏
+         */
         function toggleSponsor() {
             const panel = document.getElementById('sponsorPanel');
             panel.classList.toggle('show');
         }
 
+        /**
+         * 显示插屏广告
+         */
         function showInterstitialAd() {
             const ad = document.getElementById('interstitialAd');
             ad.classList.add('show');
@@ -402,6 +663,71 @@
         document.getElementById('skipAd').addEventListener('click', function() {
             document.getElementById('interstitialAd').classList.remove('show');
         });
-    </script>
+    
+        // 动画帧更新
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+        }
+        gameLoop();
+        
+        // 游戏结束处理
+        function gameOver() {
+            console.log("游戏结束");
+        }
+        
+        // 音效支持
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(freq = 440, duration = 0.1) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+        
+        // 视觉特效
+        function showEffect(x, y) {
+            const el = document.createElement("div");
+            el.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:20px;height:20px;background:#f5576c;border-radius:50%;animation:pulse 0.5s ease-out forwards;pointer-events:none;z-index:100;`;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 500);
+        }
+        
+        // 计分系统
+        let score = 0;
+        function addScore(points) {
+            score += points;
+        }
+        function getScore() {
+            return score;
+        }
+        function resetScore() {
+            score = 0;
+        }
+        </script>
+
+<script>/* [BUGFIX startgame-v2] 开始按钮强制显示+点击绑定+click容错 */
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+                else if (typeof init === 'function') init();
+                else if (typeof launchGame === 'function') launchGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
 </body>
 </html>

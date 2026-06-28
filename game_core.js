@@ -246,6 +246,25 @@ const GameCore = {
     },
 
     init: function(options = {}) {
+        // --- BUG4 修复: 注入补丁：赞助面板和插屏广告的关闭按钮需恢复 pointer-events ---
+        try {
+            if (!document.getElementById('gc-pointer-fix')) {
+                var peStyle = document.createElement('style');
+                peStyle.id = 'gc-pointer-fix';
+                peStyle.textContent = [
+                    '.sponsor-close, #sponsorClose, .skip-btn, #skipInterstitial {',
+                    '  pointer-events: auto !important;',
+                    '}',
+                    '.sponsor-panel button, .interstitial-ad button {',
+                    '  pointer-events: auto !important;',
+                    '}'
+                ].join('\n');
+                document.head.appendChild(peStyle);
+            }
+        } catch (e) {
+            console.warn('[GameCore] pointer-events patch failed:', e);
+        }
+
         if (options.touch !== false) {
             GameCore.touch.enableAllButtons();
         }
@@ -254,19 +273,83 @@ const GameCore = {
             GameCore.error.init();
         }
         
+        // --- BUG2 修复: loading 时序竞态 + 超时兜底
         if (options.loading !== false) {
             GameCore.loading.show();
-            window.addEventListener('load', function() {
-                setTimeout(() => {
-                    GameCore.loading.hide();
-                }, 500);
-            });
+            var gcLoadingHidden = false;
+            var gcHideLoadingOnce = function(delay) {
+                if (gcLoadingHidden) return;
+                setTimeout(function() {
+                    if (gcLoadingHidden) return;
+                    gcLoadingHidden = true;
+                    try { GameCore.loading.hide(); } catch (e) {}
+                }, delay != null ? delay : 0);
+            };
+            // 兜底超时 5s：无论如何最终都会隐藏，防止永久卡住
+            setTimeout(gcHideLoadingOnce, 5000);
+            // 如果页面已经加载完成，不用等 load 事件
+            if (document.readyState === 'complete') {
+                console.log('[GameCore] document already complete, hide loading soon');
+                gcHideLoadingOnce(500);
+            } else {
+                window.addEventListener('load', function() {
+                    gcHideLoadingOnce(500);
+                });
+            }
         }
         
         if (options.highScore) {
             GameCore.storage.set('current_game', options.highScore);
         }
-        
-        console.log('GameCore initialized');
+
+        // --- BUG5 修复: 自动显示默认隐藏的 start-game-btn
+        try {
+            if (document.body) {
+                var startBtns = document.querySelectorAll('#start-game-btn, #startGameBtn, .start-btn, .startBtn, .btn-start');
+                for (var i = 0; i < startBtns.length; i++) {
+                    var btn = startBtns[i];
+                    if (btn.style.display === 'none' || getComputedStyle(btn).display === 'none') {
+                        // 保留原有样式，只把 display 改为 block
+                        btn.style.setProperty('display', 'block', 'important');
+                        console.log('[GameCore] auto-shown start button:', btn.id || btn.className);
+                    }
+                }
+            } else {
+                document.addEventListener('DOMContentLoaded', function() {
+                    var startBtns = document.querySelectorAll('#start-game-btn, #startGameBtn, .start-btn, .startBtn, .btn-start');
+                    for (var i = 0; i < startBtns.length; i++) {
+                        if (startBtns[i].style.display === 'none') {
+                            startBtns[i].style.setProperty('display', 'block', 'important');
+                        }
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('[GameCore] start-btn auto-show failed:', e);
+        }
+
+        // --- 关键流程日志（预防措施） ---
+        console.log('[GameCore] initialized at readyState=' + document.readyState,
+            'time=' + (performance ? performance.now().toFixed(0) + 'ms' : ''));
     }
 };
+
+// ============================================================
+// BUG1 修复: 全局 Storage 兼容层（被 66+ 文件引用但从未定义）
+// 所有游戏中调用 Storage.load(key, default) / Storage.save(key, value)
+// ============================================================
+window.Storage = {
+    load: function(key, defaultValue) {
+        var val = GameCore.storage.get(key, defaultValue);
+        console.log('[Storage.load]', key, '=', val);
+        return val;
+    },
+    save: function(key, value) {
+        console.log('[Storage.save]', key, '=', value);
+        return GameCore.storage.set(key, value);
+    },
+    remove: function(key) {
+        return GameCore.storage.remove(key);
+    }
+};
+console.log('[GameCore] global Storage shim installed');

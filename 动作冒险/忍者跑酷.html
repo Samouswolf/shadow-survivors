@@ -117,8 +117,22 @@ canvas {
 .interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
 .interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
 </style>
+
+  <!-- [BUGFIX ad-pointer-v1] 广告关闭按钮指针事件补偿 -->
+  <style>
+    /* GameMonetize赞助面板关闭按钮 */
+    .sponsor-close, #sponsorClose { pointer-events: auto !important; }
+    /* GameMonetize插屏跳过按钮 */
+    .skip-btn, #skipInterstitial { pointer-events: auto !important; }
+  </style>
 </head>
 <body>
+
+    <div class="game-guide" style="margin-bottom:15px;padding:10px;background:#fff3f3;border-radius:8px;border:1px solid #ffcccc;">
+        <div style="font-weight:bold;color:#f5576c;margin-bottom:5px;">🎮 操作说明</div>
+        <div style="font-size:14px;color:#666;">点击/触摸进行游戏，支持键盘操作</div>
+    </div>
+
 <div id="gameContainer">
     <canvas id="gameCanvas" width="800" height="400"></canvas>
     <div id="ui">
@@ -143,6 +157,12 @@ canvas {
         <button class="btn" onclick="startGame()">再来一次</button>
     </div>
     <div id="powerupIndicator"></div>
+    <div id="pauseBtn" style="position:absolute;top:8px;right:8px;z-index:20;width:44px;height:44px;background:rgba(0,0,0,0.6);border:2px solid rgba(255,255,255,0.4);border-radius:8px;color:#fff;font-size:20px;cursor:pointer;display:none;line-height:40px;text-align:center">||</div>
+    <div id="pauseScreen" style="position:absolute;top:0;left:0;right:0;bottom:0;display:none;flex-direction:column;justify-content:center;align-items:center;background:rgba(0,0,0,0.85);color:white;border-radius:8px;z-index:15">
+        <h1 style="font-size:40px;margin-bottom:20px;color:#ff6b6b">暂停</h1>
+        <button class="btn" onclick="togglePause()">继续游戏</button>
+        <button class="btn" style="margin-top:10px;background:linear-gradient(135deg,#666,#444)" onclick="location.reload()">返回菜单</button>
+    </div>
 </div>
 
 <script>
@@ -220,6 +240,11 @@ var ctx = canvas.getContext('2d');
 var keys = {};
 document.addEventListener('keydown', function(e) {
     keys[e.code] = true;
+    if (e.code === 'Escape' && (G.state === 'playing' || G.state === 'paused')) {
+        e.preventDefault();
+        togglePause();
+        return;
+    }
     if (e.code === 'Space' && G.state === 'playing') {
         e.preventDefault();
         jump();
@@ -235,11 +260,28 @@ canvas.addEventListener('click', function() {
     if (G.state === 'menu') startGame();
     else if (G.state === 'playing') jump();
 });
+document.getElementById('pauseBtn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    togglePause();
+});
 canvas.addEventListener('touchstart', function(e) {
     e.preventDefault();
     if (G.state === 'menu') startGame();
     else if (G.state === 'playing') jump();
 });
+
+// ==================== 暂停功能 ====================
+function togglePause() {
+    if (G.state === 'playing') {
+        G.state = 'paused';
+        document.getElementById('pauseScreen').style.display = 'flex';
+        document.getElementById('pauseBtn').innerHTML = '▶';
+    } else if (G.state === 'paused') {
+        G.state = 'playing';
+        document.getElementById('pauseScreen').style.display = 'none';
+        document.getElementById('pauseBtn').innerHTML = '||';
+    }
+}
 
 // ==================== 游戏函数 ====================
 function startGame() {
@@ -267,6 +309,8 @@ function startGame() {
 
     document.getElementById('startScreen').style.display = 'none';
     document.getElementById('gameOverScreen').style.display = 'none';
+    document.getElementById('pauseBtn').style.display = 'block';
+    document.getElementById('pauseScreen').style.display = 'none';
     updateUI();
 }
 
@@ -299,6 +343,7 @@ function gameOver() {
     document.getElementById('finalStats').textContent =
         '距离: ' + Math.floor(G.distance) + ' | 金币: ' + G.coins + ' | 钻石: ' + G.diamonds;
     document.getElementById('gameOverScreen').style.display = 'flex';
+    document.getElementById('pauseBtn').style.display = 'none';
     document.getElementById('highScore').textContent = '最高分: ' + G.highScore;
 }
 
@@ -989,6 +1034,31 @@ const GameMonetize = {
 	},
 };
 GameMonetize.init();
+
+// ===== 音效系统 =====
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function initAudio() { if (!audioCtx) audioCtx = new AudioCtx(); }
+function playTone(freq, dur, type='sine', vol=0.3) {
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+function sfxClick() { initAudio(); playTone(800, 0.05, 'sine', 0.2); }
+function sfxScore() { initAudio(); playTone(523, 0.1); playTone(659, 0.1); }
+function sfxWin()   { initAudio(); playTone(523, 0.15); setTimeout(()=>playTone(659, 0.15), 100); setTimeout(()=>playTone(784, 0.2), 200); }
+function sfxLose()  { initAudio(); playTone(300, 0.2, 'sawtooth', 0.2); setTimeout(()=>playTone(200, 0.3, 'sawtooth', 0.2), 150); }
+
 </script>
 <!-- 游戏工坊统一广告系统 -->
 <div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
