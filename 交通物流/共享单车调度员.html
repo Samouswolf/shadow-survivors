@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>共享单车调度员</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f2027;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#ff6b35;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=800;
+const GAME_TIME=90;
+const GRID=5;
+const NODE_COUNT=GRID*GRID;
+const HUD_H=112;
+const TASK_H=208;
+
+const DESC=['🚲 90秒共享单车调度极速挑战', '🔴 红区(>20密)扫码装车动作', '🟢 绿区(<5空)卸车精准投放', '🚚 6车位货车满了去下一站', '💯 每搬1辆+100,红灯撞车扣分'];
+
+const LEVEL_NAMES=['新手入门','初级挑战','中级任务','高级运输','大师级别'];
+const LEVEL_MULS=[1.0,1.1,1.25,1.5,2.0];
+const LEVEL_DESCS=['简单路况','少量障碍','中等难度','复杂环境','极限挑战'];
+const LEVEL_COLORS=['#81c784','#64b5f6','#ffb74d','#f06292','#ba68c8'];
+
+const ROAD_PALETTE=['#263238','#37474f','#455a64','#546e7a','#607d8b','#78909c'];
+const VEHICLE_PALETTE=['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#00897b','#f4511e','#3949ab','#00acc1','#d81b60','#7cb342','#5e35b1'];
+
+const TASK_TYPES=['delivery','pickup','express','vip','fragile','same-day','cold-chain','high-value'];
+const TASK_TYPE_NAMES=['标准配送','上门取件','加急快递','VIP订单','易碎品','当日达','冷链运输','高价值'];
+const TASK_TYPE_COLORS=['#90a4ae','#42a5f5','#ffa726','#ffd700','#ef5350','#66bb6a','#26c6da','#ab47bc'];
+const CARGO_NAMES=['文件','餐食','包裹','快递','急件','鲜花','蛋糕','礼物','药品','零件','生鲜','数码','服装','书籍','家具','珠宝','设备','样本','文档','礼盒'];
+const NODE_NAMES=['中央仓库','万达广场','商业中心','科技园','大学','医院','公园','体育中心','火车站','机场','滨江花园','海景小区','老城区','开发区','景区北门','图书馆','博物馆','音乐厅','酒店','科技园B','购物中心','美食街','酒吧街','文化中心','软件园'];
+
+const UPGRADES=[
+    {id:'speed',name:'引擎升级',cost:200,desc:'移动速度提升25%',icon:'⚡'},
+    {id:'cap',name:'扩容升级',cost:300,desc:'载货/载客容量+2',icon:'📦'},
+    {id:'safe',name:'安全升级',cost:250,desc:'事故扣分减少50%',icon:'🛡️'},
+    {id:'bonus',name:'奖励升级',cost:400,desc:'完成得分增加30%',icon:'💎'},
+    {id:'radar',name:'雷达升级',cost:350,desc:'任务范围扩展+30%',icon:'📡'},
+    {id:'time',name:'时间管理',cost:500,desc:'订单时限增加20%',icon:'⏰'}
+];
+
+const ACHIEVEMENTS_DATA=[
+    {id:'first',name:'首战告捷',desc:'完成第一个任务',req:g=>g.completed>=1,icon:'🥇'},
+    {id:'five',name:'五小福',desc:'累计完成5个任务',req:g=>g.completed>=5,icon:'🎖️'},
+    {id:'perfect',name:'完美无瑕',desc:'无事故完成5个任务',req:g=>g.accidents===0&&g.completed>=5,icon:'💯'},
+    {id:'speed',name:'闪电侠',desc:'提前完成3个任务',req:g=>g.early>=3,icon:'⚡'},
+    {id:'rich',name:'富甲一方',desc:'单局得分≥2000',req:g=>g.score>=2000,icon:'💰'},
+    {id:'master',name:'共享单车调度员大师',desc:'完成全部5关挑战',req:g=>g.level>=5,icon:'👑'},
+    {id:'combo',name:'连击王者',desc:'连续完成8单无事故',req:g=>g.combo>=8,icon:'🔥'},
+    {id:'ten',name:'十全十美',desc:'累计完成10单任务',req:g=>g.completed>=10,icon:'🔟'},
+    {id:'vip',name:'VIP专家',desc:'完成3单VIP订单',req:g=>g.vipDone>=3,icon:'💎'},
+    {id:'upgrade',name:'装备狂人',desc:'购买3个升级项',req:g=>Object.keys(g.upgradesBought).length>=3,icon:'🔧'}
+];
+
+const EVENTS_DATA=[
+    {id:'rush',name:'🌆 高峰时段',dur:360,desc:'任务生成速度×2倍',onS:g=>g.spawnMul=2,onE:g=>g.spawnMul=1},
+    {id:'bonus',name:'🎁 双倍奖励',dur:300,desc:'所有完成分数×1.5',onS:g=>g.scoreMul=1.5,onE:g=>g.scoreMul=1},
+    {id:'badroad',name:'⚠️ 路况恶劣',dur:240,desc:'移动速度-30%',onS:g=>g.roadBad=0.7,onE:g=>g.roadBad=1},
+    {id:'viporder',name:'💎 VIP大单',dur:0,desc:'下一个订单分数×3',onS:g=>g.nextVip3=true,onE:g=>{}},
+    {id:'freecoin',name:'💰 意外奖金',dur:0,desc:'立即获得150分',onS:g=>{g.score+=150;g.eventCooldown=600;},onE:g=>{}},
+    {id:'festival',name:'🎉 节日庆典',dur:360,desc:'小费额外增加100%',onS:g=>g.tipMul=2,onE:g=>g.tipMul=1},
+    {id:'rain',name:'🌧️ 下雨天气',dur:300,desc:'事故概率+50%,速度-15%',onS:g=>{g.rainMul=0.85;g.rainAcc=1.5;},onE:g=>{g.rainMul=1;g.rainAcc=1;}}
+];
+
+const WEATHER_STATES=[
+    {id:0,name:'☀️ 晴',speed:1.0,acc:1.0,col1:'#1976d2',col2:'#64b5f6',desc:'完美天气'},
+    {id:1,name:'⛅ 多云',speed:1.0,acc:1.0,col1:'#455a64',col2:'#90a4ae',desc:'适宜出行'},
+    {id:2,name:'🌧️ 小雨',speed:0.85,acc:1.3,col1:'#37474f',col2:'#607d8b',desc:'减速慢行'},
+    {id:3,name:'🌫️ 大雾',speed:0.65,acc:1.6,col1:'#546e7a',col2:'#b0bec5',desc:'能见度低'},
+    {id:4,name:'❄️ 下雪',speed:0.55,acc:1.8,col1:'#78909c',col2:'#eceff1',desc:'道路湿滑'}
+];
+
+let audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playTone(freq,dur,type,vol){if(!audioCtx)return;try{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type||'square';o.frequency.value=freq;g.gain.value=vol||0.15;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);}catch(err){}}
+function sfxStart(){playTone(440,0.08,'sine',0.18);setTimeout(()=>playTone(554,0.1,'sine',0.16),80);setTimeout(()=>playTone(659,0.15,'sine',0.14),180)}
+function sfxSuccess(){playTone(523,0.08,'sine',0.2);setTimeout(()=>playTone(659,0.08,'sine',0.2),90);setTimeout(()=>playTone(784,0.18,'sine',0.2),180)}
+function sfxError(){playTone(180,0.3,'sawtooth',0.18)}
+function sfxHit(){playTone(120,0.25,'square',0.22);setTimeout(()=>playTone(80,0.15,'square',0.18),60)}
+function sfxBtn(){playTone(600,0.06,'sine',0.1)}
+function sfxCoin(){playTone(720,0.06,'square',0.12);setTimeout(()=>playTone(960,0.1,'square',0.1),50)}
+function sfxUpgrade(){playTone(440,0.08,'sine',0.16);setTimeout(()=>playTone(660,0.08,'sine',0.16),80);setTimeout(()=>playTone(880,0.15,'sine',0.18),160)}
+function sfxAchieve(){playTone(659,0.08,'sine',0.18);setTimeout(()=>playTone(784,0.08,'sine',0.18),90);setTimeout(()=>playTone(880,0.08,'sine',0.18),180);setTimeout(()=>playTone(988,0.22,'sine',0.2),270)}
+function sfxEvent(){playTone(392,0.08,'triangle',0.14);setTimeout(()=>playTone(523,0.12,'triangle',0.14),90)}
+function sfxPickup(){playTone(500,0.05,'sine',0.15);setTimeout(()=>playTone(700,0.08,'sine',0.12),50)}
+function sfxDrop(){playTone(450,0.06,'sine',0.14);setTimeout(()=>playTone(350,0.1,'sine',0.12),60)}
+function sfxLevelUp(){for(let i=0;i<5;i++)setTimeout(()=>playTone(400+i*80,0.09,'triangle',0.14),i*55)}
+function sfxAlarm(){playTone(880,0.1,'square',0.16);setTimeout(()=>playTone(660,0.1,'square',0.14),120)}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){const vw=innerWidth,vh=innerHeight;scale=Math.min(vw/W,vh/H);canvas.width=W*scale;canvas.height=H*scale;canvas.style.width=W*scale+'px';canvas.style.height=H*scale+'px';canvas.getContext('2d').setTransform(scale,0,0,scale,0,0);}
+window.addEventListener('resize',resize);resize();
+
+function getPos(e){const r=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:(t.clientX-r.left)/scale,y:(t.clientY-r.top)/scale};}
+
+const ACH=ACHIEVEMENTS_DATA.map(a=>({...a,done:false}));
+
+const G={
+    state:STATE_MENU,
+    score:0,high:0,timeLeft:GAME_TIME*60,
+    level:1,completed:0,failed:0,accidents:0,early:0,combo:0,maxCombo:0,vipDone:0,
+    player:{x:0,y:0,vx:0,vy:0,speed:3,angle:0,color:'#e53935',trail:[]},
+    tasks:[],npcs:[],
+    spawnTimer:180,maxTasks:6,tickAcc:0,btnRects:{},
+    toaster:[],particles:[],scorePopups:[],floatingTexts:[],
+    keys:{},pointerActive:false,pointerTarget:null,dragStart:null,
+    spawnMul:1,scoreMul:1,roadBad:1,rainMul:1,rainAcc:1,tipMul:1,nextVip3:false,
+    activeEvents:[],eventCooldown:480,achievements:{},
+    upgradesBought:{},speedMul:1,capBonus:0,safeMul:1,bonusMul:1,radarMul:1,timeBonus:1,
+    statDim1:0,statDim2:100,
+    selectedTask:null,showUpgrade:false,loadedItems:0,maxCapacity:4,
+    totalEarned:0,bestStreak:0,trafficLevel:1,
+    nodes:[],edges:[],obstacles:[],roadMarks:[],npcs_cars:[],
+    weather:0,weatherTimer:0,weatherCooldown:360,
+    miniMap:{x:W-100,y:H-112-TASK_H,w:80,h:80,show:true},
+    shakeTimer:0,shakeIntensity:0,
+    screenFlash:0,flashColor:'#fff',
+    tutorialStep:0,showTutorial:true,
+    totalDistance:0,maxTaskLen:0,avgTaskLen:0,
+    currentLevelTasks:0,tasksPerLevel:5,
+    lastActionTime:0
+};
+
+G.high=parseInt(Storage.load('bike_highscore','0'));
+
+function nodeX(c){return 56+c*94;}
+function nodeY(r){return HUD_H+30+r*104;}
+
+function buildMap(){
+    G.nodes=[];G.edges=[];G.obstacles=[];G.roadMarks=[];G.npcs_cars=[];
+    for(let r=0;r<GRID;r++)for(let c=0;c<GRID;c++){
+        const idx=r*GRID+c;
+        let tp='customer';
+        if(r===0&&c===0)tp='depot';
+        else if(Math.random()<0.32)tp='merchant';
+        else if(Math.random()<0.18)tp='service';
+        G.nodes.push({id:idx,r:r,c:c,x:nodeX(c),y:nodeY(r),type:tp,name:NODE_NAMES[idx%NODE_NAMES.length],visits:0});
+    }
+    for(let r=0;r<GRID;r++)for(let c=0;c<GRID;c++){
+        const i=r*GRID+c;
+        if(c<GRID-1)G.edges.push({a:i,b:i+1,horiz:true,heavy:Math.random()<0.25});
+        if(r<GRID-1)G.edges.push({a:i,b:i+GRID,horiz:false,heavy:Math.random()<0.25});
+    }
+    for(let i=0;i<9;i++){
+        G.obstacles.push({x:50+Math.random()*(W-100),y:HUD_H+40+Math.random()*(H-HUD_H-TASK_H-80),w:28+Math.random()*40,h:22+Math.random()*28,type:Math.random()<0.45?'cone':(Math.random()<0.6?'barrier':'pothole'),col:Math.random()<0.5?'#ff7043':(Math.random()<0.5?'#78909c':'#5d4037')});
+    }
+    for(let i=0;i<48;i++)G.roadMarks.push({x:Math.random()*W,y:HUD_H+30+Math.random()*(H-HUD_H-TASK_H-60),len:10+Math.random()*20,rot:Math.random()*Math.PI*0.5,col:Math.random()<0.3?'#fdd835':'#e0e0e0'});
+    for(let i=0;i<5;i++)G.npcs_cars.push({x:60+Math.random()*(W-120),y:HUD_H+50+Math.random()*(H-HUD_H-TASK_H-100),vx:(Math.random()<0.5?-1:1)*(0.5+Math.random()*1.2),vy:0,col:VEHICLE_PALETTE[Math.floor(Math.random()*VEHICLE_PALETTE.length)],angle:Math.random()*Math.PI,speed:0.8+Math.random()*1.2});
+}
+buildMap();
+G.player.x=G.nodes[0].x;G.player.y=G.nodes[0].y;
+
+function toast(text,life,col){G.toaster.push({text:text,life:life||180,maxLife:life||180,y:0,col:col||'#fff'});}
+function floatText(x,y,text,col,life){G.floatingTexts.push({x:x,y:y,text:text,col:col||'#fff',life:life||50,maxLife:life||50,vy:-1.2});}
+function spawnBurst(x,y,col,n,speed){for(let i=0;i<n;i++)G.particles.push({x:x,y:y,vx:(Math.random()-0.5)*(speed||5),vy:(Math.random()-0.5)*(speed||5)-2,life:28+Math.random()*28,maxLife:50,color:col,size:1.5+Math.random()*3});}
+function spawnTrail(x,y,col){G.particles.push({x:x+(Math.random()-0.5)*4,y:y+(Math.random()-0.5)*4,vx:(Math.random()-0.5)*0.5,vy:0.1+Math.random()*0.3,life:14+Math.random()*10,maxLife:22,color:col,size:2+Math.random()*2});}
+
+function manhattanDist(a,b){return Math.abs(a.x-b.x)+Math.abs(a.y-b.y);}
+function euclid(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+
+function makeTask(level){
+    const avlTypes=Math.min(TASK_TYPES.length,2+level);
+    let typeIdx=Math.floor(Math.random()*avlTypes);
+    const isForcedVip=G.nextVip3&&Math.random()<0.35;
+    if(isForcedVip){typeIdx=3;G.nextVip3=false;}
+    const nonDepot=G.nodes.filter(n=>n.type!=='depot');
+    const pickN=nonDepot[Math.floor(Math.random()*nonDepot.length)];
+    let dropN=nonDepot[Math.floor(Math.random()*nonDepot.length)];
+    let tries=0;while(dropN.id===pickN.id&&tries<20){dropN=nonDepot[Math.floor(Math.random()*nonDepot.length)];tries++;}
+    const dist=manhattanDist(pickN,dropN);
+    const base=50+level*28+Math.floor(dist*0.18)+Math.floor(Math.random()*40);
+    const timeBase=(18+Math.floor(dist/50)-level)*G.timeBonus;
+    const timeLimit=Math.max(10,Math.floor(timeBase+Math.random()*14));
+    return{
+        id:Math.random().toString(36).slice(2,10),
+        typeIdx:typeIdx,typeName:TASK_TYPE_NAMES[typeIdx],typeCol:TASK_TYPE_COLORS[typeIdx],
+        pickNode:pickN.id,dropNode:dropN.id,
+        pickX:pickN.x,pickY:pickN.y,dropX:dropN.x,dropY:dropN.y,
+        pickName:pickN.name,dropName:dropN.name,
+        status:'pending',reward:base,tip:0,penalty:0,
+        timeLeft:timeLimit*60,totalTime:timeLimit*60,
+        isVip:typeIdx===3,fragile:typeIdx===4,cold:typeIdx===6,highValue:typeIdx===7,
+        vipMul:typeIdx===3?3:(typeIdx===7?2:1),progress:0,
+        cargoName:CARGO_NAMES[Math.floor(Math.random()*CARGO_NAMES.length)],
+        acceptT:0,dist:dist,priority:typeIdx
+    };
+}
+
+function initState(){
+    G.state=STATE_PLAYING;G.score=0;G.timeLeft=GAME_TIME*60;
+    G.level=1;G.completed=0;G.failed=0;G.accidents=0;G.early=0;G.combo=0;G.maxCombo=0;G.vipDone=0;
+    G.player={x:G.nodes[0].x,y:G.nodes[0].y,vx:0,vy:0,speed:3,angle:0,color:VEHICLE_PALETTE[Math.floor(Math.random()*VEHICLE_PALETTE.length)],trail:[]};
+    G.tasks=[];G.npcs_cars.forEach(nc=>{nc.x=60+Math.random()*(W-120);nc.y=HUD_H+50+Math.random()*(H-HUD_H-TASK_H-100);});
+    G.spawnTimer=120;G.maxTasks=6;G.tickAcc=0;
+    G.toaster=[];G.particles=[];G.scorePopups=[];G.floatingTexts=[];
+    G.spawnMul=1;G.scoreMul=1;G.roadBad=1;G.rainMul=1;G.rainAcc=1;G.tipMul=1;G.nextVip3=false;
+    G.activeEvents=[];G.eventCooldown=480;G.achievements={};
+    G.upgradesBought={};G.speedMul=1;G.capBonus=0;G.safeMul=1;G.bonusMul=1;G.radarMul=1;G.timeBonus=1;
+    G.statDim1=0;G.statDim2=100;G.loadedItems=0;G.maxCapacity=4;
+    G.totalEarned=0;G.bestStreak=0;G.trafficLevel=1;
+    G.weather=0;G.weatherTimer=0;G.weatherCooldown=360;
+    G.shakeTimer=0;G.shakeIntensity=0;G.screenFlash=0;
+    G.tutorialStep=0;G.showTutorial=true;G.currentLevelTasks=0;
+    for(let i=0;i<ACH.length;i++)ACH[i].done=false;
+    for(let i=0;i<2;i++)G.tasks.push(makeTask(1));
+    toast('🚀 '+GAME_TIME+'秒共享单车调度员挑战开始!走近任务点自动处理',300);
+    toast('💡 提示:WASD/方向键移动,触屏拖动,U升级',360);
+}
+
+function startGame(){initAudio();initState();sfxStart();}
+function endGame(){
+    G.state=STATE_OVER;
+    let achBonus=0;ACH.forEach(a=>{if(a.done)achBonus+=100;});
+    G.score+=achBonus;
+    if(G.score>G.high){G.high=G.score;Storage.save('bike_highscore',G.high);G.screenFlash=30;G.flashColor='#ffd700';}
+    sfxError();
+}
+function togglePause(){if(G.state===STATE_PLAYING)G.state=STATE_PAUSE;else if(G.state===STATE_PAUSE)G.state=STATE_PLAYING;sfxBtn();}
+
+function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();}
+function drawBtn(c,x,y,w,h,text,name,color,textColor,fontSize){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    c.fillStyle=color||'#ff6b35';c.strokeStyle='rgba(255,255,255,0.9)';c.lineWidth=2;
+    roundRect(c,x,y,w,h,8);c.fill();c.stroke();
+    c.fillStyle=textColor||'#fff';c.font='bold '+(fontSize||14)+'px "Microsoft YaHei"';
+    c.textAlign='center';c.textBaseline='middle';
+    c.fillText(text,x+w/2,y+h/2);
+    c.textBaseline='alphabetic';c.textAlign='left';
+}
+function hitBtn(p,name){const r=G.btnRects[name];return r&&p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+
+function tryTriggerEvent(){
+    G.eventCooldown--;
+    if(G.eventCooldown>0)return;
+    if(G.activeEvents.length>=2)return;
+    if(G.tickAcc%30!==0)return;
+    if(Math.random()<0.028){
+        const ev=EVENTS_DATA[Math.floor(Math.random()*EVENTS_DATA.length)];
+        if(ev.dur>0)G.activeEvents.push({...ev,timeLeft:ev.dur});
+        ev.onS(G);G.eventCooldown=420+Math.floor(Math.random()*300);
+        sfxEvent();toast('📢 '+ev.name+' · '+ev.desc,280,'#ffd700');
+        spawnBurst(W/2,HUD_H/2+10,'#ffd700',18,7);
+    }
+}
+function updateEvents(){
+    for(let i=G.activeEvents.length-1;i>=0;i--){
+        G.activeEvents[i].timeLeft--;
+        if(G.activeEvents[i].timeLeft<=0){
+            G.activeEvents[i].onE(G);
+            toast('📢 事件结束: '+G.activeEvents[i].name,180,'#bdbdbd');
+            G.activeEvents.splice(i,1);
+        }
+    }
+}
+
+function updateWeather(){
+    if(G.weatherTimer>0){G.weatherTimer--;return;}
+    if(G.weatherCooldown>0){G.weatherCooldown--;return;}
+    if(G.tickAcc%80!==0||Math.random()>=0.04)return;
+    let nw=Math.floor(Math.random()*WEATHER_STATES.length);
+    if(nw===G.weather)nw=(nw+1+Math.floor(Math.random()*(WEATHER_STATES.length-1)))%WEATHER_STATES.length;
+    G.weather=nw;G.weatherTimer=420+Math.floor(Math.random()*420);G.weatherCooldown=300;
+    toast('🌤️ 天气变化: '+WEATHER_STATES[nw].name+' ('+WEATHER_STATES[nw].desc+')',260);
+}
+
+function tryBuyUpgrade(idx){
+    const u=UPGRADES[idx];
+    if(G.upgradesBought[u.id]){sfxError();toast('⚠️ 该升级已拥有',120,'#ef5350');return false;}
+    if(G.score<u.cost){sfxError();toast('💸 分数不足!需要 '+u.cost,150,'#ef5350');return false;}
+    G.score-=u.cost;G.upgradesBought[u.id]=true;sfxUpgrade();
+    if(u.id==='speed')G.speedMul=1.25;
+    if(u.id==='cap'){G.capBonus=2;G.maxCapacity=6;}
+    if(u.id==='safe')G.safeMul=0.5;
+    if(u.id==='bonus')G.bonusMul=1.3;
+    if(u.id==='radar')G.radarMul=1.3;
+    if(u.id==='time')G.timeBonus=1.2;
+    toast('⬆️ '+u.icon+' 升级成功: '+u.name,220,'#8bc34a');
+    spawnBurst(W/2,HUD_H+40,'#8bc34a',22,6);
+    return true;
+}
+
+function checkAchievements(){
+    for(let i=0;i<ACH.length;i++){
+        const a=ACH[i];
+        if(!a.done&&a.req(G)){
+            a.done=true;G.achievements[a.id]=true;
+            G.score+=60;sfxAchieve();
+            toast('🏅 成就解锁: '+a.icon+' '+a.name+' (+60分)',300,'#ffd700');
+            spawnBurst(W/2,120,'#ffd700',30,8);
+            G.screenFlash=10;G.flashColor='#ffd700';
+        }
+    }
+}
+
+function acceptTask(t){
+    if(t.status!=='pending')return false;
+    t.status='accepted';t.acceptT=G.tickAcc;sfxPickup();
+    toast('📝 接单: ['+t.typeName+'] '+t.cargoName+' → 基础'+t.reward,200);
+    floatText(t.pickX,t.pickY-15,'接!'+t.typeCol,'#fff',40);
+    return true;
+}
+
+function pickCargo(t){
+    if(t.status!=='accepted')return false;
+    if(G.loadedItems>=G.maxCapacity){sfxError();toast('📦 载货已满!先送货再装',150,'#ef5350');return false;}
+    if(euclid(G.player,t)>45*G.radarMul){sfxError();toast('📍 请先到达取货点 '+t.pickName,150,'#ef5350');return false;}
+    t.status='loaded';G.loadedItems++;sfxPickup();
+    const n=G.nodes[t.pickNode];n.visits++;
+    toast('✅ 装货: '+t.cargoName+' 前往'+t.dropName,180,'#8bc34a');
+    floatText(t.pickX,t.pickY-20,'装!','#4caf50',45);
+    spawnBurst(t.pickX,t.pickY,'#8bc34a',10,4);
+    return true;
+}
+
+function deliverTask(t){
+    if(t.status!=='loaded')return false;
+    if(euclid(G.player,t)>45*G.radarMul){sfxError();toast('📍 请先到达收货点 '+t.dropName,150,'#ef5350');return false;}
+    const timeRatio=t.timeLeft/t.totalTime;
+    let base=t.reward*t.vipMul;
+    let tip=0,pen=0;
+    if(timeRatio>0.72){tip=Math.floor(base*0.5*G.tipMul);G.early++;}
+    else if(timeRatio>0.42){tip=Math.floor(base*0.22*G.tipMul);}
+    else if(timeRatio<=0.02){pen=Math.floor(base*0.52);G.failed++;}
+    if(t.fragile&&G.accidents===0)tip=Math.floor(tip*1.6);
+    if(t.cold)tip=Math.floor(tip*1.25);
+    const levelMul=LEVEL_MULS[Math.min(4,G.level-1)];
+    const total=Math.max(0,Math.floor((base+tip-pen)*G.scoreMul*G.bonusMul*levelMul));
+    G.score=Math.max(0,G.score+total);G.totalEarned+=total;
+    G.completed++;G.combo++;G.loadedItems--;G.currentLevelTasks++;
+    if(t.isVip)G.vipDone++;
+    G.statDim1=Math.min(100,G.statDim1+6.5);
+    G.statDim2=Math.max(0,Math.min(100,G.statDim2+(pen>0?-5:(tip>0?3:1))));
+    G.maxCombo=Math.max(G.maxCombo,G.combo);G.bestStreak=G.maxCombo;
+    const dn=G.nodes[t.dropNode];dn.visits++;
+    G.scorePopups.push({x:t.dropX,y:t.dropY-20,text:'+'+total,life:65,maxLife:65,color:tip>base*0.35?'#ffd700':'#8bc34a'});
+    spawnBurst(t.dropX,t.dropY,tip>0?'#ffd700':'#8bc34a',14,5);
+    if(pen>0)G.combo=0;
+    sfxSuccess();if(tip>0)sfxCoin();if(tip>base*0.5)sfxAlarm();
+    toast('💯 送达!+'+total+'分'+(tip>0?' 小费+'+tip:'')+(pen>0?' 超时-'+pen:''),200,tip>0?'#ffd700':(pen>0?'#ef5350':'#8bc34a'));
+    if(G.currentLevelTasks>=G.tasksPerLevel&&G.level<5){
+        G.level++;G.currentLevelTasks=0;G.tasksPerLevel+=2;
+        toast('🎖️ 升级! 第'+G.level+'关 '+LEVEL_NAMES[G.level-1]+' x'+LEVEL_MULS[G.level-1],300,LEVEL_COLORS[G.level-1]);
+        sfxLevelUp();spawnBurst(W/2,HUD_H+60,LEVEL_COLORS[G.level-1],40,9);
+        G.screenFlash=20;G.flashColor=LEVEL_COLORS[G.level-1];
+    }
+    return true;
+}
+
+function updatePlayer(){
+    let dx=0,dy=0;
+    if(G.keys['ArrowLeft']||G.keys['a']||G.keys['A'])dx-=1;
+    if(G.keys['ArrowRight']||G.keys['d']||G.keys['D'])dx+=1;
+    if(G.keys['ArrowUp']||G.keys['w']||G.keys['W'])dy-=1;
+    if(G.keys['ArrowDown']||G.keys['s']||G.keys['S'])dy+=1;
+    if(G.pointerActive&&G.pointerTarget){
+        const ddx=G.pointerTarget.x-G.player.x,ddy=G.pointerTarget.y-G.player.y;
+        const d=Math.hypot(ddx,ddy);
+        if(d>6){dx=ddx/d;dy=ddy/d;}
+    }
+    const ws=WEATHER_STATES[G.weather];
+    const sp=G.player.speed*G.speedMul*G.roadBad*G.rainMul*ws.speed;
+    const mag=Math.hypot(dx,dy);
+    if(mag>0){dx/=mag;dy/=mag;G.player.angle=Math.atan2(dy,dx);}
+    G.player.vx+=dx*sp*0.27;G.player.vy+=dy*sp*0.27;
+    G.player.vx*=0.81;G.player.vy*=0.81;
+    const mv=sp;const vv=Math.hypot(G.player.vx,G.player.vy);
+    if(vv>mv){G.player.vx*=mv/vv;G.player.vy*=mv/vv;}
+    const oldX=G.player.x,oldY=G.player.y;
+    G.player.x+=G.player.vx;G.player.y+=G.player.vy;
+    G.player.x=Math.max(28,Math.min(W-28,G.player.x));
+    G.player.y=Math.max(HUD_H+20,Math.min(H-TASK_H-20,G.player.y));
+    G.totalDistance+=Math.hypot(G.player.x-oldX,G.player.y-oldY);
+    if(vv>1.2&&G.tickAcc%4===0)spawnTrail(G.player.x,G.player.y+6,'rgba(180,180,180,0.4)');
+    G.player.trail.push({x:G.player.x,y:G.player.y,life:20});
+    if(G.player.trail.length>22)G.player.trail.shift();
+    G.player.trail.forEach(tr=>tr.life--);
+    
+    for(let oi=0;oi<G.obstacles.length;oi++){
+        const ob=G.obstacles[oi];
+        if(G.player.x>ob.x-20&&G.player.x<ob.x+ob.w+20&&G.player.y>ob.y-20&&G.player.y<ob.y+ob.h+20){
+            const cx=ob.x+ob.w/2,cy=ob.y+ob.h/2;
+            const ddx=G.player.x-cx,ddy=G.player.y-cy;const dd=Math.max(1,Math.hypot(ddx,ddy));
+            G.player.x=cx+ddx/dd*(ob.w/2+24);G.player.y=cy+ddy/dd*(ob.h/2+24);
+            G.player.vx*=-0.32;G.player.vy*=-0.32;
+            G.accidents++;G.combo=0;
+            const loss=Math.floor(32*G.safeMul*(ob.type==='pothole'?1.4:1));
+            G.score=Math.max(0,G.score-loss);
+            G.statDim2=Math.max(0,G.statDim2-3);
+            G.shakeTimer=14;G.shakeIntensity=Math.random()<0.5?4:6;
+            G.scorePopups.push({x:G.player.x,y:G.player.y-30,text:'-'+loss,life:55,maxLife:55,color:'#ef5350'});
+            spawnBurst(G.player.x,G.player.y,'#ef5350',14,6);sfxHit();
+            toast('💥 撞'+(ob.type==='cone'?'锥桶':(ob.type==='barrier'?'护栏':'坑洞'))+'! -'+loss+'分 连击×0',170,'#ef5350');
+            break;
+        }
+    }
+    
+    for(const nc of G.npcs_cars){
+        if(Math.hypot(G.player.x-nc.x,G.player.y-nc.y)<32&&Math.random()<0.015*G.rainAcc){
+            G.combo=0;G.accidents++;
+            const loss=Math.floor(22*G.safeMul);
+            G.score=Math.max(0,G.score-loss);G.shakeTimer=10;G.shakeIntensity=4;
+            spawnBurst((G.player.x+nc.x)/2,(G.player.y+nc.y)/2,'#ffb300',10,5);
+            G.scorePopups.push({x:G.player.x,y:G.player.y-28,text:'-'+loss,life:45,maxLife:45,color:'#ffb300'});
+            floatText(G.player.x,G.player.y-40,'剐蹭!','#ffb300',40);
+        }
+    }
+}
+
+function updateNpcs(){
+    for(const nc of G.npcs_cars){
+        nc.x+=nc.vx;nc.y+=nc.vy;
+        if(nc.x<35){nc.vx=Math.abs(nc.vx);nc.angle=0;}
+        if(nc.x>W-35){nc.vx=-Math.abs(nc.vx);nc.angle=Math.PI;}
+        if(nc.y<HUD_H+30){nc.vy=Math.abs(nc.vy);}
+        if(nc.y>H-TASK_H-30){nc.vy=-Math.abs(nc.vy);}
+        if(Math.random()<0.01){
+            nc.vx=(Math.random()<0.5?-1:1)*(0.5+Math.random()*1.2);
+            nc.angle=nc.vx<0?Math.PI:0;
+        }
+    }
+}
+
+function updateTasks(){
+    G.spawnTimer--;
+    const interval=Math.max(90,Math.floor(270/(G.spawnMul||1)));
+    if(G.spawnTimer<=0){
+        G.spawnTimer=interval;
+        if(G.tasks.length<G.maxTasks)G.tasks.push(makeTask(G.level));
+    }
+    for(let i=G.tasks.length-1;i>=0;i--){
+        const t=G.tasks[i];
+        if(t.status==='accepted'||t.status==='loaded'){
+            t.timeLeft--;
+            if(t.timeLeft<=-200){
+                G.score=Math.max(0,G.score-45);G.failed++;G.combo=0;
+                G.statDim1=Math.max(0,G.statDim1-3);G.statDim2=Math.max(0,G.statDim2-10);
+                if(t.status==='loaded')G.loadedItems--;
+                const tx=t.status==='loaded'?t.dropX:t.pickX,ty=t.dropY-20;
+                G.scorePopups.push({x:tx,y:ty,text:'-45',life:55,maxLife:55,color:'#ef5350'});
+                sfxError();toast('❌ 任务超时! -45分 ['+t.typeName+'] '+t.cargoName,200,'#ef5350');
+                spawnBurst(tx,ty,'#ef5350',15,6);
+                G.tasks.splice(i,1);continue;
+            }
+        }else if(t.status==='pending'){
+            t.acceptT++;
+            if(t.acceptT>960){G.tasks.splice(i,1);continue;}
+        }
+    }
+}
+
+function tryInteract(){
+    for(let i=G.tasks.length-1;i>=0;i--){
+        const t=G.tasks[i];
+        if(t.status==='pending'&&euclid(G.player,{x:t.pickX,y:t.pickY})<36*G.radarMul){acceptTask(t);return;}
+    }
+    for(let i=G.tasks.length-1;i>=0;i--){
+        const t=G.tasks[i];
+        if(t.status==='accepted'&&euclid(G.player,{x:t.pickX,y:t.pickY})<42*G.radarMul){pickCargo(t);return;}
+    }
+    for(let i=G.tasks.length-1;i>=0;i--){
+        const t=G.tasks[i];
+        if(t.status==='loaded'&&euclid(G.player,{x:t.dropX,y:t.dropY})<42*G.radarMul){deliverTask(t);G.tasks.splice(i,1);return;}
+    }
+}
+
+function update(){
+    if(G.state!==STATE_PLAYING)return;
+    G.timeLeft--;G.tickAcc++;
+    tryTriggerEvent();updateEvents();updateWeather();checkAchievements();
+    if(G.shakeTimer>0)G.shakeTimer--;
+    if(G.screenFlash>0)G.screenFlash--;
+    updatePlayer();updateNpcs();updateTasks();
+    if(G.tickAcc%28===0)tryInteract();
+    
+    for(let i=G.scorePopups.length-1;i>=0;i--){G.scorePopups[i].y-=0.9;G.scorePopups[i].life--;if(G.scorePopups[i].life<=0)G.scorePopups.splice(i,1);}
+    for(let i=G.floatingTexts.length-1;i>=0;i--){const ft=G.floatingTexts[i];ft.y+=ft.vy;ft.vy*=0.96;ft.life--;if(ft.life<=0)G.floatingTexts.splice(i,1);}
+    for(let i=G.particles.length-1;i>=0;i--){const p=G.particles[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.19;p.vx*=0.99;p.life--;if(p.life<=0)G.particles.splice(i,1);}
+    for(let i=G.toaster.length-1;i>=0;i--){G.toaster[i].life--;G.toaster[i].y+=(G.toaster.length-1-i)*0.32;if(G.toaster[i].life<=0)G.toaster.splice(i,1);}
+    
+    if(G.timeLeft<=0){endGame();return;}
+}
+
+function drawSkyAndGround(){
+    const ws=WEATHER_STATES[G.weather];
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,ws.col1);g.addColorStop(0.28,ws.col2);g.addColorStop(1,'#33691e');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#2e7d32';ctx.fillRect(0,HUD_H,W,H-HUD_H);
+    ctx.strokeStyle='rgba(0,70,0,0.28)';ctx.lineWidth=1;
+    for(let y=HUD_H+4;y<H;y+=17){ctx.beginPath();for(let x=0;x<W;x+=13){ctx.moveTo(x,y);ctx.lineTo(x+3,y+7);}ctx.stroke();}
+}
+
+function drawRoads(){
+    for(const e of G.edges){
+        const a=G.nodes[e.a],b=G.nodes[e.b];
+        ctx.strokeStyle=e.heavy?ROAD_PALETTE[1]:ROAD_PALETTE[2];ctx.lineWidth=e.heavy?44:36;ctx.lineCap='round';
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+        ctx.strokeStyle=ROAD_PALETTE[0];ctx.lineWidth=e.heavy?36:28;
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    }
+    for(const e of G.edges){
+        const a=G.nodes[e.a],b=G.nodes[e.b];
+        ctx.strokeStyle='#fdd835';ctx.lineWidth=2.5;ctx.setLineDash(e.heavy?[14,14]:[11,11]);
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    }
+    ctx.setLineDash([]);
+}
+
+function drawObstacles(){
+    for(const ob of G.obstacles){
+        ctx.fillStyle='rgba(0,0,0,0.34)';roundRect(ctx,ob.x+2,ob.y+5,ob.w,ob.h,4);ctx.fill();
+        ctx.fillStyle=ob.col;roundRect(ctx,ob.x,ob.y,ob.w,ob.h,4);ctx.fill();
+        ctx.strokeStyle='rgba(0,0,0,0.45)';ctx.lineWidth=1.5;ctx.stroke();
+        if(ob.type==='cone'){
+            ctx.fillStyle='#fff';ctx.fillRect(ob.x+4,ob.y+ob.h*0.34,ob.w-8,ob.h*0.16);
+            ctx.fillRect(ob.x+4,ob.y+ob.h*0.72,ob.w-8,ob.h*0.16);
+        }else if(ob.type==='barrier'){
+            ctx.fillStyle='#fff';for(let s=0;s<3;s++)ctx.fillRect(ob.x+3+s*(ob.w-6)/3,ob.y+3,(ob.w-6)/3-2,ob.h-6);
+        }else{
+            ctx.fillStyle='rgba(40,20,0,0.55)';ctx.beginPath();ctx.ellipse(ob.x+ob.w/2,ob.y+ob.h/2,ob.w/2-2,ob.h/2-2,0,0,Math.PI*2);ctx.fill();
+        }
+    }
+}
+
+function drawNodes(){
+    for(const n of G.nodes){
+        const rt=G.tasks.find(t=>t.pickNode===n.id&&(t.status==='pending'||t.status==='accepted'));
+        const dl=G.tasks.find(t=>t.dropNode===n.id&&t.status==='loaded');
+        const related=rt||dl;
+        let col='#78909c',ic='📍';
+        if(n.type==='depot'){col='#455a64';ic='🏠';}
+        else if(n.type==='merchant'){col='#fb8c00';ic='🛒';}
+        else if(n.type==='service'){col='#7e57c2';ic='⛽';}
+        else{col='#00897b';ic='🏘️';}
+        if(related)col=dl?'#43a047':(rt.status==='accepted'?'#ffb300':'#e53935');
+        ctx.fillStyle='rgba(0,0,0,0.38)';ctx.beginPath();ctx.arc(n.x+2,n.y+5,n.r+1,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=col;ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#fff';ctx.lineWidth=2.8;ctx.stroke();
+        ctx.font='18px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(ic,n.x,n.y+1);
+        ctx.textAlign='left';ctx.textBaseline='alphabetic';
+        ctx.fillStyle='#fff';ctx.font='bold 10px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText(n.name,n.x,n.y+n.r+13);
+        if(n.visits>0){ctx.fillStyle='#ffd700';ctx.font='9px Arial';ctx.fillText('★'.repeat(Math.min(3,n.visits)),n.x,n.y+n.r+25);}
+        ctx.textAlign='left';
+        if(related){
+            const pulse=1+Math.sin(G.tickAcc*0.17)*0.18;
+            ctx.strokeStyle=dl?'rgba(67,160,71,0.55)':(rt.status==='accepted'?'rgba(255,179,0,0.55)':'rgba(229,57,53,0.55)');
+            ctx.lineWidth=3.5;ctx.beginPath();ctx.arc(n.x,n.y,(n.r+7)*pulse,0,Math.PI*2);ctx.stroke();
+        }
+    }
+}
+
+function drawTaskPaths(){
+    for(const t of G.tasks){
+        if(t.status==='accepted'){
+            ctx.strokeStyle='rgba(255,193,7,0.58)';ctx.lineWidth=3;ctx.setLineDash([9,9]);
+            ctx.beginPath();ctx.moveTo(G.player.x,G.player.y);ctx.lineTo(t.pickX,t.pickY);ctx.stroke();
+            ctx.setLineDash([]);
+        }else if(t.status==='loaded'){
+            ctx.strokeStyle='rgba(76,175,80,0.65)';ctx.lineWidth=3;ctx.setLineDash([9,9]);
+            ctx.beginPath();ctx.moveTo(G.player.x,G.player.y);ctx.lineTo(t.dropX,t.dropY);ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle='rgba(76,175,80,0.28)';ctx.beginPath();ctx.arc(t.dropX,t.dropY,35,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle='#4caf50';ctx.lineWidth=2.5;ctx.stroke();
+            ctx.fillStyle='#4caf50';ctx.font='bold 11px "Microsoft YaHei"';ctx.textAlign='center';ctx.fillText('收货: '+t.dropName,t.dropX,t.dropY-40);ctx.textAlign='left';
+        }
+    }
+}
+
+function drawPlayer(){
+    ctx.save();
+    const sx=G.shakeTimer>0?(Math.random()-0.5)*G.shakeIntensity:0;
+    const sy=G.shakeTimer>0?(Math.random()-0.5)*G.shakeIntensity:0;
+    
+    for(let ti=0;ti<G.player.trail.length;ti++){
+        const tr=G.player.trail[ti];
+        const a=tr.life/22;
+        ctx.globalAlpha=a*0.35;
+        ctx.fillStyle=G.player.color;ctx.beginPath();
+        ctx.arc(tr.x,tr.y,4+ti*0.2,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    
+    ctx.translate(G.player.x+sx,G.player.y+sy);
+    ctx.rotate(G.player.angle);
+    ctx.fillStyle='rgba(0,0,0,0.42)';roundRect(ctx,-19,-11,40,24,6);ctx.fill();
+    ctx.fillStyle=G.player.color;roundRect(ctx,-22,-13,44,26,7);ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.45)';ctx.lineWidth=2.2;ctx.stroke();
+    ctx.fillStyle='#81d4fa';ctx.fillRect(9,-9,9,18);
+    ctx.fillStyle='rgba(255,255,255,0.4)';ctx.fillRect(9,-9,3.5,18);
+    ctx.fillStyle='#fff';ctx.fillRect(-18,-10,3.5,6);ctx.fillRect(-18,4,3.5,6);
+    ctx.fillStyle='#f44336';ctx.fillRect(18,-10,3.5,6);ctx.fillRect(18,4,3.5,6);
+    ctx.fillStyle='#212121';
+    roundRect(ctx,-23,-16,9,7,2);ctx.fill();roundRect(ctx,-23,9,9,7,2);ctx.fill();
+    roundRect(ctx,14,-16,9,7,2);ctx.fill();roundRect(ctx,14,9,9,7,2);ctx.fill();
+    ctx.restore();
+    
+    if(G.loadedItems>0){
+        ctx.fillStyle='rgba(0,0,0,0.55)';roundRect(ctx,G.player.x-32,G.player.y-38,64,16,6);ctx.fill();
+        ctx.fillStyle='#ffd54f';ctx.font='bold 11px Arial';ctx.textAlign='center';
+        ctx.fillText('📦 '+G.loadedItems+'/'+G.maxCapacity,G.player.x,G.player.y-27);ctx.textAlign='left';
+    }
+    const progR=26;
+    const hpAng=(-Math.PI/2)+(G.statDim2/100)*Math.PI*2;
+    ctx.strokeStyle='rgba(0,0,0,0.4)';ctx.lineWidth=3.5;ctx.beginPath();ctx.arc(G.player.x,G.player.y,progR,0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle=G.statDim2>65?'#66bb6a':(G.statDim2>35?'#ffa726':'#ef5350');
+    ctx.lineWidth=3.5;ctx.beginPath();ctx.arc(G.player.x,G.player.y,progR,-Math.PI/2,hpAng);ctx.stroke();
+}
+
+function drawNpcs(){
+    for(const nc of G.npcs_cars){
+        ctx.save();ctx.translate(nc.x,nc.y);ctx.rotate(nc.angle);
+        ctx.fillStyle='rgba(0,0,0,0.3)';roundRect(ctx,-15,-8,30,16,4);ctx.fill();
+        ctx.fillStyle=nc.col;roundRect(ctx,-17,-10,34,20,5);ctx.fill();
+        ctx.strokeStyle='rgba(0,0,0,0.4)';ctx.lineWidth=1.5;ctx.stroke();
+        ctx.fillStyle='#81d4fa';ctx.fillRect(6,-7,6,14);
+        ctx.fillStyle='#212121';roundRect(ctx,-18,-12,6,4,1);ctx.fill();roundRect(ctx,-18,8,6,4,1);ctx.fill();
+        roundRect(ctx,12,-12,6,4,1);ctx.fill();roundRect(ctx,12,8,6,4,1);ctx.fill();
+        ctx.restore();
+    }
+}
+
+function drawHUD(){
+    ctx.fillStyle='rgba(0,0,0,0.78)';roundRect(ctx,0,0,W,HUD_H,0);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.14)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,HUD_H-1);ctx.lineTo(W,HUD_H-1);ctx.stroke();
+    
+    ctx.fillStyle='#fff';ctx.font='bold 24px "Microsoft YaHei"';ctx.textAlign='left';
+    ctx.fillText('💰 '+G.score,14,34);
+    ctx.fillStyle='#ffd700';ctx.font='13px "Microsoft YaHei"';ctx.fillText('🏆 最高 '+G.high,14,55);
+    ctx.fillStyle=LEVEL_COLORS[Math.min(4,G.level-1)];ctx.fillText('📊 第'+G.level+'关·'+LEVEL_NAMES[G.level-1],14,75);
+    ctx.fillStyle='#78909c';ctx.font='11px "Microsoft YaHei"';ctx.fillText('('+G.currentLevelTasks+'/'+G.tasksPerLevel+' → 升级)',14,93);
+    
+    const mins=Math.floor(G.timeLeft/60),secs=G.timeLeft%60;
+    const tc=G.timeLeft<600?'#ef5350':(G.timeLeft<1800?'#ffb300':'#a5d6a7');
+    ctx.fillStyle='#fff';ctx.font='bold 24px Arial';ctx.textAlign='right';
+    ctx.fillText('⏱️ '+String(mins).padStart(2,'0')+':'+String(secs).padStart(2,'0'),W-14,34);
+    ctx.fillStyle=tc;ctx.font='13px "Microsoft YaHei"';ctx.fillText('货车载量',W-14,55);
+    ctx.fillStyle=WEATHER_STATES[G.weather].col2;ctx.fillText(WEATHER_STATES[G.weather].name,W-14,75);ctx.textAlign='left';
+    
+    ctx.fillStyle='rgba(0,0,0,0.5)';roundRect(ctx,178,14,132,14,5);ctx.fill();
+    ctx.fillStyle='#4caf50';roundRect(ctx,180,16,128*Math.min(1,G.statDim1/100),10,4);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 10px "Microsoft YaHei"';ctx.textAlign='center';ctx.fillText('调度数量: '+G.statDim1.toFixed(0)+'分',244,24);ctx.textAlign='left';
+    
+    ctx.fillStyle='rgba(0,0,0,0.5)';roundRect(ctx,178,34,132,14,5);ctx.fill();
+    const c2=G.statDim2>68?'#66bb6a':(G.statDim2>38?'#ffa726':'#ef5350');
+    ctx.fillStyle=c2;roundRect(ctx,180,36,128*Math.min(1,G.statDim2/100),10,4);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 10px "Microsoft YaHei"';ctx.textAlign='center';ctx.fillText('效率评分: '+G.statDim2.toFixed(0)+'%',244,44);ctx.textAlign='left';
+    
+    ctx.fillStyle='#e0e0e0';ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText('📦 '+G.loadedItems+'/'+G.maxCapacity,178,70);
+    ctx.fillStyle='#ff8a65';ctx.fillText('🔥×'+G.combo,260,70);
+    ctx.fillStyle='#ce93d8';ctx.fillText('✅'+G.completed,178,90);
+    ctx.fillStyle='#ef9a9a';ctx.fillText('💥'+G.accidents,238,90);
+    ctx.fillStyle='#81d4fa';ctx.fillText('📏'+(G.totalDistance/100).toFixed(1)+'km',300,90);
+    
+    drawBtn(ctx,W-118,84,48,22,'U升级','btnUp','#5c6bc0','#fff',10);
+    drawBtn(ctx,W-64,84,50,22,'⏸️暂停','btnPause','#78909c','#fff',10);
+    
+    if(G.activeEvents.length>0){
+        ctx.fillStyle='rgba(255,215,0,0.18)';roundRect(ctx,178,99,132,11,3);ctx.fill();
+        ctx.fillStyle='#ffd700';ctx.font='bold 9px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText(G.activeEvents.map(e=>e.name.split(' ')[0]).join(' '),244,108);ctx.textAlign='left';
+    }
+}
+
+function drawTaskPanel(){
+    const py=H-TASK_H,ph=TASK_H;
+    ctx.fillStyle='rgba(0,0,0,0.86)';roundRect(ctx,4,py,W-8,ph-4,10);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.16)';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 15px "Microsoft YaHei"';ctx.fillText('📋 任务列表  (共'+G.tasks.length+'单,上限'+G.maxTasks+')',14,py+22);
+    ctx.fillStyle='#90caf9';ctx.font='11px "Microsoft YaHei"';ctx.fillText('💡 走近节点自动接/取/送 · U键打开升级',W-220,py+22);
+    
+    const show=G.tasks.slice(0,4);
+    for(let i=0;i<4;i++){
+        const y=py+34+i*42;
+        if(i<show.length){
+            const t=show[i];
+            const bg=t.status==='pending'?'rgba(229,57,53,0.13)':(t.status==='accepted'?'rgba(255,179,0,0.13)':'rgba(76,175,80,0.13)');
+            const brd=t.status==='pending'?'#e53935':(t.status==='accepted'?'#ffb300':'#4caf50');
+            ctx.fillStyle=bg;roundRect(ctx,10,y,W-20,38,6);ctx.fill();
+            ctx.strokeStyle=brd;ctx.lineWidth=1.8;ctx.stroke();
+            ctx.fillStyle=brd;ctx.font='bold 11px "Microsoft YaHei"';
+            ctx.fillText((t.status==='pending'?'🔴待接':(t.status==='accepted'?'🟡待取':'🟢配送'))+' ['+t.typeName+']',18,y+25);
+            const m2=Math.floor(Math.max(0,t.timeLeft)/60),s2=Math.max(0,t.timeLeft)%60;
+            const urg=t.timeLeft<300;
+            ctx.fillStyle=urg?'#ef5350':'#fff';ctx.font='bold 11px Arial';ctx.textAlign='center';
+            ctx.fillText(String(m2).padStart(2,'0')+':'+String(s2).padStart(2,'0'),92,y+25);ctx.textAlign='left';
+            ctx.fillStyle='#fff';ctx.font='11px "Microsoft YaHei"';
+            const nm=t.cargoName+(t.isVip?' 💎':'')+(t.fragile?' 🥚':'')+(t.cold?' ❄️':'')+(t.highValue?' 💠':'');
+            ctx.fillText(nm,128,y+15);
+            ctx.fillStyle='#9e9e9e';ctx.font='10px "Microsoft YaHei"';
+            ctx.fillText(t.pickName+' → '+t.dropName,128,y+30);
+            const rw=(t.status!=='pending')?Math.max(0,t.timeLeft)/t.totalTime:1;
+            ctx.fillStyle='rgba(0,0,0,0.45)';ctx.fillRect(W-108,y+11,94,8);
+            ctx.fillStyle=rw>0.52?'#66bb6a':(rw>0.26?'#ffa726':'#ef5350');ctx.fillRect(W-107,y+12,92*rw,6);
+            ctx.fillStyle='#ffd700';ctx.font='bold 10px "Microsoft YaHei"';ctx.textAlign='right';
+            ctx.fillText('💰'+t.reward,W-12,y+18);ctx.textAlign='left';
+        }else{
+            ctx.fillStyle='rgba(255,255,255,0.04)';roundRect(ctx,10,y,W-20,38,6);ctx.fill();
+            ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.setLineDash([4,4]);ctx.stroke();ctx.setLineDash([]);
+            ctx.fillStyle='rgba(255,255,255,0.25)';ctx.font='12px "Microsoft YaHei"';ctx.textAlign='center';
+            ctx.fillText('— 等待新任务 —',W/2,y+24);ctx.textAlign='left';
+        }
+    }
+}
+
+function drawMiniMap(){
+    const m=G.miniMap;if(!m.show)return;
+    ctx.fillStyle='rgba(0,0,0,0.72)';roundRect(ctx,m.x-2,m.y-2,m.w+4,m.h+4,6);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle='rgba(46,125,50,0.95)';ctx.fillRect(m.x,m.y,m.w,m.h);
+    const sx=m.w/W,sy=m.h/H;
+    ctx.strokeStyle='#455a64';ctx.lineWidth=1.5;
+    for(const e of G.edges){const a=G.nodes[e.a],b=G.nodes[e.b];ctx.beginPath();ctx.moveTo(m.x+a.x*sx,m.y+(a.y-HUD_H)*sy);ctx.lineTo(m.x+b.x*sx,m.y+(b.y-HUD_H)*sy);ctx.stroke();}
+    for(const n of G.nodes){
+        const rt=G.tasks.find(t=>t.pickNode===n.id&&(t.status==='pending'||t.status==='accepted'));
+        const dl=G.tasks.find(t=>t.dropNode===n.id&&t.status==='loaded');
+        let c='#78909c';
+        if(rt||dl)c=dl?'#4caf50':(rt.status==='accepted'?'#ffb300':'#e53935');
+        else if(n.type==='depot')c='#455a64';
+        else if(n.type==='merchant')c='#fb8c00';
+        ctx.fillStyle=c;ctx.beginPath();ctx.arc(m.x+n.x*sx,m.y+(n.y-HUD_H)*sy,2.3,0,Math.PI*2);ctx.fill();
+    }
+    ctx.fillStyle='#ffeb3b';ctx.beginPath();ctx.arc(m.x+G.player.x*sx,m.y+(G.player.y-HUD_H)*sy,3.4,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle='#bdbdbd';ctx.font='9px Arial';ctx.textAlign='center';ctx.fillText('小地图',m.x+m.w/2,m.y+m.h+11);ctx.textAlign='left';
+}
+
+function drawEffects(){
+    for(const p of G.particles){
+        ctx.globalAlpha=Math.max(0,p.life/p.maxLife);
+        ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    for(const sp of G.scorePopups){
+        ctx.globalAlpha=Math.max(0,sp.life/sp.maxLife);
+        ctx.fillStyle=sp.color||'#fff';ctx.font='bold '+Math.floor(13+6*(sp.life/sp.maxLife))+'px Arial';
+        ctx.textAlign='center';ctx.fillText(sp.text,sp.x,sp.y);ctx.textAlign='left';
+    }
+    ctx.globalAlpha=1;
+    for(const ft of G.floatingTexts){
+        ctx.globalAlpha=Math.max(0,ft.life/ft.maxLife);
+        ctx.fillStyle=ft.col;ctx.font='bold 14px "Microsoft YaHei"';
+        ctx.textAlign='center';ctx.fillText(ft.text,ft.x,ft.y);ctx.textAlign='left';
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawToasts(){
+    for(let i=0;i<G.toaster.length;i++){
+        const t=G.toaster[i];
+        const a=Math.min(1,t.life/32);
+        ctx.globalAlpha=a;
+        const y=HUD_H+18+i*32+t.y;
+        ctx.fillStyle='rgba(0,0,0,0.82)';roundRect(ctx,W/2-180,y,360,28,7);ctx.fill();
+        ctx.strokeStyle=t.col==='#fff'?'rgba(255,255,255,0.22)':t.col+'55';ctx.lineWidth=1.2;ctx.stroke();
+        ctx.fillStyle=t.col;ctx.font='12px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText(t.text,W/2,y+19);ctx.textAlign='left';
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawScreenFlash(){
+    if(G.screenFlash<=0)return;
+    ctx.globalAlpha=G.screenFlash/30*0.35;
+    ctx.fillStyle=G.flashColor;ctx.fillRect(0,0,W,H);
+    ctx.globalAlpha=1;
+}
+
+function drawTutorial(){
+    if(!G.showTutorial||G.state!==STATE_PLAYING)return;
+    const steps=[
+        {t:'欢迎来到'+t+'!',d:'WASD/方向键 或 触屏拖动 控制移动',y:HUD_H+120},
+        {t:'目标1:接单',d:'走到红色闪烁🛒商店,自动接任务',y:G.nodes[6]?G.nodes[6].y-50:HUD_H+220},
+        {t:'目标2:装货',d:'再走回同一商家装货 (黄色=已接)',y:G.nodes[12]?G.nodes[12].y-40:HUD_H+320},
+        {t:'目标3:配送',d:'走到绿色圈的🏘️客户,自动完成!',y:G.nodes[18]?G.nodes[18].y-40:HUD_H+420},
+        {t:'开始行动吧!',d:'(本教程5秒后自动关闭)',y:H-TASK_H-40}
+    ];
+    const si=Math.min(steps.length-1,Math.floor(G.tickAcc/240));
+    if(G.tickAcc>1500){G.showTutorial=false;return;}
+    const s=steps[si];
+    ctx.fillStyle='rgba(0,0,0,0.78)';roundRect(ctx,W/2-160,s.y,320,52,10);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#ffd700';ctx.font='bold 15px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText(s.t,W/2,s.y+20);
+    ctx.fillStyle='#fff';ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText(s.d,W/2,s.y+40);ctx.textAlign='left';
+    ctx.fillStyle='rgba(255,215,0,0.5)';ctx.font='10px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText((si+1)+' / '+steps.length+'  ·  点击任意位置跳过',W/2,s.y+64);ctx.textAlign='left';
+}
+
+function drawMenu(){
+    drawSkyAndGround();drawRoads();drawNodes();
+    const g2=ctx.createRadialGradient(W/2,H/2,30,W/2,H/2,450);
+    g2.addColorStop(0,'rgba(0,0,0,0.25)');g2.addColorStop(1,'rgba(0,0,0,0.78)');
+    ctx.fillStyle=g2;ctx.fillRect(0,0,W,H);
+    
+    ctx.fillStyle='rgba(255,215,0,0.18)';ctx.font='bold 56px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🚚 '+t,W/2+2,126);ctx.textAlign='left';
+    ctx.fillStyle='#ffd700';ctx.font='bold 42px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🚚 '+t,W/2,122);ctx.textAlign='left';
+    ctx.fillStyle='rgba(255,255,255,0.55)';ctx.font='14px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('bike dispatcher  ·  时长'+GAME_TIME+'秒 · 共5关挑战',W/2,152);ctx.textAlign='left';
+    
+    ctx.fillStyle='rgba(0,0,0,0.78)';roundRect(ctx,28,170,W-56,340,12);ctx.fill();
+    ctx.strokeStyle='rgba(255,215,0,0.32)';ctx.lineWidth=2.2;ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 19px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('📖 玩法说明 & 目标',W/2,202);ctx.textAlign='left';
+    
+    for(let i=0;i<DESC.length;i++){
+        const yy=232+i*48;
+        ctx.fillStyle='rgba(255,255,255,0.05)';roundRect(ctx,40,yy-24,W-80,40,6);ctx.fill();
+        ctx.fillStyle='#e0e0e0';ctx.font='14px "Microsoft YaHei"';
+        ctx.fillText(DESC[i],56,yy+3);
+    }
+    
+    ctx.fillStyle='#ffd700';ctx.font='bold 13px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🏆 最高分: '+G.high+'    |    ⌨️ 空格/回车开始    |    📱 触屏点击开始',W/2,532);ctx.textAlign='left';
+    
+    drawBtn(ctx,W/2-108,556,216,60,'▶️  开始游戏','startBtn','#ff6b35','#fff',18);
+    
+    const tiles=[
+        {t:'WASD/方向键',d:'移动载具',ic:'🎮'},
+        {t:'触屏/鼠标',d:'拖动行驶',ic:'👆'},
+        {t:'ESC 键',d:'暂停游戏',ic:'⏸️'},
+        {t:'U 键',d:'升级面板',ic:'⬆️'}
+    ];
+    for(let i=0;i<tiles.length;i++){
+        const x=18+i*114,y=644;
+        ctx.fillStyle='rgba(255,255,255,0.08)';roundRect(ctx,x,y,108,58,8);ctx.fill();
+        ctx.strokeStyle='rgba(255,255,255,0.16)';ctx.lineWidth=1;ctx.stroke();
+        ctx.fillStyle='#fff';ctx.font='22px Arial';ctx.textAlign='center';ctx.fillText(tiles[i].ic,x+54,y+26);
+        ctx.font='12px "Microsoft YaHei"';ctx.fillStyle='#e0e0e0';ctx.fillText(tiles[i].t,x+54,y+48);
+        ctx.fillStyle='#9e9e9e';ctx.font='10px "Microsoft YaHei"';ctx.fillText(tiles[i].d,x+54,y+60);
+        ctx.textAlign='left';
+    }
+    
+    const achDone=ACH.filter(a=>a.done).length;
+    ctx.fillStyle='rgba(255,255,255,0.06)';roundRect(ctx,28,718,W-56,36,6);ctx.fill();
+    ctx.fillStyle='#bdbdbd';ctx.font='12px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🎯 核心目标: 调度数量 & 效率评分  ·  🏅 成就: '+achDone+'/'+ACH.length+'  ·  天气系统×'+WEATHER_STATES.length,W/2,742);
+    ctx.textAlign='left';
+}
+
+function drawPause(){
+    ctx.fillStyle='rgba(0,0,0,0.86)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';ctx.font='bold 46px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('⏸️  暂 停 中',W/2,180);ctx.textAlign='left';
+    ctx.fillStyle='#bdbdbd';ctx.font='15px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('得分: '+G.score+'   ·   第 '+G.level+' 关   ·   完成 '+G.completed+' 单   ·   连击 '+G.combo+'×',W/2,228);ctx.textAlign='left';
+    
+    ctx.fillStyle='rgba(255,255,255,0.06)';roundRect(ctx,W/2-160,258,320,16,5);ctx.fill();
+    for(let i=0;i<G.activeEvents.length;i++){
+        const e=G.activeEvents[i];
+        ctx.fillStyle='#ffd700';ctx.font='11px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText(e.name+' '+Math.ceil(e.timeLeft/60)+'s',W/2-150+i*160,270);ctx.textAlign='left';
+    }
+    
+    drawBtn(ctx,W/2-100,298,200,54,'▶️  继续游戏','resumeBtn','#43a047','#fff',16);
+    drawBtn(ctx,W/2-100,366,200,54,'⬆️  升级中心','shopBtn','#5c6bc0','#fff',16);
+    drawBtn(ctx,W/2-100,434,200,54,'🏠 退出到菜单','quitBtn','#78909c','#fff',16);
+    
+    ctx.fillStyle='#78909c';ctx.font='13px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('按 ESC 可快速继续 / 再次暂停',W/2,520);
+    ctx.fillStyle='#546e7a';ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('(在菜单按空格/回车可快速开始)',W/2,544);ctx.textAlign='left';
+}
+
+function drawOver(){
+    ctx.fillStyle='rgba(0,0,0,0.89)';ctx.fillRect(0,0,W,H);
+    const nr=G.score>=G.high&&G.high>0;
+    ctx.fillStyle=nr?'#ffd700':'#fff';ctx.font='bold 44px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText(nr?'🏆 新纪录!':'🎮 游戏结束',W/2,108);
+    if(nr){ctx.fillStyle='rgba(255,215,0,0.22)';ctx.font='bold 52px "Microsoft YaHei"';ctx.fillText('🏆 新纪录!',W/2+2,110);}
+    ctx.textAlign='left';
+    
+    ctx.fillStyle='rgba(255,255,255,0.07)';roundRect(ctx,34,136,W-68,372,12);ctx.fill();
+    ctx.strokeStyle='rgba(255,215,0,0.2)';ctx.lineWidth=1.5;ctx.stroke();
+    
+    ctx.fillStyle='#fff';ctx.font='bold 26px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('本局最终得分',W/2,180);
+    ctx.fillStyle='#ffd700';ctx.font='bold 62px Arial';ctx.fillText(G.score,W/2,248);
+    ctx.fillStyle='#90a4ae';ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('🏆 历史最高: '+G.high+(nr?'  🆕 NEW RECORD!':''),W/2,284);ctx.textAlign='left';
+    
+    const st=[
+        ['🎯 完成任务',G.completed+' 单'],['📊 达到关卡','第 '+G.level+' 关'],
+        ['💯 最高连击',G.maxCombo+' 连击'],['💥 事故次数',G.accidents+' 次'],
+        ['🚫 失败任务',G.failed+' 单'],['⚡ 提前送达',G.early+' 单'],
+        ['调度数量',G.statDim1.toFixed(0)+' 分'],['效率评分',G.statDim2.toFixed(0)+' %']
+    ];
+    for(let r=0;r<4;r++)for(let c=0;c<2;c++){
+        const si=r*2+c,x=52+c*188,y=308+r*44;
+        ctx.fillStyle='rgba(255,255,255,0.05)';roundRect(ctx,x,y,178,36,5);ctx.fill();
+        ctx.fillStyle='#9e9e9e';ctx.font='12px "Microsoft YaHei"';ctx.fillText(st[si][0],x+12,y+15);
+        ctx.fillStyle='#fff';ctx.font='bold 15px "Microsoft YaHei"';ctx.textAlign='right';
+        ctx.fillText(st[si][1],x+166,y+25);ctx.textAlign='left';
+    }
+    
+    const aL=ACH.filter(a=>a.done).length;
+    ctx.fillStyle='rgba(255,215,0,0.12)';roundRect(ctx,34,488,W-68,36,6);ctx.fill();
+    ctx.fillStyle='#ffd700';ctx.font='bold 14px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🏅 成就解锁: '+aL+' / '+ACH.length+'   获得奖励 +'+(aL*100)+' 分',W/2,512);ctx.textAlign='left';
+    
+    const achIcons=ACH.filter(a=>a.done).map(a=>a.icon).join('  ');
+    if(achIcons){ctx.fillStyle='#fff';ctx.font='16px Arial';ctx.textAlign='center';ctx.fillText(achIcons,W/2,536);ctx.textAlign='left';}
+    
+    drawBtn(ctx,58,564,170,56,'🔄  再玩一次','restartBtn','#ff6b35','#fff',16);
+    drawBtn(ctx,252,564,170,56,'🏠 返回菜单','menuBtn','#5c6bc0','#fff',16);
+}
+
+function drawUpgradePanel(){
+    ctx.fillStyle='rgba(0,0,0,0.92)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';ctx.font='bold 30px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('⬆️ 升级中心  (当前分数: '+G.score+')',W/2,70);ctx.textAlign='left';
+    for(let i=0;i<UPGRADES.length;i++){
+        const u=UPGRADES[i],y=108+i*78;
+        const b=G.upgradesBought[u.id];
+        ctx.fillStyle=b?'rgba(76,175,80,0.13)':'rgba(255,255,255,0.06)';roundRect(ctx,26,y,W-52,68,8);ctx.fill();
+        ctx.strokeStyle=b?'#4caf50':'rgba(255,255,255,0.16)';ctx.lineWidth=1.6;ctx.stroke();
+        ctx.fillStyle=b?'#4caf50':'#fff';ctx.font='28px Arial';ctx.textAlign='center';
+        ctx.fillText(u.icon,56,y+40);ctx.textAlign='left';
+        ctx.fillStyle=b?'#4caf50':'#fff';ctx.font='bold 17px "Microsoft YaHei"';
+        ctx.fillText(u.name,86,y+28);
+        ctx.fillStyle='#bdbdbd';ctx.font='12px "Microsoft YaHei"';
+        ctx.fillText(u.desc,86,y+52);
+        if(!b)drawBtn(ctx,W-122,y+14,88,40,u.cost+' 分','up'+i,G.score>=u.cost?'#fb8c00':'#616161','#fff',12);
+        else{ctx.fillStyle='#4caf50';ctx.font='bold 17px "Microsoft YaHei"';ctx.textAlign='right';ctx.fillText('✅ 已拥有',W-40,y+42);ctx.textAlign='left';}
+    }
+    drawBtn(ctx,W/2-90,108+UPGRADES.length*78+10,180,50,'关闭升级 (U)','closeUp','#78909c','#fff',14);
+}
+
+function draw(){
+    ctx.save();
+    if(G.state===STATE_MENU)drawMenu();
+    else if(G.state===STATE_PLAYING||G.state===STATE_PAUSE||G.state===STATE_OVER){
+        drawSkyAndGround();drawRoads();drawTaskPaths();drawObstacles();
+        drawMiniMap();drawNodes();drawNpcs();drawPlayer();drawEffects();
+        drawHUD();drawTaskPanel();drawToasts();
+        drawTutorial();
+        if(G.showUpgrade&&G.state===STATE_PLAYING)drawUpgradePanel();
+        if(G.state===STATE_PAUSE)drawPause();
+        if(G.state===STATE_OVER)drawOver();
+        drawScreenFlash();
+    }
+    ctx.restore();
+}
+
+function handlePointerDown(p){
+    if(G.showTutorial&&G.state===STATE_PLAYING){G.showTutorial=false;}
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'startBtn')){startGame();return;}
+        startGame();return;
+    }
+    if(G.state===STATE_OVER){
+        if(hitBtn(p,'restartBtn')){initState();sfxBtn();return;}
+        if(hitBtn(p,'menuBtn')){G.state=STATE_MENU;sfxBtn();return;}
+    }
+    if(G.state===STATE_PAUSE){
+        if(hitBtn(p,'resumeBtn')){togglePause();return;}
+        if(hitBtn(p,'shopBtn')){togglePause();G.showUpgrade=true;sfxBtn();return;}
+        if(hitBtn(p,'quitBtn')){G.state=STATE_MENU;sfxBtn();return;}
+    }
+    if(G.state===STATE_PLAYING){
+        if(hitBtn(p,'btnPause')){togglePause();return;}
+        if(hitBtn(p,'btnUp')){G.showUpgrade=true;sfxBtn();return;}
+        if(G.showUpgrade){
+            for(let i=0;i<UPGRADES.length;i++)if(hitBtn(p,'up'+i)){tryBuyUpgrade(i);return;}
+            if(hitBtn(p,'closeUp')){G.showUpgrade=false;sfxBtn();return;}
+        }
+        G.pointerActive=true;G.pointerTarget={x:p.x,y:p.y};G.dragStart={...p};
+    }
+}
+function handlePointerMove(p){if(G.state===STATE_PLAYING&&G.pointerActive)G.pointerTarget={x:p.x,y:p.y};}
+function handlePointerUp(){G.pointerActive=false;G.pointerTarget=null;G.dragStart=null;}
+
+canvas.addEventListener('mousedown',e=>{e.preventDefault();handlePointerDown(getPos(e));},{passive:false});
+canvas.addEventListener('mousemove',e=>handlePointerMove(getPos(e)));
+canvas.addEventListener('mouseup',()=>handlePointerUp());
+canvas.addEventListener('mouseleave',()=>handlePointerUp());
+canvas.addEventListener('touchstart',e=>{e.preventDefault();handlePointerDown(getPos(e));},{passive:false});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();handlePointerMove(getPos(e));},{passive:false});
+canvas.addEventListener('touchend',e=>{e.preventDefault();handlePointerUp();},{passive:false});
+
+window.addEventListener('keydown',e=>{
+    G.keys[e.key]=true;
+    if(e.key===' '||e.key==='Enter'){
+        if(G.state===STATE_MENU){startGame();e.preventDefault();}
+        else if(G.state===STATE_OVER){initState();e.preventDefault();}
+    }
+    if(e.key==='Escape'){
+        if(G.showUpgrade){G.showUpgrade=false;sfxBtn();e.preventDefault();}
+        else if(G.state===STATE_PLAYING||G.state===STATE_PAUSE){togglePause();e.preventDefault();}
+    }
+    if((e.key==='u'||e.key==='U')&&G.state===STATE_PLAYING){G.showUpgrade=!G.showUpgrade;sfxBtn();}
+    if(e.key==='m'||e.key==='M'){G.miniMap.show=!G.miniMap.show;}
+});
+window.addEventListener('keyup',e=>{G.keys[e.key]=false;});
+
+
+// ================= 附加功能模块: 天气粒子 + 收费站 + 详细统计 + 订单详情 =================
+
+const TOLL_STATIONS = [];
+const GAS_STATIONS = [];
+
+function initSpecialStations() {
+    TOLL_STATIONS.length = 0; GAS_STATIONS.length = 0;
+    for (let i = 0; i < 3; i++) {
+        TOLL_STATIONS.push({
+            x: 80 + i * 140 + Math.random() * 30,
+            y: HUD_H + 80 + Math.random() * 30,
+            w: 28, h: 38, fee: 8 + i * 3, paid: {}
+        });
+    }
+    for (let i = 0; i < 2; i++) {
+        GAS_STATIONS.push({
+            x: 160 + i * 180, y: H - TASK_H - 120 - i * 30,
+            w: 44, h: 44, price: 4, used: false, cd: 0
+        });
+    }
+}
+initSpecialStations();
+
+function updateTollAndGas() {
+    for (const ts of TOLL_STATIONS) {
+        const cx = ts.x + ts.w / 2, cy = ts.y + ts.h / 2;
+        if (Math.abs(G.player.x - cx) < ts.w / 2 + 16 && Math.abs(G.player.y - cy) < ts.h / 2 + 16) {
+            const key = 't_' + G.tickAcc;
+            if (!ts.paid[G.player.x.toFixed(0)]) {
+                ts.paid[G.player.x.toFixed(0)] = true;
+                const fee = ts.fee;
+                if (G.score >= fee) {
+                    G.score -= fee;
+                    G.scorePopups.push({ x: cx, y: ts.y - 10, text: '-' + fee + '费', life: 55, maxLife: 55, color: '#ff9800' });
+                    sfxDrop();
+                    toast('🛃 过路费 ¥' + fee, 120, '#ff9800');
+                } else {
+                    ts.paid = {};
+                }
+            }
+        }
+    }
+    for (const gs of GAS_STATIONS) {
+        if (gs.cd > 0) gs.cd--;
+        const cx = gs.x + gs.w / 2, cy = gs.y + gs.h / 2;
+        if (Math.hypot(G.player.x - cx, G.player.y - cy) < gs.w / 2 + 18 && gs.cd <= 0 && G.loadedItems > 0) {
+            gs.cd = 60;
+            const bonus = 15;
+            G.score += bonus;
+            G.statDim2 = Math.min(100, G.statDim2 + 5);
+            G.scorePopups.push({ x: cx, y: cy - 18, text: '+15补给', life: 60, maxLife: 60, color: '#8bc34a' });
+            sfxCoin();
+            toast('⛽ 补给站: +15分, 满意度+5%', 140, '#8bc34a');
+            spawnBurst(cx, cy, '#8bc34a', 12, 4);
+        }
+    }
+}
+
+// ================= 天气粒子渲染 =================
+const WEATHER_PARTICLES = [];
+function updateWeatherParticles() {
+    const ws = WEATHER_STATES[G.weather];
+    const density = (ws.id === 2 || ws.id === 4) ? 80 : (ws.id === 3 ? 12 : 0);
+    while (WEATHER_PARTICLES.length < density) {
+        WEATHER_PARTICLES.push({
+            x: Math.random() * W,
+            y: HUD_H + Math.random() * (H - HUD_H - TASK_H),
+            vx: ws.id === 2 ? 0.6 + Math.random() * 0.6 : (ws.id === 4 ? 0.2 : 0),
+            vy: ws.id === 4 ? 1.5 + Math.random() * 1.5 : (ws.id === 2 ? 5 + Math.random() * 3 : 0.8),
+            life: 180 + Math.random() * 120,
+            size: ws.id === 4 ? 2.5 + Math.random() * 1.5 : 1.8,
+            len: ws.id === 2 ? 8 + Math.random() * 6 : 0
+        });
+    }
+    while (WEATHER_PARTICLES.length > density) WEATHER_PARTICLES.pop();
+    for (let i = WEATHER_PARTICLES.length - 1; i >= 0; i--) {
+        const p = WEATHER_PARTICLES[i];
+        p.x += p.vx; p.y += p.vy; p.life--;
+        if (p.y > H - TASK_H || p.x > W || p.life <= 0) {
+            p.x = Math.random() * W; p.y = HUD_H - 20; p.life = 180 + Math.random() * 100;
+        }
+    }
+}
+function drawWeatherParticles() {
+    const ws = WEATHER_STATES[G.weather];
+    if (ws.id === 2) {
+        ctx.strokeStyle = 'rgba(180, 210, 255, 0.65)'; ctx.lineWidth = 1.5;
+        for (const p of WEATHER_PARTICLES) {
+            ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.len * 0.3, p.y + p.len); ctx.stroke();
+        }
+    } else if (ws.id === 4) {
+        for (const p of WEATHER_PARTICLES) {
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+        }
+    } else if (ws.id === 3) {
+        ctx.fillStyle = 'rgba(220,225,230,0.35)';
+        for (const p of WEATHER_PARTICLES) {
+            ctx.beginPath(); ctx.arc(p.x, p.y, 10 + Math.sin(G.tickAcc / 20 + p.x) * 3, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+    if (ws.id >= 2) {
+        ctx.globalAlpha = 0.22;
+        const g = ctx.createLinearGradient(0, HUD_H, 0, H - TASK_H);
+        g.addColorStop(0, ws.col2); g.addColorStop(1, 'rgba(0,0,0,0.4)');
+        ctx.fillStyle = g; ctx.fillRect(0, HUD_H, W, H - HUD_H - TASK_H);
+        ctx.globalAlpha = 1;
+    }
+}
+
+// ================= 收费站/加油站 渲染 =================
+function drawTollAndGas() {
+    for (const ts of TOLL_STATIONS) {
+        ctx.fillStyle = 'rgba(0,0,0,0.35)'; roundRect(ctx, ts.x + 2, ts.y + 5, ts.w, ts.h, 3); ctx.fill();
+        ctx.fillStyle = '#78909c'; roundRect(ctx, ts.x, ts.y, ts.w, ts.h, 3); ctx.fill();
+        ctx.strokeStyle = '#37474f'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = '#f44336'; ctx.fillRect(ts.x, ts.y - 6, ts.w, 6);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('¥' + ts.fee, ts.x + ts.w / 2, ts.y + ts.h / 2 + 2);
+        ctx.fillText('🛃', ts.x + ts.w / 2, ts.y + ts.h - 4);
+        ctx.textAlign = 'left';
+    }
+    for (const gs of GAS_STATIONS) {
+        const pulse = 1 + Math.sin(G.tickAcc * 0.1) * 0.04;
+        ctx.fillStyle = 'rgba(0,0,0,0.35)'; roundRect(ctx, gs.x + 3, gs.y + 5, gs.w, gs.h, 6); ctx.fill();
+        ctx.fillStyle = '#ef6c00'; roundRect(ctx, gs.x, gs.y, gs.w * pulse, gs.h * pulse, 6); ctx.fill();
+        ctx.strokeStyle = '#bf360c'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.fillRect(gs.x + gs.w / 2 - 1, gs.y - 18, 2, 18);
+        ctx.fillStyle = '#ffd54f';
+        ctx.beginPath(); ctx.arc(gs.x + gs.w / 2, gs.y - 20, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('⛽', gs.x + gs.w / 2, gs.y + gs.h / 2 + 6);
+        ctx.fillStyle = '#ffecb3'; ctx.font = 'bold 9px Arial';
+        ctx.fillText('¥' + gs.price + '/L', gs.x + gs.w / 2, gs.y + gs.h + 10);
+        ctx.textAlign = 'left';
+    }
+}
+
+// ================= 详细统计面板 (按Tab键) =================
+let SHOW_STATS = false;
+function drawDetailedStats() {
+    if (!SHOW_STATS) return;
+    const px = W / 2 - 150, py = H / 2 - 180, pw = 300, ph = 360;
+    ctx.fillStyle = 'rgba(0,0,0,0.94)'; roundRect(ctx, px, py, pw, ph, 10); ctx.fill();
+    ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#ffd700'; ctx.font = 'bold 18px "Microsoft YaHei"'; ctx.textAlign = 'center';
+    ctx.fillText('📊 游戏详细统计面板', px + pw / 2, py + 28);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.font = '13px "Microsoft YaHei"';
+    const lines = [
+        ['🎯 完成任务数', G.completed + ' 单'],
+        ['🏅 当前关卡', '第 ' + G.level + ' 关 · ' + LEVEL_NAMES[G.level - 1]],
+        ['⏱️ 游戏剩余', Math.floor(G.timeLeft / 60) + '分' + (G.timeLeft % 60) + '秒'],
+        ['💯 最高连击', G.maxCombo + ' 连续完成'],
+        ['💥 碰撞事故', G.accidents + ' 次'],
+        ['❌ 超时失败', G.failed + ' 单'],
+        ['⚡ 提前送达', G.early + ' 单'],
+        ['💎 VIP完成', G.vipDone + ' 单'],
+        ['🔧 升级购买', Object.keys(G.upgradesBought).length + ' / ' + UPGRADES.length],
+        ['🏆 成就解锁', Object.keys(G.achievements).length + ' / ' + ACH.length],
+        ['📦 载货容量', G.maxCapacity + ' 件 (基础4+' + G.capBonus + ')'],
+        ['🚀 当前速度', (G.player.speed * G.speedMul * G.roadBad * G.rainMul * WEATHER_STATES[G.weather].speed).toFixed(2)],
+        ['📏 总行驶距离', (G.totalDistance / 100).toFixed(2) + ' km'],
+        ['🌤️ 当前天气', WEATHER_STATES[G.weather].name + ' · ' + WEATHER_STATES[G.weather].desc],
+        ['📈 完成得分率', (G.completed > 0 ? (G.completed / (G.completed + G.failed) * 100).toFixed(1) : 100) + '%'],
+        ['📋 进行中任务', G.tasks.filter(t => t.status !== 'pending').length + ' 单'],
+    ];
+    for (let i = 0; i < lines.length; i++) {
+        const yy = py + 50 + i * 18;
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent';
+        ctx.fillRect(px + 8, yy - 12, pw - 16, 16);
+        ctx.fillStyle = '#bdbdbd'; ctx.fillText(lines[i][0], px + 18, yy);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.fillText(lines[i][1], px + pw - 18, yy);
+        ctx.textAlign = 'left';
+    }
+    ctx.fillStyle = '#78909c'; ctx.font = '11px "Microsoft YaHei"'; ctx.textAlign = 'center';
+    ctx.fillText('(按 Tab 键关闭此面板)', px + pw / 2, py + ph - 12);
+    ctx.textAlign = 'left';
+}
+
+// ================= 订单详情提示气泡 =================
+function drawTaskTooltips() {
+    for (const t of G.tasks) {
+        if (t.status === 'pending' && euclid(G.player, { x: t.pickX, y: t.pickY }) < 70 * G.radarMul) {
+            const tx = t.pickX, ty = t.pickY - 72;
+            ctx.fillStyle = 'rgba(0,0,0,0.9)'; roundRect(ctx, tx - 70, ty, 140, 54, 5); ctx.fill();
+            ctx.strokeStyle = t.typeCol; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.fillStyle = t.typeCol; ctx.font = 'bold 10px "Microsoft YaHei"'; ctx.textAlign = 'center';
+            ctx.fillText('🔴 ' + t.typeName + ' · ' + t.cargoName, tx, ty + 14);
+            ctx.fillStyle = '#fff'; ctx.font = '10px "Microsoft YaHei"';
+            ctx.fillText(t.pickName + ' → ' + t.dropName, tx, ty + 28);
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText('奖励 ¥' + t.reward + (t.isVip ? ' ×3' : '') + ' · 走近自动接单', tx, ty + 44);
+            ctx.textAlign = 'left';
+        }
+        if (t.status === 'loaded' && euclid(G.player, { x: t.dropX, y: t.dropY }) < 70 * G.radarMul) {
+            const tx = t.dropX, ty = t.dropY - 72;
+            ctx.fillStyle = 'rgba(0,0,0,0.92)'; roundRect(ctx, tx - 70, ty, 140, 50, 5); ctx.fill();
+            ctx.strokeStyle = '#4caf50'; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.fillStyle = '#4caf50'; ctx.font = 'bold 11px "Microsoft YaHei"'; ctx.textAlign = 'center';
+            ctx.fillText('🟢 收货点: ' + t.dropName, tx, ty + 14);
+            ctx.fillStyle = '#fff'; ctx.font = '10px "Microsoft YaHei"';
+            const m = Math.floor(Math.max(0, t.timeLeft) / 60), s = Math.max(0, t.timeLeft) % 60;
+            const tip = t.timeLeft / t.totalTime > 0.7 ? ' +小费' : (t.timeLeft / t.totalTime > 0.4 ? '' : ' ⚠超时');
+            ctx.fillText('剩余 ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + tip, tx, ty + 30);
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText('走近自动完成配送!', tx, ty + 44);
+            ctx.textAlign = 'left';
+        }
+    }
+}
+
+// ================= 完成里程碑特效 =================
+function checkMilestones() {
+    const mstones = [100, 300, 500, 800, 1200, 1800, 2500, 3500, 5000];
+    for (const m of mstones) {
+        if (!G['_ms' + m] && G.score >= m) {
+            G['_ms' + m] = true;
+            const bonus = Math.floor(m / 10);
+            G.score += bonus;
+            toast('🌟 里程碑! ¥' + m + ' 达成 +' + bonus + ' 奖励', 260, '#ffd700');
+            sfxAchieve();
+            G.screenFlash = 14; G.flashColor = '#ffd700';
+            spawnBurst(W / 2, H / 2, '#ffd700', 50, 10);
+        }
+    }
+}
+
+// ================= update/draw 增强钩子 =================
+const _origUpdate = update;
+update = function () {
+    _origUpdate();
+    if (G.state !== STATE_PLAYING) return;
+    updateTollAndGas();
+    updateWeatherParticles();
+    checkMilestones();
+};
+
+const _origDraw = draw;
+draw = function () {
+    ctx.save();
+    if (G.state === STATE_MENU) { drawMenu(); ctx.restore(); return; }
+    drawSkyAndGround();
+    drawRoads();
+    drawWeatherParticles();
+    drawTollAndGas();
+    drawTaskPaths();
+    drawObstacles();
+    drawMiniMap();
+    drawNodes();
+    drawTaskTooltips();
+    drawNpcs();
+    drawPlayer();
+    drawEffects();
+    drawHUD();
+    drawTaskPanel();
+    drawToasts();
+    drawTutorial();
+    if (G.showUpgrade && G.state === STATE_PLAYING) drawUpgradePanel();
+    if (G.state === STATE_PAUSE) drawPause();
+    if (G.state === STATE_OVER) drawOver();
+    drawDetailedStats();
+    drawScreenFlash();
+    ctx.restore();
+};
+
+// ================= Tab 键切换统计面板 =================
+window.addEventListener('keydown', function (e) {
+    if (e.key === 'Tab') {
+        SHOW_STATS = !SHOW_STATS;
+        if (SHOW_STATS) sfxBtn();
+        e.preventDefault();
+    }
+});
+
+
+setInterval(function loop(){
+    if(G.state===STATE_PLAYING)update();
+    draw();
+},16);
+
+const _sbtn=document.getElementById('start-game-btn');
+_sbtn.addEventListener('click',function(){initAudio();startGame();this.style.display='none';});
+
+})();
+</script>
+
+<!-- ===== [QA-PATCH ads-v1] 广告4组件HTML ===== -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+
+/* ===== [QA-PATCH ads-v1] 广告/赞助 关闭+打开绑定 ===== */
+(function(){
+  try{
+    var sp = document.getElementById('sponsorPanel'), sb = document.getElementById('sponsorBtn'), sc = document.getElementById('sponsorClose');
+    if(sp && sb){
+      sb.addEventListener('click', function(ev){
+        try{ ev.stopPropagation(); sp.style.display='flex'; sp.style.setProperty('pointer-events','auto'); }catch(e){}
+      });
+    }
+    if(sp && sc){ sc.addEventListener('click', function(){ try{ sp.style.display='none'; sp.style.setProperty('pointer-events','none'); }catch(e){} }); }
+    if(sp){ sp.addEventListener('click', function(){ sp.style.setProperty('pointer-events','auto'); }, true); }
+  }catch(e){}
+  try{
+    var ia = document.getElementById('interstitialAd'), si = document.getElementById('skipInterstitial');
+    if(ia && si){ si.addEventListener('click', function(){ try{ ia.style.display='none'; ia.style.setProperty('pointer-events','none'); }catch(e){} }); }
+    if(ia){ ia.addEventListener('click', function(){ ia.style.setProperty('pointer-events','auto'); }, true); }
+    // 首次进入游戏后 4s 弹一次插屏（仅弹1次）
+    try{
+      var __shown = false;
+      function __showInter(){ if(__shown || !ia) return; __shown=true; ia.style.display='flex'; ia.style.setProperty('pointer-events','auto'); }
+      if(window.addEventListener){
+        window.addEventListener('load', function(){ setTimeout(__showInter, 4000); });
+      } else setTimeout(__showInter, 5000);
+    }catch(e){}
+  }catch(e){}
+})();
+
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

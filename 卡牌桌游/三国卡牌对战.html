@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>三国卡牌对战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a0a00;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#c9302c;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=800;
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'square';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxAttack(){playTone(220,0.08,'sawtooth',0.18);setTimeout(()=>playTone(150,0.1,'sawtooth',0.15),50)}
+function sfxSkill(){playTone(523,0.08,'sine',0.15);setTimeout(()=>playTone(659,0.08,'sine',0.15),80);setTimeout(()=>playTone(784,0.15,'sine',0.15),160)}
+function sfxDefend(){playTone(300,0.1,'triangle',0.12)}
+function sfxDraw(){playTone(440,0.06,'sine',0.1)}
+function sfxDeath(){playTone(200,0.15,'sawtooth',0.2);setTimeout(()=>playTone(100,0.3,'sawtooth',0.2),150)}
+function sfxWin(){for(let i=0;i<4;i++)setTimeout(()=>playTone(400+i*100,0.15,'sine',0.2),i*120)}
+function sfxBtn(){playTone(600,0.06,'sine',0.1)}
+function sfxLose(){for(let i=0;i<4;i++)setTimeout(()=>playTone(400-i*50,0.2,'sawtooth',0.18),i*150)}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const CARD_POOL=[
+    {id:'guanyu',name:'关羽',faction:'蜀',cost:4,atk:5,hp:6,skill:'武圣:登场对敌方造成3伤害',emoji:'⚔️',color:'#2e7d32',skillType:'damage',skillVal:3},
+    {id:'zhangfei',name:'张飞',faction:'蜀',cost:3,atk:4,hp:4,skill:'咆哮:攻击后可再攻击一次',emoji:'🗡️',color:'#2e7d32',skillType:'double',skillVal:1},
+    {id:'zhaoyun',name:'赵云',faction:'蜀',cost:4,atk:4,hp:5,skill:'龙胆:获得2点护甲',emoji:'🛡️',color:'#2e7d32',skillType:'armor',skillVal:2},
+    {id:'zhugeliang',name:'诸葛亮',faction:'蜀',cost:5,atk:3,hp:4,skill:'神算:抽2张牌',emoji:'📜',color:'#2e7d32',skillType:'draw',skillVal:2},
+    {id:'liubei',name:'刘备',faction:'蜀',cost:3,atk:2,hp:5,skill:'仁德:恢复3点生命',emoji:'👑',color:'#2e7d32',skillType:'heal',skillVal:3},
+    {id:'machao',name:'马超',faction:'蜀',cost:4,atk:6,hp:3,skill:'铁骑:无视护甲造成伤害',emoji:'🐴',color:'#2e7d32',skillType:'pierce',skillVal:1},
+    {id:'huangzhong',name:'黄忠',faction:'蜀',cost:3,atk:5,hp:3,skill:'烈弓:远程攻击后排',emoji:'🏹',color:'#2e7d32',skillType:'backrow',skillVal:1},
+    {id:'jiangwei',name:'姜维',faction:'蜀',cost:3,atk:3,hp:4,skill:'九伐:回合结束+1攻',emoji:'⚡',color:'#2e7d32',skillType:'buff',skillVal:1},
+    {id:'caocao',name:'曹操',faction:'魏',cost:5,atk:4,hp:6,skill:'奸雄:击杀时抽1牌',emoji:'😈',color:'#1565c0',skillType:'killdraw',skillVal:1},
+    {id:'simayi',name:'司马懿',faction:'魏',cost:4,atk:3,hp:5,skill:'鬼才:敌方卡牌-1攻',emoji:'🦉',color:'#1565c0',skillType:'debuff',skillVal:1},
+    {id:'xiahoudun',name:'夏侯惇',faction:'魏',cost:3,atk:4,hp:5,skill:'刚烈:受伤反弹2伤害',emoji:'👁️',color:'#1565c0',skillType:'reflect',skillVal:2},
+    {id:'zhangliao',name:'张辽',faction:'魏',cost:4,atk:5,hp:4,skill:'突袭:登场可攻击一次',emoji:'⚔️',color:'#1565c0',skillType:'charge',skillVal:1},
+    {id:'guojia',name:'郭嘉',faction:'魏',cost:3,atk:2,hp:4,skill:'遗计:死亡抽2牌',emoji:'💀',color:'#1565c0',skillType:'deathdraw',skillVal:2},
+    {id:'xuchu',name:'许褚',faction:'魏',cost:4,atk:6,hp:5,skill:'裸衣:攻击时+2攻',emoji:'💪',color:'#1565c0',skillType:'atkboost',skillVal:2},
+    {id:'dianwei',name:'典韦',faction:'魏',cost:3,atk:4,hp:6,skill:'强袭:可牺牲1HP换1攻',emoji:'🔱',color:'#1565c0',skillType:'sacrifice',skillVal:1},
+    {id:'sunquan',name:'孙权',faction:'吴',cost:4,atk:3,hp:6,skill:'制衡:弃1抽2',emoji:'🔄',color:'#e65100',skillType:'cycle',skillVal:2},
+    {id:'zhouyu',name:'周瑜',faction:'吴',cost:4,atk:4,hp:4,skill:'反间:对所有敌方造成1伤害',emoji:'🔥',color:'#e65100',skillType:'aoe',skillVal:1},
+    {id:'lumeng',name:'吕蒙',faction:'吴',cost:3,atk:3,hp:5,skill:'白衣:登场获得隐身',emoji:'👻',color:'#e65100',skillType:'stealth',skillVal:1},
+    {id:'ganning',name:'甘宁',faction:'吴',cost:3,atk:4,hp:3,skill:'奇袭:破坏敌方1张手牌',emoji:'💥',color:'#e65100',skillType:'discard',skillVal:1},
+    {id:'taishi',name:'太史慈',faction:'吴',cost:4,atk:5,hp:4,skill:'神射:可攻击任意敌人',emoji:'🎯',color:'#e65100',skillType:'anytarget',skillVal:1},
+    {id:'huanggai',name:'黄盖',faction:'吴',cost:2,atk:3,hp:4,skill:'苦肉:失去1HP抽1牌',emoji:'😭',color:'#e65100',skillType:'paindraw',skillVal:1},
+    {id:'lusu',name:'鲁肃',faction:'吴',cost:3,atk:2,hp:5,skill:'好施:双方各抽1牌',emoji:'🤝',color:'#e65100',skillType:'share',skillVal:1},
+    {id:'lvbu',name:'吕布',faction:'群',cost:6,atk:8,hp:6,skill:'无双:每次攻击2目标',emoji:'🦁',color:'#6a1b9a',skillType:'multi',skillVal:2},
+    {id:'diaochan',name:'貂蝉',faction:'群',cost:3,atk:2,hp:3,skill:'离间:敌方互相攻击',emoji:'💃',color:'#6a1b9a',skillType:'charm',skillVal:1},
+    {id:'yuanshao',name:'袁绍',faction:'群',cost:5,atk:4,hp:6,skill:'乱箭:对所有敌造成2伤害',emoji:'🏹',color:'#6a1b9a',skillType:'aoe',skillVal:2},
+    {id:'huaxiong',name:'华雄',faction:'群',cost:3,atk:5,hp:4,skill:'酒色:HP越低攻击越高',emoji:'🍷',color:'#6a1b9a',skillType:'berserk',skillVal:1},
+    {id:'jiLing',name:'纪灵',faction:'群',cost:3,atk:4,hp:4,skill:'双刃:攻击两次',emoji:'⚔️',color:'#6a1b9a',skillType:'double',skillVal:1},
+    {id:'shence',name:'策略·火攻',faction:'策',cost:2,atk:0,hp:0,skill:'对目标造成4点伤害',emoji:'🔥',color:'#d32f2f',skillType:'spelldmg',skillVal:4},
+    {id:'shentao',name:'策略·桃园',faction:'策',cost:3,atk:0,hp:0,skill:'恢复所有友方4HP',emoji:'🌸',color:'#c62828',skillType:'aoeheal',skillVal:4},
+    {id:'shenwu',name:'策略·无中',faction:'策',cost:1,atk:0,hp:0,skill:'抽3张牌',emoji:'🎴',color:'#c62828',skillType:'draw',skillVal:3},
+    {id:'shennan',name:'策略·南蛮',faction:'策',cost:4,atk:0,hp:0,skill:'全体敌方受3伤害',emoji:'🐘',color:'#c62828',skillType:'aoe',skillVal:3},
+    {id:'shenwan',name:'策略·万箭',faction:'策',cost:4,atk:0,hp:0,skill:'全体敌方受3伤害',emoji:'🎯',color:'#c62828',skillType:'aoe',skillVal:3},
+    {id:'shenshun',name:'策略·顺手',faction:'策',cost:1,atk:0,hp:0,skill:'抽敌方1张牌',emoji:'👋',color:'#c62828',skillType:'steal',skillVal:1},
+    {id:'shenguo',name:'策略·过河',faction:'策',cost:1,atk:0,hp:0,skill:'弃敌方1张牌',emoji:'🌊',color:'#c62828',skillType:'discard',skillVal:1}
+];
+
+function makeCard(tpl){
+    return{
+        ...tpl,
+        uid:'c'+Math.random().toString(36).slice(2,10),
+        curAtk:tpl.atk,
+        curHp:tpl.hp,
+        maxHp:tpl.hp,
+        canAttack:false,
+        hasAttacked:false,
+        armor:0,
+        stealth:false,
+        buffAtk:0
+    };
+}
+
+let particles=[];
+function spawnParticles(x,y,color,count){
+    count=count||12;
+    for(let i=0;i<count;i++){
+        particles.push({
+            x:x,y:y,
+            vx:(Math.random()-0.5)*8,
+            vy:(Math.random()-0.5)*8-3,
+            life:35+Math.random()*20,
+            maxLife:55,
+            size:2+Math.random()*4,
+            color:color
+        });
+    }
+}
+function updateParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.vy+=0.25;p.vx*=0.98;
+        p.life--;
+        if(p.life<=0) particles.splice(i,1);
+    }
+}
+function drawParticles(ctx){
+    for(const p of particles){
+        ctx.globalAlpha=Math.max(0,p.life/p.maxLife);
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+let floatTexts=[];
+function addFloatText(x,y,text,color){
+    floatTexts.push({x:x,y:y,text:text,color:color||'#fff',life:60,maxLife:60,vy:-1.5});
+}
+function updateFloatTexts(){
+    for(let i=floatTexts.length-1;i>=0;i--){
+        const f=floatTexts[i];
+        f.y+=f.vy;f.life--;
+        if(f.life<=0) floatTexts.splice(i,1);
+    }
+}
+function drawFloatTexts(ctx){
+    for(const f of floatTexts){
+        ctx.globalAlpha=f.life/f.maxLife;
+        ctx.fillStyle=f.color;
+        ctx.strokeStyle='#000';
+        ctx.lineWidth=3;
+        ctx.font='bold 22px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.strokeText(f.text,f.x,f.y);
+        ctx.fillText(f.text,f.x,f.y);
+        ctx.textAlign='left';
+    }
+    ctx.globalAlpha=1;
+}
+
+const G={
+    state:STATE_MENU,
+    level:1,
+    maxLevel:8,
+    playerHp:30,
+    playerMaxHp:30,
+    playerArmor:0,
+    playerEnergy:1,
+    playerMaxEnergy:1,
+    enemyHp:25,
+    enemyMaxHp:25,
+    enemyArmor:0,
+    playerHand:[],
+    playerDeck:[],
+    playerField:[],
+    enemyField:[],
+    selectedCard:null,
+    selectedField:null,
+    targetMode:false,
+    turn:1,
+    isPlayerTurn:true,
+    log:[],
+    animTimer:0,
+    btnRects:{},
+    dragStart:null,
+    dragCurrent:null,
+    hoverCard:null,
+    hoverField:null,
+    highScore:0,
+    score:0,
+    animating:false,
+    animQueue:[],
+    shake:0,
+    flash:0,
+    flashColor:'#fff'
+};
+
+G.highScore=parseInt(Storage.load('sanguo_high','0'));
+
+function shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+        const j=Math.floor(Math.random()*(i+1));
+        [arr[i],arr[j]]=[arr[j],arr[i]];
+    }
+    return arr;
+}
+
+function buildDeck(){
+    const deck=[];
+    const pool=[...CARD_POOL];
+    for(let i=0;i<25;i++){
+        const c=pool[Math.floor(Math.random()*pool.length)];
+        deck.push(makeCard(c));
+    }
+    return shuffle(deck);
+}
+
+function drawCard(n,who){
+    n=n||1;who=who||'p';
+    const deck=who==='p'?G.playerDeck:null;
+    const hand=who==='p'?G.playerHand:null;
+    for(let i=0;i<n;i++){
+        if(deck.length>0 && hand.length<8){
+            const c=deck.pop();
+            hand.push(c);
+            sfxDraw();
+        }
+    }
+}
+
+function roundRect(ctx,x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function factionColor(f){
+    if(f==='蜀')return '#2e7d32';
+    if(f==='魏')return '#1565c0';
+    if(f==='吴')return '#e65100';
+    if(f==='群')return '#6a1b9a';
+    if(f==='策')return '#c62828';
+    return '#555';
+}
+
+function drawCardView(ctx,c,x,y,w,h,selected,faceDown){
+    h=h||100;w=w||70;
+    if(faceDown){
+        const g=ctx.createLinearGradient(x,y,x+w,y+h);
+        g.addColorStop(0,'#5d4037');
+        g.addColorStop(1,'#3e2723');
+        ctx.fillStyle=g;
+        roundRect(ctx,x,y,w,h,6);ctx.fill();
+        ctx.strokeStyle='#ffd700';
+        ctx.lineWidth=2;
+        roundRect(ctx,x,y,w,h,6);ctx.stroke();
+        ctx.fillStyle='#ffd700';
+        ctx.font='bold 20px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText('三',x+w/2,y+h/2+8);
+        ctx.font='10px "Microsoft YaHei"';
+        ctx.fillText('國',x+w/2,y+h/2+22);
+        ctx.textAlign='left';
+        return;
+    }
+    const col=c.color||factionColor(c.faction);
+    const g=ctx.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0,col);
+    g.addColorStop(1,'#222');
+    ctx.fillStyle=g;
+    roundRect(ctx,x,y,w,h,6);ctx.fill();
+    if(selected){
+        ctx.strokeStyle='#ffd700';
+        ctx.lineWidth=3;
+        ctx.shadowColor='#ffd700';
+        ctx.shadowBlur=10;
+    }else{
+        ctx.strokeStyle=G.hoverCard===c.uid?'#fff':'rgba(255,255,255,0.4)';
+        ctx.lineWidth=2;
+    }
+    roundRect(ctx,x,y,w,h,6);ctx.stroke();
+    ctx.shadowBlur=0;
+    if(c.cost>=0){
+        ctx.fillStyle='#2196f3';
+        ctx.beginPath();
+        ctx.arc(x+10,y+11,9,0,Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.font='bold 12px Arial';
+        ctx.textAlign='center';
+        ctx.fillText(c.cost,x+10,y+15);
+        ctx.textAlign='left';
+    }
+    const iconSize=Math.min(28,w*0.4);
+    ctx.font=iconSize+'px Arial';
+    ctx.textAlign='center';
+    ctx.fillText(c.emoji,x+w/2,y+h*0.4);
+    ctx.textAlign='left';
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+(Math.min(10,w*0.14))+'px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(c.name,x+w/2,y+h*0.58);
+    ctx.textAlign='left';
+    ctx.font='8px "Microsoft YaHei"';
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.textAlign='center';
+    const skillText=c.skill.length>10?c.skill.slice(0,10)+'..':c.skill;
+    ctx.fillText(skillText,x+w/2,y+h*0.72);
+    ctx.textAlign='left';
+    if(c.curAtk>0||c.atk>0){
+        const atkY=y+h-12;
+        ctx.fillStyle='#f44336';
+        ctx.beginPath();ctx.arc(x+12,atkY,8,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.font='bold 10px Arial';
+        ctx.textAlign='center';
+        ctx.fillText(c.curAtk||c.atk,x+12,atkY+3);
+        ctx.textAlign='left';
+        ctx.fillStyle=c.curHp<c.maxHp?'#ffeb3b':'#4caf50';
+        ctx.beginPath();ctx.arc(x+w-12,atkY,8,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.font='bold 10px Arial';
+        ctx.textAlign='center';
+        ctx.fillText(c.curHp||c.hp,x+w-12,atkY+3);
+        ctx.textAlign='left';
+    }
+    if(c.armor>0){
+        ctx.fillStyle='#90caf9';
+        ctx.font='bold 10px Arial';
+        ctx.fillText('🛡'+c.armor,x+2,y+h-28);
+    }
+    if(c.stealth){
+        ctx.fillStyle='rgba(200,200,255,0.3)';
+        roundRect(ctx,x,y,w,h,6);ctx.fill();
+        ctx.fillStyle='#fff';
+        ctx.font='10px Arial';
+        ctx.fillText('👻',x+w-16,y+18);
+    }
+    if(!c.canAttack && c.faction!=='策' && !c.hasAttacked){
+        ctx.fillStyle='rgba(0,0,0,0.4)';
+        roundRect(ctx,x,y,w,h,6);ctx.fill();
+    }
+    if(c.hasAttacked){
+        ctx.strokeStyle='rgba(255,100,100,0.6)';
+        ctx.lineWidth=2;
+        ctx.setLineDash([3,3]);
+        roundRect(ctx,x,y,w,h,6);ctx.stroke();
+        ctx.setLineDash([]);
+    }
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color,textColor){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    const c=color||'#c9302c';
+    const grad=ctx.createLinearGradient(x,y,x,y+h);
+    grad.addColorStop(0,c);
+    grad.addColorStop(1,'#000');
+    ctx.fillStyle=grad;
+    ctx.strokeStyle='#ffd700';
+    ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle=textColor||'#fff';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+    ctx.textAlign='left';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+function rectHit(p,r){
+    return p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function cardRectsHand(){
+    const rs=[];
+    const n=G.playerHand.length;
+    const gap=8;
+    const totalW=n*62+(n-1)*gap;
+    let startX=(W-totalW)/2;
+    const y=H-140;
+    for(let i=0;i<n;i++){
+        rs.push({x:startX+i*(62+gap),y:y,w:62,h:100,idx:i,card:G.playerHand[i]});
+    }
+    return rs;
+}
+
+function cardRectsPlayer(){
+    const rs=[];
+    const n=G.playerField.length;
+    if(n===0)return rs;
+    const gap=8;
+    const cardW=Math.min(66,(W-80-gap*(n-1))/n);
+    const totalW=n*cardW+(n-1)*gap;
+    let startX=(W-totalW)/2;
+    const y=H-290;
+    for(let i=0;i<n;i++){
+        rs.push({x:startX+i*(cardW+gap),y:y,w:cardW,h:94,idx:i,card:G.playerField[i]});
+    }
+    return rs;
+}
+
+function cardRectsEnemy(){
+    const rs=[];
+    const n=G.enemyField.length;
+    if(n===0)return rs;
+    const gap=8;
+    const cardW=Math.min(66,(W-80-gap*(n-1))/n);
+    const totalW=n*cardW+(n-1)*gap;
+    let startX=(W-totalW)/2;
+    const y=160;
+    for(let i=0;i<n;i++){
+        rs.push({x:startX+i*(cardW+gap),y:y,w:cardW,h:94,idx:i,card:G.enemyField[i]});
+    }
+    return rs;
+}
+
+function useCard(card){
+    if(!G.isPlayerTurn)return;
+    if(card.cost>G.playerEnergy){
+        addFloatText(W/2,H/2,'能量不足!','#ff6b6b');
+        return false;
+    }
+    G.playerEnergy-=card.cost;
+    G.playerHand=G.playerHand.filter(c=>c.uid!==card.uid);
+    G.score+=card.cost*10;
+    if(card.faction==='策'){
+        executeSpell(card);
+    }else{
+        card.canAttack=false;
+        card.hasAttacked=false;
+        G.playerField.push(card);
+        addFloatText(W/2,H-300,card.name+' 登场!',card.color);
+        sfxSkill();
+        spawnParticles(W/2,H-260,card.color,20);
+        executeBattlecry(card,'player');
+    }
+    checkGameOver();
+    return true;
+}
+
+function executeSpell(card){
+    sfxSkill();
+    spawnParticles(W/2,H/2,card.color,30);
+    switch(card.skillType){
+        case 'spelldmg':
+            if(G.enemyField.length>0){
+                const target=G.enemyField[0];
+                dealDamage(target,card.skillVal,'enemy');
+            }else{
+                dealDamageToHero('enemy',card.skillVal);
+            }
+            break;
+        case 'aoeheal':
+            G.playerField.forEach(c=>{
+                const heal=Math.min(card.skillVal,c.maxHp-c.curHp);
+                c.curHp+=heal;
+                addFloatText(W/2+(G.playerField.indexOf(c)-G.playerField.length/2)*70,H-243,'+'+heal,'#4caf50');
+            });
+            const heroHeal=Math.min(card.skillVal,G.playerMaxHp-G.playerHp);
+            G.playerHp+=heroHeal;
+            if(heroHeal>0)addFloatText(W/2,H-340,'+'+heroHeal,'#4caf50');
+            break;
+        case 'draw':
+            drawCard(card.skillVal,'p');
+            break;
+        case 'aoe':
+            G.enemyField.forEach(c=>dealDamage(c,card.skillVal,'enemy'));
+            dealDamageToHero('enemy',card.skillVal);
+            break;
+        case 'discard':
+            break;
+        case 'steal':
+            drawCard(card.skillVal,'p');
+            break;
+    }
+    addFloatText(W/2,H/2-50,card.name,card.color);
+    G.shake=8;
+}
+
+function executeBattlecry(card,who){
+    const selfSide=who==='player'?G.playerField:G.enemyField;
+    const oppSide=who==='player'?G.enemyField:G.playerField;
+    switch(card.skillType){
+        case 'damage':
+            if(oppSide.length>0){
+                const t=oppSide[Math.floor(Math.random()*oppSide.length)];
+                dealDamage(t,card.skillVal,who==='player'?'enemy':'player');
+            }else{
+                dealDamageToHero(who==='player'?'enemy':'player',card.skillVal);
+            }
+            break;
+        case 'armor':
+            card.armor=card.skillVal;
+            break;
+        case 'draw':
+            if(who==='player')drawCard(card.skillVal,'p');
+            break;
+        case 'heal':
+            if(who==='player'){
+                const h=Math.min(card.skillVal,G.playerMaxHp-G.playerHp);
+                G.playerHp+=h;
+                addFloatText(W/2,H-340,'+'+h,'#4caf50');
+            }else{
+                const h=Math.min(card.skillVal,G.enemyMaxHp-G.enemyHp);
+                G.enemyHp+=h;
+            }
+            break;
+        case 'charge':
+            card.canAttack=true;
+            break;
+        case 'stealth':
+            card.stealth=true;
+            break;
+    }
+}
+
+function dealDamage(target,amount,side){
+    let dmg=amount;
+    if(target.armor>0){
+        const absorb=Math.min(target.armor,dmg);
+        target.armor-=absorb;
+        dmg-=absorb;
+        sfxDefend();
+    }
+    target.curHp-=dmg;
+    const rects=side==='player'?cardRectsPlayer():cardRectsEnemy();
+    const r=rects.find(rr=>rr.card.uid===target.uid);
+    const tx=r?r.x+r.w/2:W/2;
+    const ty=r?r.y+r.h/2:(side==='player'?H-290:160);
+    addFloatText(tx,ty,'-'+dmg,'#ff6b6b');
+    sfxAttack();
+    spawnParticles(tx,ty,'#ff6b6b',10);
+    G.shake=Math.max(G.shake,5);
+    if(target.curHp<=0){
+        killCard(target,side);
+    }
+}
+
+function dealDamageToHero(side,amount){
+    let dmg=amount;
+    if(side==='player'){
+        if(G.playerArmor>0){
+            const a=Math.min(G.playerArmor,dmg);
+            G.playerArmor-=a;dmg-=a;sfxDefend();
+        }
+        G.playerHp-=dmg;
+        addFloatText(W/2,H-360,'-'+dmg,'#ff6b6b');
+    }else{
+        if(G.enemyArmor>0){
+            const a=Math.min(G.enemyArmor,dmg);
+            G.enemyArmor-=a;dmg-=a;sfxDefend();
+        }
+        G.enemyHp-=dmg;
+        addFloatText(W/2,100,'-'+dmg,'#ff6b6b');
+    }
+    sfxAttack();
+    G.shake=8;
+    G.flash=10;G.flashColor='#ff3333';
+}
+
+function killCard(card,side){
+    sfxDeath();
+    const rects=side==='player'?cardRectsPlayer():cardRectsEnemy();
+    const r=rects.find(rr=>rr.card.uid===card.uid);
+    if(r)spawnParticles(r.x+r.w/2,r.y+r.h/2,'#333',20);
+    if(side==='player'){
+        G.playerField=G.playerField.filter(c=>c.uid!==card.uid);
+    }else{
+        G.enemyField=G.enemyField.filter(c=>c.uid!==card.uid);
+        G.score+=20;
+    }
+    if(card.skillType==='deathdraw' && side==='player'){
+        drawCard(card.skillVal,'p');
+    }
+}
+
+function attackerCanHitTarget(attacker,target,attackerSide){
+    if(target.stealth && attackerSide==='enemy'){
+        const others=G.playerField.filter(c=>c.uid!==target.uid && !c.stealth);
+        if(others.length>0)return false;
+    }
+    if(target.stealth && attackerSide==='player'){
+        const others=G.enemyField.filter(c=>c.uid!==target.uid && !c.stealth);
+        if(others.length>0)return false;
+    }
+    return true;
+}
+
+function performAttack(attacker,target,attackerSide){
+    if(!attackerCanHitTarget(attacker,target,attackerSide)){
+        addFloatText(W/2,H/2,'需先清除嘲讽!','#ffc107');
+        return false;
+    }
+    if(attacker.stealth)attacker.stealth=false;
+    let atkVal=attacker.curAtk+(attacker.buffAtk||0);
+    if(attacker.skillType==='atkboost')atkVal+=attacker.skillVal;
+    if(attacker.skillType==='berserk'){
+        const ratio=1-attacker.curHp/attacker.maxHp;
+        atkVal+=Math.floor(ratio*3);
+    }
+    const targetSide=attackerSide==='player'?'enemy':'player';
+    const pierce=attacker.skillType==='pierce';
+    if(!pierce){
+        dealDamage(target,atkVal,targetSide);
+    }else{
+        target.curHp-=atkVal;
+        const rects=targetSide==='player'?cardRectsPlayer():cardRectsEnemy();
+        const r=rects.find(rr=>rr.card.uid===target.uid);
+        const tx=r?r.x+r.w/2:W/2;
+        const ty=r?r.y+r.h/2:160;
+        addFloatText(tx,ty,'-'+atkVal+' 穿!','#ff9800');
+        sfxAttack();
+        G.shake=6;
+        if(target.curHp<=0)killCard(target,targetSide);
+    }
+    if(target.curHp>0 && target.faction!=='策'){
+        const counterAtk=target.curAtk+(target.buffAtk||0);
+        if(!attacker.stealth || attackerSide==='enemy'){
+            dealDamage(attacker,counterAtk,attackerSide);
+        }
+    }
+    if(target.skillType==='reflect' && target.curHp>0){
+        dealDamage(attacker,target.skillVal,attackerSide);
+    }
+    attacker.hasAttacked=true;
+    attacker.canAttack=false;
+    return true;
+}
+
+function attackHero(attacker,attackerSide){
+    if(attacker.stealth)attacker.stealth=false;
+    let atkVal=attacker.curAtk+(attacker.buffAtk||0);
+    if(attacker.skillType==='atkboost')atkVal+=attacker.skillVal;
+    dealDamageToHero(attackerSide==='player'?'enemy':'player',atkVal);
+    attacker.hasAttacked=true;
+    attacker.canAttack=false;
+}
+
+function checkGameOver(){
+    if(G.enemyHp<=0){
+        if(G.level>=G.maxLevel){
+            G.state=STATE_OVER;
+            G.score+=500;
+            if(G.score>G.highScore){
+                G.highScore=G.score;
+                Storage.save('sanguo_high',G.highScore);
+            }
+            sfxWin();
+        }else{
+            nextLevel();
+        }
+    }else if(G.playerHp<=0){
+        G.state=STATE_OVER;
+        if(G.score>G.highScore){
+            G.highScore=G.score;
+            Storage.save('sanguo_high',G.highScore);
+        }
+        sfxLose();
+    }
+}
+
+function nextLevel(){
+    G.level++;
+    G.enemyMaxHp=20+G.level*5;
+    G.enemyHp=G.enemyMaxHp;
+    G.enemyArmor=Math.floor(G.level/2);
+    G.playerMaxEnergy=Math.min(10,G.playerMaxEnergy+1);
+    G.playerEnergy=G.playerMaxEnergy;
+    G.playerHp=Math.min(G.playerMaxHp,G.playerHp+8);
+    G.playerField.forEach(c=>{
+        c.canAttack=true;c.hasAttacked=false;
+        if(c.skillType==='buff')c.buffAtk=(c.buffAtk||0)+c.skillVal;
+    });
+    drawCard(2,'p');
+    spawnEnemyField();
+    G.turn=1;G.isPlayerTurn=true;
+    addFloatText(W/2,H/2,'第'+G.level+'关!','#ffd700');
+    sfxWin();
+}
+
+function spawnEnemyField(){
+    G.enemyField=[];
+    const n=Math.min(5,1+Math.floor(G.level/1.5));
+    const pool=CARD_POOL.filter(c=>c.faction!=='策');
+    for(let i=0;i<n;i++){
+        const tpl=pool[Math.floor(Math.random()*pool.length)];
+        const c=makeCard(tpl);
+        c.curAtk+=Math.floor(G.level/3);
+        c.curHp+=Math.floor(G.level/2);
+        c.maxHp=c.curHp;
+        c.canAttack=false;
+        G.enemyField.push(c);
+    }
+}
+
+function startPlayerTurn(){
+    G.isPlayerTurn=true;
+    G.turn++;
+    G.playerMaxEnergy=Math.min(10,G.playerMaxEnergy+1);
+    G.playerEnergy=G.playerMaxEnergy;
+    G.playerField.forEach(c=>{
+        c.canAttack=true;c.hasAttacked=false;
+        if(c.skillType==='buff')c.buffAtk=(c.buffAtk||0)+c.skillVal;
+    });
+    drawCard(1,'p');
+}
+
+function enemyTurn(){
+    G.isPlayerTurn=false;
+    G.animating=true;
+    setTimeout(()=>{
+        const eEnergy=Math.min(10,G.level+2);
+        let ee=eEnergy;
+        const pool=CARD_POOL.filter(c=>c.faction!=='策');
+        let tries=0;
+        while(ee>0 && tries<5 && G.enemyField.length<5){
+            const affordable=pool.filter(c=>c.cost<=ee);
+            if(affordable.length===0)break;
+            const tpl=affordable[Math.floor(Math.random()*affordable.length)];
+            ee-=tpl.cost;
+            const c=makeCard(tpl);
+            c.curAtk+=Math.floor(G.level/3);
+            c.curHp+=Math.floor(G.level/2);
+            c.maxHp=c.curHp;
+            c.canAttack=false;
+            G.enemyField.push(c);
+            executeBattlecry(c,'enemy');
+            tries++;
+        }
+        setTimeout(()=>{
+            enemyAttackPhase();
+        },600);
+    },500);
+}
+
+function enemyAttackPhase(){
+    const attackers=G.enemyField.filter(c=>c.canAttack && !c.hasAttacked);
+    let idx=0;
+    function doOne(){
+        if(idx>=attackers.length){
+            G.enemyField.forEach(c=>{c.canAttack=true;c.hasAttacked=false;});
+            G.animating=false;
+            startPlayerTurn();
+            return;
+        }
+        const atk=attackers[idx++];
+        const validTargets=G.playerField.filter(t=>attackerCanHitTarget(atk,t,'enemy'));
+        if(validTargets.length>0 && Math.random()<0.7){
+            const t=validTargets[Math.floor(Math.random()*validTargets.length)];
+            performAttack(atk,t,'enemy');
+        }else{
+            attackHero(atk,'enemy');
+        }
+        checkGameOver();
+        if(G.state===STATE_PLAYING)setTimeout(doOne,500);
+    }
+    doOne();
+}
+
+function endTurn(){
+    if(!G.isPlayerTurn||G.animating)return;
+    sfxBtn();
+    G.selectedCard=null;G.selectedField=null;G.targetMode=false;
+    enemyTurn();
+}
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.level=1;
+    G.playerHp=G.playerMaxHp=30;
+    G.playerArmor=0;
+    G.playerEnergy=1;G.playerMaxEnergy=1;
+    G.enemyHp=G.enemyMaxHp=25;
+    G.enemyArmor=0;
+    G.playerHand=[];
+    G.playerDeck=buildDeck();
+    G.playerField=[];
+    G.turn=1;G.isPlayerTurn=true;
+    G.score=0;
+    G.selectedCard=null;G.selectedField=null;G.targetMode=false;
+    particles=[];floatTexts=[];
+    drawCard(4,'p');
+    spawnEnemyField();
+    sfxBtn();
+}
+
+function drawHpBar(ctx,x,y,w,hp,maxHp,color,armor,label){
+    const barW=w;
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    roundRect(ctx,x-2,y-2,barW+4,18,4);ctx.fill();
+    const ratio=Math.max(0,hp/maxHp);
+    ctx.fillStyle=color;
+    roundRect(ctx,x,y,barW*ratio,14,3);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=1;
+    roundRect(ctx,x,y,barW,14,3);ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText(label,x+4,y+11);
+    ctx.textAlign='right';
+    let txt=hp+'/'+maxHp;
+    if(armor>0)txt+=' 🛡'+armor;
+    ctx.fillText(txt,x+barW-4,y+11);
+    ctx.textAlign='left';
+}
+
+function drawEnergy(ctx){
+    const barX=W/2-100,barY=H-30,barW=200,barH=18;
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    roundRect(ctx,barX-2,barY-2,barW+4,barH+4,4);ctx.fill();
+    for(let i=0;i<G.playerMaxEnergy;i++){
+        const sx=barX+i*(barW/G.playerMaxEnergy)+1;
+        const sw=(barW/G.playerMaxEnergy)-2;
+        ctx.fillStyle=i<G.playerEnergy?'#2196f3':'#37474f';
+        roundRect(ctx,sx,barY,sw,barH,3);ctx.fill();
+    }
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=1;
+    roundRect(ctx,barX,barY,barW,barH,3);ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 11px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('能量 '+G.playerEnergy+'/'+G.playerMaxEnergy,W/2,barY+13);
+    ctx.textAlign='left';
+}
+
+function drawBoard(ctx){
+    const bgGrad=ctx.createLinearGradient(0,0,0,H);
+    bgGrad.addColorStop(0,'#3e1f0a');
+    bgGrad.addColorStop(0.5,'#1a0a00');
+    bgGrad.addColorStop(1,'#3e1f0a');
+    ctx.fillStyle=bgGrad;
+    ctx.fillRect(0,0,W,H);
+    for(let i=0;i<8;i++){
+        ctx.strokeStyle='rgba(255,215,0,0.04)';
+        ctx.lineWidth=1;
+        ctx.beginPath();
+        ctx.moveTo(0,80+i*90);ctx.lineTo(W,80+i*90);
+        ctx.stroke();
+    }
+    ctx.strokeStyle='rgba(255,215,0,0.15)';
+    ctx.setLineDash([8,8]);
+    ctx.lineWidth=2;
+    ctx.strokeRect(30,145,W-60,120);
+    ctx.strokeRect(30,H-310,W-60,120);
+    ctx.setLineDash([]);
+    ctx.fillStyle='rgba(255,215,0,0.06)';
+    ctx.fillRect(30,145,W-60,120);
+    ctx.fillStyle='rgba(50,200,100,0.06)';
+    ctx.fillRect(30,H-310,W-60,120);
+}
+
+function drawHeroInfo(ctx){
+    drawHpBar(ctx,30,25,W/2-45,G.enemyHp,G.enemyMaxHp,'#e53935',G.enemyArmor,'敌方 Lv'+G.level);
+    drawHpBar(ctx,W/2+15,25,W/2-45,G.playerHp,G.playerMaxHp,'#43a047',G.playerArmor,'主公');
+    const handRects=cardRectsHand();
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('牌库:'+G.playerDeck.length,15,H-15);
+    ctx.textAlign='right';
+    ctx.fillText('分数:'+G.score,W-15,H-15);
+    ctx.textAlign='left';
+    ctx.fillStyle=G.isPlayerTurn?'#4caf50':'#f44336';
+    ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(G.isPlayerTurn?'【你的回合】':'【敌方回合】',W/2,140);
+    ctx.textAlign='left';
+}
+
+function drawAllCards(ctx){
+    G.enemyField.forEach(c=>{
+        const rects=cardRectsEnemy();
+        const r=rects.find(rr=>rr.card.uid===c.uid);
+        if(r)drawCardView(ctx,c,r.x,r.y,r.w,r.h,false,false);
+    });
+    G.playerField.forEach(c=>{
+        const rects=cardRectsPlayer();
+        const r=rects.find(rr=>rr.card.uid===c.uid);
+        if(r)drawCardView(ctx,c,r.x,r.y,r.w,r.h,G.selectedField===c.uid,false);
+    });
+    G.playerHand.forEach(c=>{
+        const rects=cardRectsHand();
+        const r=rects.find(rr=>rr.card.uid===c.uid);
+        if(r){
+            const lift=(G.selectedCard===c.uid||G.hoverCard===c.uid)?-15:0;
+            drawCardView(ctx,c,r.x,r.y+lift,r.w,r.h,G.selectedCard===c.uid,false);
+        }
+    });
+}
+
+function drawTurnButtons(ctx){
+    if(G.isPlayerTurn && !G.animating){
+        drawBtn(ctx,W-130,H-370,110,40,'结束回合','endturn','#c9302c');
+    }
+    drawBtn(ctx,15,H-370,110,32,'投降','surrender','#555');
+}
+
+function drawTargetHints(ctx){
+    if(G.targetMode && G.selectedField){
+        ctx.fillStyle='rgba(255,0,0,0.15)';
+        const ers=cardRectsEnemy();
+        ers.forEach(r=>{
+            if(attackerCanHitTarget(G.playerField.find(c=>c.uid===G.selectedField),r.card,'player')){
+                roundRect(ctx,r.x-4,r.y-4,r.w+8,r.h+8,10);ctx.fill();
+            }
+        });
+        ctx.fillStyle='rgba(255,0,0,0.1)';
+        roundRect(ctx,W/2-60,15,120,40,8);ctx.fill();
+        ctx.strokeStyle='#ff6b6b';ctx.lineWidth=2;
+        roundRect(ctx,W/2-60,15,120,40,8);ctx.stroke();
+        ctx.fillStyle='#ff6b6b';
+        ctx.font='bold 13px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText('点击攻击敌将',W/2,42);
+        ctx.textAlign='left';
+    }
+    if(G.selectedCard){
+        const c=G.playerHand.find(x=>x.uid===G.selectedCard);
+        if(c && c.cost<=G.playerEnergy){
+            ctx.fillStyle='rgba(0,255,100,0.1)';
+            roundRect(ctx,W/2-60,H-305,120,30,8);ctx.fill();
+            ctx.fillStyle='#4caf50';
+            ctx.font='bold 12px "Microsoft YaHei"';
+            ctx.textAlign='center';
+            if(c.faction==='策'){
+                ctx.fillText('点击使用策略',W/2,H-285);
+            }else{
+                ctx.fillText('点击召唤上场',W/2,H-285);
+            }
+            ctx.textAlign='left';
+        }
+    }
+}
+
+function drawMenu(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#4a148c');
+    g.addColorStop(0.5,'#880e4f');
+    g.addColorStop(1,'#3e1f0a');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+    for(let i=0;i<50;i++){
+        ctx.fillStyle=`rgba(255,215,0,${Math.random()*0.3})`;
+        const x=(i*97)%W,y=(i*53)%H;
+        ctx.fillRect(x,y,2,2);
+    }
+    ctx.save();
+    ctx.translate(W/2,180);
+    const t=Date.now()/1000;
+    ctx.rotate(Math.sin(t)*0.05);
+    ctx.fillStyle='#c9302c';
+    roundRect(ctx,-140,-60,280,120,20);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=4;
+    roundRect(ctx,-140,-60,280,120,20);ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 52px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('三国卡牌',W/2,170);
+    ctx.fillText('对战',W/2,225);
+    ctx.textAlign='left';
+    const factions=[['蜀','#2e7d32','⚔️'],['魏','#1565c0','🏰'],['吴','#e65100','🌊'],['群','#6a1b9a','🦁']];
+    for(let i=0;i<4;i++){
+        const fx=40+i*100,fy=320;
+        ctx.fillStyle=factions[i][1];
+        roundRect(ctx,fx,fy,90,90,15);ctx.fill();
+        ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
+        roundRect(ctx,fx,fy,90,90,15);ctx.stroke();
+        ctx.font='36px Arial';ctx.textAlign='center';
+        ctx.fillText(factions[i][2],fx+45,fy+48);
+        ctx.fillStyle='#fff';
+        ctx.font='bold 18px "Microsoft YaHei"';
+        ctx.fillText(factions[i][0]+'国',fx+45,fy+80);
+        ctx.textAlign='left';
+    }
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('历史最高分: '+G.highScore,W/2,460);
+    ctx.textAlign='left';
+    drawBtn(ctx,W/2-110,500,220,60,'⚔️ 征战天下','start','#c9302c');
+    const tips=[
+        '🃏 拖动或点击手牌召唤武将',
+        '⚔️ 点击我方武将后再点敌方攻击',
+        '🎯 消灭敌将后可直取敌酋',
+        '🛡️ 每回合能量+1,上限10点',
+        '🏆 通过8关获得最终胜利!'
+    ];
+    ctx.fillStyle='rgba(255,255,255,0.75)';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    for(let i=0;i<tips.length;i++){
+        ctx.fillText(tips[i],W/2,590+i*24);
+    }
+    ctx.textAlign='left';
+}
+
+function drawGame(ctx){
+    drawBoard(ctx);
+    drawHeroInfo(ctx);
+    drawAllCards(ctx);
+    drawTurnButtons(ctx);
+    drawTargetHints(ctx);
+    drawEnergy(ctx);
+    drawParticles(ctx);
+    drawFloatTexts(ctx);
+}
+
+function drawGameOver(ctx){
+    const win=G.playerHp>0;
+    const g=ctx.createLinearGradient(0,0,0,H);
+    if(win){
+        g.addColorStop(0,'#1b5e20');g.addColorStop(1,'#0a2a0a');
+    }else{
+        g.addColorStop(0,'#b71c1c');g.addColorStop(1,'#2a0a0a');
+    }
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=win?'#ffd700':'#ff6b6b';
+    ctx.font='bold 64px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(win?'🏆 统一天下!':'💀 败走麦城',W/2,200);
+    ctx.textAlign='left';
+    ctx.fillStyle='#fff';
+    ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('通关关卡: '+Math.min(G.level,G.maxLevel)+'/'+G.maxLevel,W/2,290);
+    ctx.fillText('最终得分: '+G.score,W/2,325);
+    if(G.score>=G.highScore){
+        ctx.fillStyle='#ffd700';
+        ctx.fillText('🎉 新纪录! 🎉',W/2,370);
+    }else{
+        ctx.fillText('历史最高: '+G.highScore,W/2,370);
+    }
+    ctx.textAlign='left';
+    drawBtn(ctx,W/2-90,430,180,55,'⚔️ 再战','restart','#c9302c');
+    drawBtn(ctx,W/2-70,505,140,45,'返回','menu','#555');
+    ctx.fillStyle='rgba(255,255,255,0.55)';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('策略+武将,智取天下!',W/2,590);
+    ctx.textAlign='left';
+}
+
+function update(){
+    updateParticles();
+    updateFloatTexts();
+    if(G.shake>0)G.shake-=0.5;
+    if(G.flash>0)G.flash--;
+    if(G.state!==STATE_PLAYING)return;
+}
+
+function draw(){
+    ctx.save();
+    if(G.shake>0){
+        ctx.translate((Math.random()-0.5)*G.shake,(Math.random()-0.5)*G.shake);
+    }
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+        case STATE_PAUSE: drawGame(ctx); break;
+    }
+    if(G.flash>0){
+        ctx.globalAlpha=G.flash/20;
+        ctx.fillStyle=G.flashColor;
+        ctx.fillRect(0,0,W,H);
+        ctx.globalAlpha=1;
+    }
+    ctx.restore();
+}
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){startGame();return}
+    }else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;return}
+    }else if(G.state===STATE_PLAYING){
+        if(hitBtn(p,'endturn')){endTurn();return}
+        if(hitBtn(p,'surrender')){G.playerHp=0;checkGameOver();return}
+        if(G.targetMode && G.selectedField){
+            if(p.y>15 && p.y<65){
+                const attacker=G.playerField.find(c=>c.uid===G.selectedField);
+                if(attacker)attackHero(attacker,'player');
+                G.selectedField=null;G.targetMode=false;
+                checkGameOver();
+                return;
+            }
+            const ers=cardRectsEnemy();
+            for(const r of ers){
+                if(rectHit(p,r)){
+                    const attacker=G.playerField.find(c=>c.uid===G.selectedField);
+                    if(attacker)performAttack(attacker,r.card,'player');
+                    G.selectedField=null;G.targetMode=false;
+                    checkGameOver();
+                    return;
+                }
+            }
+            G.selectedField=null;G.targetMode=false;
+            return;
+        }
+        const hrs=cardRectsHand();
+        for(const r of hrs){
+            if(rectHit(p,r)){
+                if(G.selectedCard===r.card.uid){
+                    useCard(r.card);
+                    G.selectedCard=null;
+                }else{
+                    G.selectedCard=r.card.uid;
+                    G.selectedField=null;G.targetMode=false;
+                    sfxBtn();
+                }
+                return;
+            }
+        }
+        const prs=cardRectsPlayer();
+        for(const r of prs){
+            if(rectHit(p,r)){
+                if(r.card.canAttack && !r.card.hasAttacked && G.isPlayerTurn && !G.animating){
+                    G.selectedField=r.card.uid;
+                    G.targetMode=true;
+                    G.selectedCard=null;
+                    sfxBtn();
+                }
+                return;
+            }
+        }
+        if(G.selectedCard){
+            const c=G.playerHand.find(x=>x.uid===G.selectedCard);
+            if(c){
+                if(p.y>H-350 && p.y<H-160){
+                    useCard(c);
+                    G.selectedCard=null;
+                    return;
+                }
+            }
+        }
+        G.selectedCard=null;G.selectedField=null;G.targetMode=false;
+    }
+}
+
+function handlePointerMove(e){
+    const p=getPos(e);
+    G.hoverCard=null;G.hoverField=null;
+    if(G.state!==STATE_PLAYING)return;
+    const hrs=cardRectsHand();
+    for(const r of hrs){if(rectHit(p,r)){G.hoverCard=r.card.uid;return}}
+    const prs=cardRectsPlayer();
+    for(const r of prs){if(rectHit(p,r)){G.hoverField=r.card.uid;return}}
+}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault()},{passive:false});
+
+function gameLoop(){
+    requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+gameLoop();
+
+})();
+</script>
+
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

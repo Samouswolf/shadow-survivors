@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>英雄卡牌征战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#001a1a;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#00796b;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+<canvas id="c"></canvas>
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+const W=480,H=800;
+let audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playTone(freq,dur,type,vol){if(!audioCtx)return;try{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type||'square';o.frequency.value=freq;g.gain.value=vol||0.15;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);}catch(e){}}
+function sfxSwing(){playTone(500,0.04,'square',0.15);setTimeout(()=>playTone(200,0.08,'sawtooth',0.14),40);}
+function sfxGold(){playTone(880,0.06,'sine',0.15);setTimeout(()=>playTone(1100,0.1,'sine',0.14),70);}
+function sfxLevel(){for(let i=0;i<4;i++)setTimeout(()=>playTone(400+i*150,0.12,'sine',0.15),i*90);}
+function sfxHit(){playTone(160,0.12,'sawtooth',0.2);}
+function sfxWin(){for(let i=0;i<5;i++)setTimeout(()=>playTone(500+i*100,0.16,'sine',0.2),i*100);}
+function sfxLose(){for(let i=0;i<5;i++)setTimeout(()=>playTone(300-i*50,0.22,'sawtooth',0.18),i*130);}
+function sfxBtn(){playTone(650,0.05,'sine',0.1);}
+function sfxItem(){playTone(700,0.06,'triangle',0.12);setTimeout(()=>playTone(900,0.08,'triangle',0.12),60);}
+const canvas=document.getElementById('c');const ctx=canvas.getContext('2d');let scale=1;
+function resize(){const r=W/H;let cw=window.innerWidth,ch=window.innerHeight;if(cw/ch>r){ch=cw/r;}else{cw=ch*r;}canvas.width=cw;canvas.height=ch;scale=cw/W;ctx.setTransform(scale,0,0,scale,0,0);}
+window.addEventListener('resize',resize);resize();
+const CLASSES=[
+    {id:'warrior',name:'战士',emoji:'⚔️',color:'#c62828',hp:60,atk:5,def:3,skill:'狂暴:血量越低攻击越高'},
+    {id:'mage',name:'法师',emoji:'🔮',color:'#1565c0',hp:40,atk:8,def:1,skill:'法术:30%几率双倍伤害'},
+    {id:'rogue',name:'盗贼',emoji:'🗡️',color:'#6a1b9a',hp:45,atk:7,def:2,skill:'连击:25%攻击两次'},
+    {id:'priest',name:'牧师',emoji:'✨',color:'#f9a825',hp:55,atk:4,def:4,skill:'治疗:每回合回3HP'},
+    {id:'hunter',name:'猎人',emoji:'🏹',color:'#2e7d32',hp:50,atk:6,def:2,skill:'精准:暴击率+15%'},
+    {id:'knight',name:'骑士',emoji:'🛡️',color:'#37474f',hp:65,atk:4,def:6,skill:'守护:减伤20%'},
+];
+const HERO_POOL=[
+    {name:'亚瑟王',cls:'knight',rar:'SSR',skill:'圣剑:30%+5伤',bonus:{atk:3,hp:10}},
+    {name:'梅林',cls:'mage',rar:'SSR',skill:'先知:每回合抽1牌',bonus:{atk:2,hp:5}},
+    {name:'罗宾汉',cls:'hunter',rar:'SR',skill:'快射:先手攻击',bonus:{atk:4}},
+    {name:'兰斯洛特',cls:'warrior',rar:'SR',skill:'忠诚:30%格挡',bonus:{def:2,hp:5}},
+    {name:'薇薇安',cls:'priest',rar:'SR',skill:'圣泉:回5HP',bonus:{def:1,hp:8}},
+    {name:'黑衣剑士',cls:'rogue',rar:'SR',skill:'暗影:暗杀+3伤',bonus:{atk:3}},
+    {name:'圆桌骑士',cls:'knight',rar:'R',skill:'荣誉:+2防御',bonus:{def:2}},
+    {name:'火焰法师',cls:'mage',rar:'R',skill:'火球:+3法伤',bonus:{atk:2}},
+    {name:'精灵弓手',cls:'hunter',rar:'R',skill:'鹰眼:命中+10%',bonus:{atk:1}},
+    {name:'狂战士',cls:'warrior',rar:'R',skill:'暴怒:+2攻击',bonus:{atk:2,hp:-2}},
+    {name:'圣殿骑士',cls:'priest',rar:'R',skill:'祝福:每回合+1',bonus:{def:1,hp:3}},
+    {name:'刺客',cls:'rogue',rar:'R',skill:'毒刃:持续伤害',bonus:{atk:2}},
+    {name:'新兵',cls:'warrior',rar:'N',skill:'无',bonus:{}},
+    {name:'学徒',cls:'mage',rar:'N',skill:'无',bonus:{}},
+    {name:'民兵',cls:'hunter',rar:'N',skill:'无',bonus:{}},
+];
+const ENEMY_NAMES=['哥布林','兽人','骷髅兵','巨魔','黑暗骑士','巫妖','火龙','恶魔领主','暗影刺客','冰霜巨人','毒蜘蛛','石像鬼','死灵法师','炎魔','远古龙'];
+const EQUIPMENT=[
+    {name:'铁剑',slot:'weapon',emoji:'🗡️',rar:'N',bonus:{atk:2},cost:50},
+    {name:'钢剑',slot:'weapon',emoji:'⚔️',rar:'R',bonus:{atk:5},cost:150},
+    {name:'火焰剑',slot:'weapon',emoji:'🔥',rar:'SR',bonus:{atk:8,hp:-3},cost:400},
+    {name:'圣剑',slot:'weapon',emoji:'✨',rar:'SSR',bonus:{atk:12},cost:1000},
+    {name:'皮甲',slot:'armor',emoji:'🥋',rar:'N',bonus:{def:2},cost:50},
+    {name:'锁子甲',slot:'armor',emoji:'🛡️',rar:'R',bonus:{def:5},cost:150},
+    {name:'板甲',slot:'armor',emoji:'🏛️',rar:'SR',bonus:{def:9,atk:-1},cost:400},
+    {name:'龙鳞甲',slot:'armor',emoji:'🐲',rar:'SSR',bonus:{def:12,hp:10},cost:1000},
+    {name:'生命药水',slot:'potion',emoji:'❤️',rar:'N',bonus:{heal:15},cost:30},
+    {name:'高级药水',slot:'potion',emoji:'💖',rar:'R',bonus:{heal:35},cost:80},
+    {name:'力量药剂',slot:'potion',emoji:'💪',rar:'R',bonus:{buffAtk:3,buffTurn:3},cost:100},
+    {name:'复活石',slot:'special',emoji:'💎',rar:'SSR',bonus:{revive:1},cost:800},
+    {name:'幸运币',slot:'special',emoji:'🪙',rar:'SR',bonus:{crit:15},cost:300},
+    {name:'护符',slot:'special',emoji:'🔱',rar:'R',bonus:{def:2,hp:5},cost:180},
+];
+const SKILL_CARDS=[
+    {name:'重击',emoji:'💥',cost:1,effect:'crit',val:50,rar:'N',desc:'下次攻击50%暴击'},
+    {name:'防御姿态',emoji:'🛡️',cost:1,effect:'block',val:10,rar:'N',desc:'减伤10点'},
+    {name:'治疗术',emoji:'💚',cost:1,effect:'heal',val:10,rar:'N',desc:'回10HP'},
+    {name:'猛击',emoji:'⚡',cost:2,effect:'dmg',val:8,rar:'R',desc:'造成8额外伤害'},
+    {name:'战吼',emoji:'📢',cost:2,effect:'buff',val:3,rar:'R',desc:'攻击+3持续3回合'},
+    {name:'闪避',emoji:'💨',cost:1,effect:'dodge',val:60,rar:'R',desc:'60%闪避下次攻击'},
+    {name:'毒刃',emoji:'☠️',cost:2,effect:'dot',val:4,rar:'R',desc:'4回合每回合-4HP'},
+    {name:'嗜血',emoji:'🩸',cost:2,effect:'steal',val:10,rar:'SR',desc:'造成伤害并回血'},
+    {name:'圣盾',emoji:'🛡️',cost:3,effect:'shield',val:20,rar:'SR',desc:'获得20点护盾'},
+    {name:'狂暴',emoji:'🔥',cost:3,effect:'rage',val:8,rar:'SR',desc:'本回合攻击+8防御-4'},
+    {name:'终极斩',emoji:'🗡️',cost:4,effect:'nuke',val:25,rar:'SSR',desc:'造成25真实伤害'},
+    {name:'时间停止',emoji:'⏰',cost:5,effect:'skip',val:1,rar:'SSR',desc:'敌人跳过1回合'},
+];
+const G={
+    state:STATE_MENU,stage:1,maxStage:10,wave:0,maxWave:3,
+    gold:0,score:0,highScore:0,
+    hero:null,heroClass:null,heroMaxHp:0,heroHp:0,heroAtk:0,heroDef:0,
+    enemyMaxHp:0,enemyHp:0,enemyAtk:0,enemyDef:0,enemyName:'',enemyEmoji:'👾',enemyPoison:0,
+    energy:3,maxEnergy:3,
+    hand:[],deck:[],discard:[],
+    equipment:{weapon:null,armor:null,special:null},
+    inventory:[],
+    selectedCard:null,
+    buffAtk:0,buffAtkTurn:0,shield:0,dodgeNext:0,rage:0,rageTurn:0,
+    enemySkip:0,critNext:0,blockNext:0,playerDot:0,
+    log:[],btnRects:{},hoverCard:null,
+    animating:false,shake:0,flash:0,flashColor:'',
+    playerTurn:true,turn:1,inShop:false,shopItems:[]
+};
+G.highScore=parseInt(Storage.load('hero_high','0'));
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+function makeCard(tpl){return{...tpl,uid:'s'+Math.random().toString(36).slice(2,9)};}
+function buildDeck(){
+    const d=[];
+    for(let i=0;i<4;i++)d.push(makeCard(SKILL_CARDS[0]));
+    for(let i=0;i<3;i++)d.push(makeCard(SKILL_CARDS[1]));
+    for(let i=0;i<3;i++)d.push(makeCard(SKILL_CARDS[2]));
+    for(let i=0;i<2;i++)d.push(makeCard(SKILL_CARDS[3]));
+    for(let i=0;i<2;i++)d.push(makeCard(SKILL_CARDS[4]));
+    for(let i=0;i<2;i++)d.push(makeCard(SKILL_CARDS[5]));
+    for(let i=0;i<1;i++)d.push(makeCard(SKILL_CARDS[6]));
+    return shuffle(d);
+}
+function addCardToDeck(card){G.deck.push(makeCard(card));shuffle(G.deck);}
+function drawCards(n){
+    for(let i=0;i<n;i++){
+        if(G.hand.length>=8)break;
+        if(G.deck.length===0){G.deck=shuffle([...G.discard]);G.discard=[];}
+        if(G.deck.length>0)G.hand.push(G.deck.pop());
+    }
+}
+function discardHand(){G.discard.push(...G.hand);G.hand=[];}
+let particles=[];
+function spawnParticles(x,y,color,count){count=count||12;for(let i=0;i<count;i++)particles.push({x,y,vx:(Math.random()-0.5)*8,vy:(Math.random()-0.5)*8-3,life:35+Math.random()*20,maxLife:55,size:2+Math.random()*4,color});}
+function updateParticles(){for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.25;p.vx*=0.98;p.life--;if(p.life<=0)particles.splice(i,1);}}
+function drawParticles(ctx){for(const p of particles){ctx.globalAlpha=Math.max(0,p.life/p.maxLife);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
+let floats=[];
+function addFloat(x,y,t,c){floats.push({x,y,text:t,color:c||'#fff',life:60,maxLife:60,vy:-1.5});}
+function updateFloats(){for(let i=floats.length-1;i>=0;i--){const f=floats[i];f.y+=f.vy;f.vy*=0.96;f.life--;if(f.life<=0)floats.splice(i,1);}}
+function drawFloats(ctx){for(const f of floats){ctx.globalAlpha=f.life/f.maxLife;ctx.fillStyle=f.color;ctx.strokeStyle='#000';ctx.lineWidth=3;ctx.font='bold 22px "Microsoft YaHei"';ctx.textAlign='center';ctx.strokeText(f.text,f.x,f.y);ctx.fillText(f.text,f.x,f.y);ctx.textAlign='left';}ctx.globalAlpha=1;}
+function roundRect(ctx,x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+function totalAtk(){
+    let a=G.heroAtk;
+    if(G.equipment.weapon)a+=G.equipment.weapon.bonus.atk||0;
+    if(G.equipment.special&&G.equipment.special.bonus.atk)a+=G.equipment.special.bonus.atk;
+    if(G.buffAtkTurn>0)a+=G.buffAtk;
+    if(G.rageTurn>0)a+=G.rage;
+    if(G.heroClass){
+        const ratio=1-G.heroHp/G.heroMaxHp;
+        if(G.heroClass.id==='warrior')a+=Math.floor(ratio*8);
+    }
+    return Math.max(1,a);
+}
+function totalDef(){
+    let d=G.heroDef;
+    if(G.equipment.armor)d+=G.equipment.armor.bonus.def||0;
+    if(G.equipment.special&&G.equipment.special.bonus.def)d+=G.equipment.special.bonus.def;
+    if(G.rageTurn>0)d-=4;
+    if(G.heroClass&&G.heroClass.id==='knight')d=Math.ceil(d*1.2);
+    return Math.max(0,d);
+}
+function totalCrit(){
+    let c=5;
+    if(G.heroClass&&G.heroClass.id==='hunter')c+=15;
+    if(G.equipment.special&&G.equipment.special.bonus.crit)c+=G.equipment.special.bonus.crit;
+    return c;
+}
+function drawCardView(ctx,c,x,y,w,h,selected){
+    h=h||94;w=w||60;
+    const rcol=c.rar==='SSR'?'#ffd700':c.rar==='SR'?'#a855f7':c.rar==='R'?'#3b82f6':'#9ca3af';
+    const g=ctx.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0,rcol);g.addColorStop(0.4,'#16213e');g.addColorStop(1,'#001122');
+    ctx.fillStyle=g;roundRect(ctx,x,y,w,h,6);ctx.fill();
+    if(selected||G.hoverCard===c.uid){ctx.strokeStyle='#ffd700';ctx.lineWidth=3;ctx.shadowBlur=12;ctx.shadowColor='#ffd700';}
+    else{ctx.strokeStyle=rcol;ctx.lineWidth=2;}
+    roundRect(ctx,x,y,w,h,6);ctx.stroke();ctx.shadowBlur=0;
+    const cost=c.cost||0;
+    ctx.fillStyle='#1976d2';ctx.beginPath();ctx.arc(x+10,y+11,8,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText(cost,x+10,y+15);ctx.textAlign='left';
+    const es=Math.min(24,w*0.4);ctx.font=es+'px Arial';ctx.textAlign='center';
+    ctx.fillText(c.emoji,x+w/2,y+h*0.38);ctx.textAlign='left';
+    ctx.fillStyle='#fff';ctx.font='bold '+Math.min(9,w*0.14)+'px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.fillText(c.name.length>4?c.name.slice(0,4):c.name,x+w/2,y+h*0.58);
+    ctx.font='8px "Microsoft YaHei"';ctx.fillStyle='rgba(255,255,255,0.85)';
+    const desc=(c.desc||'').length>9?(c.desc||'').slice(0,9)+'..':(c.desc||'');
+    ctx.fillText(desc,x+w/2,y+h*0.72);
+    ctx.fillStyle=rcol;ctx.font='bold 8px Arial';ctx.fillText(c.rar||'N',x+w/2,y+h*0.84);
+    ctx.textAlign='left';
+}
+function drawBtn(ctx,x,y,w,h,text,name,color){
+    G.btnRects[name]={x,y,w,h};
+    const c=color||'#00796b';const grad=ctx.createLinearGradient(x,y,x,y+h);
+    grad.addColorStop(0,c);grad.addColorStop(1,'#000');
+    ctx.fillStyle=grad;ctx.strokeStyle='#ffd700';ctx.lineWidth=2;roundRect(ctx,x,y,w,h,8);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 14px "Microsoft YaHei"';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);ctx.textBaseline='alphabetic';ctx.textAlign='left';
+}
+function hitBtn(p,name){const r=G.btnRects[name];return r&&p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+function getPos(e){const rect=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};}
+function rectHit(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+function cardRectsHand(){
+    const rs=[],n=G.hand.length,gap=5;
+    const tw=n*58+(n-1)*gap;let sx=(W-tw)/2;const y=H-130;
+    for(let i=0;i<n;i++)rs.push({x:sx+i*(58+gap),y,w:58,h:94,idx:i,card:G.hand[i]});
+    return rs;
+}
+function useSkillCard(card){
+    if(!G.playerTurn||G.animating||G.energy<(card.cost||0)){if(G.energy<(card.cost||0))addFloat(W/2,H/2,'能量不足!','#ff6b6b');return false;}
+    G.energy-=card.cost||0;
+    G.hand=G.hand.filter(c=>c.uid!==card.uid);
+    G.discard.push(card);
+    sfxItem();G.shake=3;
+    switch(card.effect){
+        case 'crit':G.critNext=card.val;addFloat(W/2,H-320,'暴击准备!','#ff9800');break;
+        case 'block':G.blockNext=card.val;addFloat(W/2,H-320,'防御姿态!','#2196f3');break;
+        case 'heal':{const h=Math.min(card.val,G.heroMaxHp-G.heroHp);G.heroHp+=h;addFloat(W/2,H-340,'+'+h,'#4caf50');break;}
+        case 'dmg':{dealDmgToEnemy(card.val);break;}
+        case 'buff':G.buffAtk=card.val;G.buffAtkTurn=4;addFloat(W/2,H-320,'攻击+'+card.val,'#ff5722');break;
+        case 'dodge':G.dodgeNext=card.val;addFloat(W/2,H-320,'闪避!','#9c27b0');break;
+        case 'dot':G.enemyPoison=Math.max(G.enemyPoison,card.val);addFloat(W/2,180,'中毒!','#689f38');break;
+        case 'steal':{const d=dealDmgToEnemy(card.val);const h=Math.min(d,G.heroMaxHp-G.heroHp);G.heroHp+=h;if(h>0)addFloat(W/2,H-340,'+'+h,'#4caf50');break;}
+        case 'shield':G.shield+=card.val;addFloat(W/2,H-320,'护盾+'+card.val,'#64b5f6');break;
+        case 'rage':G.rage=card.val;G.rageTurn=1;addFloat(W/2,H-320,'狂暴!','#f44336');break;
+        case 'nuke':{dealTrueDmg(card.val);sfxSwing();break;}
+        case 'skip':G.enemySkip=card.val+1;addFloat(W/2,180,'时停!','#ffd700');break;
+    }
+    checkBattleEnd();return true;
+}
+function dealTrueDmg(val){
+    G.enemyHp-=val;
+    addFloat(W/2,220,'-'+val+' 真','#ff5252');
+    spawnParticles(W/2,220,'#ff5252',18);
+    sfxHit();G.shake=8;G.flash=10;G.flashColor='#ff3333';
+}
+function dealDmgToEnemy(baseVal){
+    let dmg=baseVal;
+    let isCrit=Math.random()*100<G.critNext;
+    if(isCrit){dmg=Math.floor(dmg*1.5);addFloat(W/2,200,'暴击!','#ffd700');}
+    const absorbed=Math.min(G.enemyDef,dmg);
+    dmg-=absorbed;
+    G.enemyHp-=dmg;
+    addFloat(W/2,220,'-'+dmg+(absorbed>0?'('+absorbed+'挡)':''),'#ff6b6b');
+    spawnParticles(W/2,220,'#ff4444',12);
+    sfxSwing();G.shake=5;
+    return dmg;
+}
+function playerAttack(){
+    if(!G.playerTurn||G.animating)return;
+    G.animating=true;
+    let atk=totalAtk();
+    let isCrit=G.critNext>0?Math.random()*100<G.critNext:Math.random()*100<totalCrit();
+    if(G.critNext>0)G.critNext=0;
+    if(G.heroClass){
+        if(G.heroClass.id==='mage'&&Math.random()<0.3){atk*=2;addFloat(W/2,H-320,'法术双倍!','#e040fb');isCrit=true;}
+        if(G.heroClass.id==='rogue'&&Math.random()<0.25){
+            const defSav=G.enemyDef;
+            const t1=atk,isC1=isCrit;
+            setTimeout(()=>{
+                let d=t1;if(isC1)d*=1.5;
+                const a=Math.min(G.enemyDef,d);d-=a;
+                G.enemyHp-=d;
+                addFloat(W/2,220,'-'+d,'#ff6b6b');
+                spawnParticles(W/2,220,'#ff4444',10);sfxSwing();G.shake=5;
+                checkBattleEnd();
+            },300);
+        }
+    }
+    if(isCrit){atk*=1.5;addFloat(W/2,200,'💥 暴击!','#ffd700');}
+    atk=Math.floor(atk);
+    const absorbed=Math.min(G.enemyDef,atk);
+    let dmg=atk-absorbed;
+    G.enemyHp-=dmg;
+    addFloat(W/2,220,'-'+dmg+(absorbed>0?' 🛡':''),'#ff6b6b');
+    spawnParticles(W/2,220,'#ff4444',14);sfxSwing();G.shake=6;
+    setTimeout(()=>{G.animating=false;checkBattleEnd();},250);
+}
+function enemyAttack(){
+    if(G.enemySkip>0){G.enemySkip--;addFloat(W/2,180,'敌人跳过','#90a4ae');endEnemyTurn();return;}
+    if(G.dodgeNext>0&&Math.random()*100<G.dodgeNext){addFloat(W/2,H-340,'闪避!','#9c27b0');G.dodgeNext=0;endEnemyTurn();return;}
+    let atk=G.enemyAtk;
+    if(Math.random()<5){atk*=1.5;addFloat(W/2,180,'敌暴击!','#ff1744');}
+    let def=totalDef();
+    if(G.blockNext>0){def+=G.blockNext;G.blockNext=0;}
+    if(G.heroClass&&G.heroClass.id==='knight')atk=Math.floor(atk*0.8);
+    const absorbed=Math.min(def,atk);
+    let dmg=atk-absorbed;
+    if(G.shield>0){
+        const sh=Math.min(G.shield,dmg);
+        dmg-=sh;G.shield-=sh;
+        addFloat(W/2,H-340,'🛡-'+sh,'#64b5f6');
+    }
+    if(dmg>0){
+        G.heroHp-=dmg;
+        addFloat(W/2,H-340,'-'+dmg+(absorbed>0?' 🛡':''),'#ff5252');
+    }else{
+        addFloat(W/2,H-340,'无伤','#78909c');
+    }
+    spawnParticles(W/2,H-340,'#ff4444',12);sfxHit();G.shake=6;G.flash=8;G.flashColor='#ff3333';
+    endEnemyTurn();
+}
+function endEnemyTurn(){
+    if(G.heroClass&&G.heroClass.id==='priest'){
+        const h=3;const hh=Math.min(h,G.heroMaxHp-G.heroHp);
+        G.heroHp+=hh;if(hh>0)addFloat(W/2,H-340,'+'+hh+'✨','#4caf50');
+    }
+    if(G.playerDot>0){G.heroHp-=3;G.playerDot--;addFloat(W/2,H-340,'毒-3','#8bc34a');}
+    if(G.buffAtkTurn>0)G.buffAtkTurn--;
+    if(G.rageTurn>0)G.rageTurn--;
+    G.turn++;
+    G.playerTurn=true;
+    G.maxEnergy=Math.min(10,G.maxEnergy+1);
+    G.energy=G.maxEnergy;
+    discardHand();drawCards(5);
+    checkBattleEnd();
+}
+function endPlayerTurn(){
+    if(!G.playerTurn||G.animating)return;
+    sfxBtn();G.playerTurn=false;
+    G.shield=Math.floor(G.shield*0.5);
+    if(G.enemyPoison>0){
+        G.enemyHp-=4;G.enemyPoison--;
+        addFloat(W/2,220,'毒-4','#8bc34a');
+    }
+    setTimeout(()=>{enemyAttack();},400);
+}
+function spawnEnemy(){
+    const stageMul=1+(G.stage-1)*0.25;
+    const idx=Math.min(ENEMY_NAMES.length-1,Math.floor((G.stage-1)/1+Math.floor(Math.random()*3)));
+    G.enemyName=ENEMY_NAMES[idx];
+    const emojiMap=['👹','👺','💀','👾','🗡️','🧟','🐉','😈','🗡️','🧊','🕷️','🦇','☠️','😈','🐲'];
+    G.enemyEmoji=emojiMap[idx]||'👾';
+    G.enemyMaxHp=Math.floor((30+G.stage*10+G.wave*5)*stageMul);
+    G.enemyHp=G.enemyMaxHp;
+    G.enemyAtk=Math.floor((5+G.stage*1.5)*stageMul);
+    G.enemyDef=Math.floor((2+G.stage*0.8)*stageMul);
+    G.enemyPoison=0;G.enemySkip=0;
+    spawnParticles(W/2,220,'#6a1b9a',25);
+}
+function startBattle(){
+    G.wave++;
+    spawnEnemy();
+    G.turn=1;G.playerTurn=true;
+    G.maxEnergy=Math.min(10,2+Math.floor(G.wave/2));G.energy=G.maxEnergy;
+    discardHand();G.deck=buildDeck();G.discard=[];
+    G.buffAtkTurn=0;G.rageTurn=0;G.dodgeNext=0;G.critNext=0;G.blockNext=0;G.shield=0;
+    drawCards(5);
+    G.animating=false;G.inShop=false;
+}
+function checkBattleEnd(){
+    if(G.enemyHp<=0){
+        const gold=30+G.stage*20+G.wave*10;
+        G.gold+=gold;G.score+=G.stage*100+G.wave*30;
+        sfxGold();
+        addFloat(W/2,H/2,'💰+'+gold,'#ffd700');
+        spawnParticles(W/2,H/2,'#ffd700',30);
+        setTimeout(()=>{
+            if(G.wave>=G.maxWave){
+                if(G.stage>=G.maxStage){winGame();}
+                else{enterShop();}
+            }else{startBattle();}
+        },800);
+    }else if(G.heroHp<=0){
+        if(G.equipment.special&&G.equipment.special.bonus.revive&&G.equipment.special.bonus.revive>0){
+            G.equipment.special.bonus.revive--;
+            G.heroHp=Math.floor(G.heroMaxHp*0.3);
+            addFloat(W/2,H-340,'复活!','#ffd700');
+            sfxLevel();spawnParticles(W/2,H-340,'#ffd700',30);
+            if(G.equipment.special.bonus.revive<=0)G.equipment.special=null;
+        }else{loseGame();}
+    }
+}
+function enterShop(){
+    G.inShop=true;G.shopItems=[];
+    const items=shuffle([...EQUIPMENT]).slice(0,3);
+    items.forEach((it,i)=>{G.shopItems.push({...it,idx:i,uid:'sh'+i});});
+    const pool=shuffle([...SKILL_CARDS.filter(c=>c.rar!=='SSR')]).slice(0,2);
+    pool.forEach((c,i)=>{G.shopItems.push({...c,idx:3+i,uid:'shc'+i,isCard:true,cost:20*(c.rar==='SR'?3:c.rar==='R'?2:1)});});
+    sfxLevel();
+}
+function buyItem(item){
+    if(G.gold<(item.cost||0)){addFloat(W/2,H/2,'金币不足!','#ff6b6b');return;}
+    G.gold-=(item.cost||0);sfxItem();
+    if(item.isCard){addCardToDeck(item);addFloat(W/2,H/2,'获得卡牌: '+item.name,'#4caf50');}
+    else if(item.slot==='potion'){
+        if(item.bonus.heal){const h=Math.min(item.bonus.heal,G.heroMaxHp-G.heroHp);G.heroHp+=h;addFloat(W/2,H/2,'+'+h,'#4caf50');}
+        if(item.bonus.buffAtk){G.buffAtk=Math.max(G.buffAtk,item.bonus.buffAtk);G.buffAtkTurn=Math.max(G.buffAtkTurn,item.bonus.buffTurn);}
+    }else{
+        const old=G.equipment[item.slot];
+        G.equipment[item.slot]={...item};
+        if(item.bonus.hp){G.heroMaxHp+=item.bonus.hp;G.heroHp+=item.bonus.hp;}
+        if(old&&old.bonus.hp){G.heroMaxHp-=old.bonus.hp;G.heroHp=Math.min(G.heroHp,G.heroMaxHp);}
+        addFloat(W/2,H/2,'装备: '+item.name,'#4caf50');
+    }
+    G.shopItems=G.shopItems.filter(s=>s.uid!==item.uid);
+}
+function nextStage(){
+    G.stage++;G.wave=0;G.inShop=false;
+    G.heroHp=Math.min(G.heroMaxHp,G.heroHp+Math.floor(G.heroMaxHp*0.2));
+    startBattle();
+}
+function winGame(){
+    G.state=STATE_OVER;G.score+=G.stage*500+G.gold;
+    if(G.score>G.highScore){G.highScore=G.score;Storage.save('hero_high',G.highScore);}
+    sfxWin();
+}
+function loseGame(){
+    G.state=STATE_OVER;
+    if(G.score>G.highScore){G.highScore=G.score;Storage.save('hero_high',G.highScore);}
+    sfxLose();
+}
+function startGame(classIdx){
+    initAudio();
+    const cls=CLASSES[classIdx!=null?classIdx:Math.floor(Math.random()*CLASSES.length)];
+    G.heroClass=cls;
+    G.heroMaxHp=cls.hp;G.heroHp=cls.hp;G.heroAtk=cls.atk;G.heroDef=cls.def;
+    G.stage=1;G.wave=0;G.gold=50;G.score=0;
+    G.equipment={weapon:null,armor:null,special:null};G.inventory=[];
+    G.playerDot=0;G.enemyPoison=0;G.shield=0;
+    particles=[];floats=[];
+    G.state=STATE_PLAYING;
+    startBattle();
+    sfxBtn();
+}
+function drawHero(ctx){
+    const c=G.heroClass;const col=c?c.color:'#00796b';
+    drawHpBar(ctx,15,30,W/2-25,G.heroHp,G.heroMaxHp,'#43a047',c?c.name:'英雄','('+totalAtk()+'⚔/'+totalDef()+'🛡)');
+    ctx.fillStyle='rgba(0,0,0,0.5)';roundRect(ctx,15,58,100,130,12);ctx.fill();
+    ctx.strokeStyle=col;ctx.lineWidth=3;roundRect(ctx,15,58,100,130,12);ctx.stroke();
+    ctx.font='60px Arial';ctx.textAlign='center';ctx.fillStyle='#fff';
+    ctx.fillText(c?c.emoji:'🦸',65,140);ctx.textAlign='left';
+    if(G.shield>0){ctx.fillStyle='#64b5f6';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('🛡'+G.shield,65,178);ctx.textAlign='left';}
+    drawHpBar(ctx,W/2+10,30,W/2-25,G.enemyHp,G.enemyMaxHp,'#e53935',G.enemyName,'('+G.enemyAtk+'⚔/'+G.enemyDef+'🛡)');
+    ctx.fillStyle='rgba(0,0,0,0.5)';roundRect(ctx,W-115,58,100,130,12);ctx.fill();
+    ctx.strokeStyle='#7b1fa2';ctx.lineWidth=3;roundRect(ctx,W-115,58,100,130,12);ctx.stroke();
+    ctx.font='60px Arial';ctx.textAlign='center';ctx.fillStyle='#fff';
+    ctx.fillText(G.enemyEmoji,W-65,140);ctx.textAlign='left';
+    if(G.enemyPoison>0){ctx.fillStyle='#8bc34a';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('☠️'+G.enemyPoison,W-65,178);ctx.textAlign='left';}
+}
+function drawHpBar(ctx,x,y,w,hp,max,color,label,sub){
+    ctx.fillStyle='rgba(0,0,0,0.65)';roundRect(ctx,x-2,y-2,w+4,22,5);ctx.fill();
+    const rr=Math.max(0,hp/max);
+    const g=ctx.createLinearGradient(x,y,x,y+18);
+    g.addColorStop(0,color);g.addColorStop(1,'#000');
+    ctx.fillStyle=g;roundRect(ctx,x,y,w*rr,18,4);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=1;roundRect(ctx,x,y,w,18,4);ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.textAlign='left';ctx.fillText(label,x+5,y+13);
+    ctx.textAlign='right';ctx.fillText(hp+'/'+max+(sub||''),x+w-5,y+13);ctx.textAlign='left';
+}
+function drawEnergy(ctx){
+    const bx=W/2-90,by=H-242,bw=180,bh=18;
+    ctx.fillStyle='rgba(0,0,0,0.65)';roundRect(ctx,bx-2,by-2,bw+4,bh+4,5);ctx.fill();
+    for(let i=0;i<10;i++){
+        if(i<G.maxEnergy){
+            const sx=bx+i*(bw/10)+1,sw=(bw/10)-2;
+            ctx.fillStyle=i<G.energy?'#ffa726':'#455a64';
+            roundRect(ctx,sx,by,sw,bh,3);ctx.fill();
+        }
+    }
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=1;roundRect(ctx,bx,by,bw,bh,3);ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 11px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('⚡ '+G.energy+'/'+G.maxEnergy+'   第'+G.stage+'关-'+G.wave+'/'+G.maxWave+'波   T'+G.turn,W/2,by+13);
+    ctx.textAlign='left';
+    ctx.fillStyle='#ffd700';ctx.font='bold 14px "Microsoft YaHei"';ctx.textAlign='left';
+    ctx.fillText('💰 '+G.gold,15,H-242);
+    ctx.textAlign='right';ctx.fillText('🏆 '+G.score,W-15,H-242);ctx.textAlign='left';
+}
+function drawBoard(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#1a237e');g.addColorStop(0.35,'#283593');g.addColorStop(0.5,'#0d47a1');g.addColorStop(0.65,'#006064');g.addColorStop(1,'#001a1a');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='rgba(255,215,0,0.18)';ctx.setLineDash([8,8]);ctx.lineWidth=2;
+    ctx.strokeRect(15,H-275,W-30,125);
+    ctx.strokeRect(15,200,W-30,180);
+    ctx.setLineDash([]);
+    ctx.fillStyle='rgba(0,150,136,0.08)';ctx.fillRect(15,H-275,W-30,125);
+    ctx.fillStyle='rgba(156,39,176,0.08)';ctx.fillRect(15,200,W-30,180);
+    ctx.fillStyle=G.playerTurn?'#4caf50':'#f44336';ctx.font='bold 13px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText(G.playerTurn?'【你的回合 出牌/攻击】':'【敌方回合】',W/2,200);ctx.textAlign='left';
+}
+function drawHand(ctx){
+    const hrs=cardRectsHand();
+    hrs.forEach(r=>{
+        const lift=(G.selectedCard===r.card.uid||G.hoverCard===r.card.uid)?-16:0;
+        drawCardView(ctx,r.card,r.x,r.y+lift,r.w,r.h,G.selectedCard===r.card.uid);
+    });
+}
+function drawEquip(ctx){
+    const slots=[['weapon','⚔️武器',15],['armor','🛡️护甲',118],['special','💎饰品',221]];
+    slots.forEach(([s,label,x])=>{
+        const eq=G.equipment[s];
+        ctx.fillStyle='rgba(0,0,0,0.55)';roundRect(ctx,x,H-40,88,30,5);ctx.fill();
+        ctx.strokeStyle=eq?'#ffd700':'rgba(255,255,255,0.3)';ctx.lineWidth=1.5;
+        roundRect(ctx,x,H-40,88,30,5);ctx.stroke();
+        ctx.fillStyle='#fff';ctx.font='9px "Microsoft YaHei"';ctx.textAlign='center';
+        if(eq){
+            const col=eq.rar==='SSR'?'#ffd700':eq.rar==='SR'?'#a855f7':eq.rar==='R'?'#3b82f6':'#bdbdbd';
+            ctx.fillStyle=col;ctx.font='bold 10px "Microsoft YaHei"';
+            ctx.fillText(eq.emoji+' '+eq.name,x+44,H-22);
+        }else{ctx.fillStyle='#888';ctx.fillText(label,x+44,H-22);}
+        ctx.textAlign='left';
+    });
+}
+function drawBattleBtns(ctx){
+    if(G.inShop)return;
+    drawBtn(ctx,W/2-95,H-215,90,42,playerAttackLabel(),'attack','#c62828');
+    if(G.playerTurn)drawBtn(ctx,W/2+5,H-215,90,42,'结束回合','end','#1565c0');
+}
+function playerAttackLabel(){
+    const atk=totalAtk();
+    return '⚔️ 攻击 ('+atk+')';
+}
+function drawShop(ctx){
+    const w=W-40,h=440;
+    ctx.fillStyle='rgba(0,0,0,0.88)';roundRect(ctx,20,120,w,h,15);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=3;roundRect(ctx,20,120,w,h,15);ctx.stroke();
+    ctx.fillStyle='#ffd700';ctx.font='bold 26px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🏪 冒险商店 💰'+G.gold,W/2,160);
+    ctx.font='13px "Microsoft YaHei"';ctx.fillStyle='#aaa';
+    ctx.fillText('('+G.stage+'关完成! 下一关:'+(G.stage+1)+'/'+G.maxStage+')',W/2,185);
+    ctx.textAlign='left';
+    G.shopItems.forEach((it,i)=>{
+        const x=30+(i%3)*142,y=205+Math.floor(i/3)*150;
+        const rcol=it.rar==='SSR'?'#ffd700':it.rar==='SR'?'#a855f7':it.rar==='R'?'#3b82f6':'#9ca3af';
+        ctx.fillStyle='rgba(30,40,60,0.9)';roundRect(ctx,x,y,135,140,10);ctx.fill();
+        ctx.strokeStyle=rcol;ctx.lineWidth=2;roundRect(ctx,x,y,135,140,10);ctx.stroke();
+        ctx.font='38px Arial';ctx.textAlign='center';ctx.fillStyle='#fff';
+        ctx.fillText(it.emoji||'🎴',x+67,y+52);
+        ctx.fillStyle='#fff';ctx.font='bold 13px "Microsoft YaHei"';
+        ctx.fillText(it.name,x+67,y+78);
+        const descArr=[];
+        if(it.bonus){
+            if(it.bonus.atk)descArr.push('⚔+'+it.bonus.atk);
+            if(it.bonus.def)descArr.push('🛡+'+it.bonus.def);
+            if(it.bonus.hp)descArr.push('❤+'+it.bonus.hp);
+            if(it.bonus.heal)descArr.push('回'+it.bonus.heal);
+            if(it.bonus.buffAtk)descArr.push('攻+'+it.bonus.buffAtk);
+            if(it.bonus.revive)descArr.push('复活');
+            if(it.bonus.crit)descArr.push('暴击+'+it.bonus.crit+'%');
+        }
+        if(it.desc)descArr.push(it.desc.length>10?it.desc.slice(0,10)+'..':it.desc);
+        ctx.fillStyle='rgba(255,255,255,0.75)';ctx.font='10px "Microsoft YaHei"';
+        for(let di=0;di<Math.min(descArr.length,2);di++)ctx.fillText(descArr[di],x+67,y+96+di*14);
+        const afford=G.gold>=(it.cost||0);
+        ctx.fillStyle=afford?'#ffd700':'#888';ctx.font='bold 14px "Microsoft YaHei"';
+        ctx.fillText('💰'+(it.cost||0),x+67,y+130);
+        ctx.textAlign='left';
+        G.btnRects['shop'+i]={x,y,w:135,h:140};
+    });
+    drawBtn(ctx,W/2-80,120+h-15,160,45,'继续冒险 ▶','nextStage','#00796b');
+}
+function drawMenu(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#1a237e');g.addColorStop(0.5,'#283593');g.addColorStop(1,'#004d40');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    for(let i=0;i<40;i++){
+        const x=(i*109)%W,y=(i*67)%H;
+        ctx.fillStyle=`rgba(255,215,0,${0.05+((i*11)%8)/40})`;
+        ctx.beginPath();ctx.arc(x,y,1+(i%4),0,Math.PI*2);ctx.fill();
+    }
+    ctx.save();ctx.translate(W/2,150);
+    const t=Date.now()/1000;ctx.rotate(Math.sin(t)*0.05);
+    const rg=ctx.createRadialGradient(0,0,10,0,0,160);
+    rg.addColorStop(0,'rgba(255,215,0,0.4)');rg.addColorStop(1,'rgba(255,215,0,0)');
+    ctx.fillStyle=rg;ctx.fillRect(-160,-100,320,200);
+    ctx.fillStyle='#00695c';roundRect(ctx,-150,-60,300,120,20);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=4;roundRect(ctx,-150,-60,300,120,20);ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle='#ffd700';ctx.font='bold 44px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('⚔️ 英雄卡牌 ⚔️',W/2,135);ctx.fillText('征战',W/2,185);ctx.textAlign='left';
+    for(let i=0;i<CLASSES.length;i++){
+        const c=CLASSES[i];
+        const x=20+(i%3)*150,y=240+Math.floor(i/3)*165;
+        ctx.fillStyle='rgba(0,0,0,0.55)';roundRect(ctx,x,y,140,150,12);ctx.fill();
+        ctx.strokeStyle=c.color;ctx.lineWidth=3;roundRect(ctx,x,y,140,150,12);ctx.stroke();
+        ctx.font='52px Arial';ctx.textAlign='center';ctx.fillText(c.emoji,x+70,y+60);
+        ctx.fillStyle='#fff';ctx.font='bold 17px "Microsoft YaHei"';ctx.fillText(c.name,x+70,y+88);
+        ctx.font='10px "Microsoft YaHei"';ctx.fillStyle='rgba(255,255,255,0.8)';
+        ctx.fillText('❤'+c.hp+' ⚔'+c.atk+' 🛡'+c.def,x+70,y+108);
+        const sk=c.skill.length>10?c.skill.slice(0,10)+'..':c.skill;
+        ctx.fillStyle='#ffd700';ctx.fillText(sk,x+70,y+128);
+        ctx.textAlign='left';
+        G.btnRects['cls'+i]={x,y,w:140,h:150};
+    }
+    ctx.fillStyle='#ffd700';ctx.font='bold 17px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🏆 最高分: '+G.highScore,W/2,575);ctx.textAlign='left';
+    ctx.fillStyle='rgba(255,255,255,0.78)';ctx.font='13px "Microsoft YaHei"';ctx.textAlign='center';
+    const tips=['📖 选择英雄职业开始征程','🃏 出牌使用技能卡,攻击键战斗','💰 关卡间商店购买装备和新卡','🏁 通关10关×3波成为传奇!'];
+    for(let i=0;i<tips.length;i++)ctx.fillText(tips[i],W/2,605+i*25);
+    ctx.textAlign='left';
+}
+function drawGame(ctx){
+    drawBoard(ctx);drawHero(ctx);
+    if(G.inShop){drawShop(ctx);}
+    else{drawEnergy(ctx);drawHand(ctx);drawEquip(ctx);drawBattleBtns(ctx);}
+    drawParticles(ctx);drawFloats(ctx);
+}
+function drawGameOver(ctx){
+    const win=G.heroHp>0;
+    const g=ctx.createLinearGradient(0,0,0,H);
+    if(win){g.addColorStop(0,'#1b5e20');g.addColorStop(1,'#00251a');}
+    else{g.addColorStop(0,'#b71c1c');g.addColorStop(1,'#2a0000');}
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=win?'#ffd700':'#ff5252';ctx.font='bold 58px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText(win?'🏆 传奇诞生!':'💀 英勇牺牲',W/2,190);ctx.textAlign='left';
+    ctx.fillStyle='#fff';ctx.font='bold 20px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('通关: '+Math.min(G.stage,G.maxStage)+'/'+G.maxStage,W/2,270);
+    ctx.fillText('获得金币: '+G.gold+'💰',W/2,302);
+    ctx.fillText('最终得分: '+G.score,W/2,334);
+    if(G.score>=G.highScore){ctx.fillStyle='#ffd700';ctx.fillText('🎉 新纪录! 🎉',W/2,380);}
+    else{ctx.fillText('历史最高: '+G.highScore,W/2,380);}
+    ctx.textAlign='left';
+    drawBtn(ctx,W/2-100,440,200,60,'⚔️ 再次征战','restart','#00796b');
+    drawBtn(ctx,W/2-70,520,140,42,'返回主菜单','menu','#555');
+    ctx.fillStyle='rgba(255,255,255,0.55)';ctx.font='12px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('策略搭配,成就最强英雄!',W/2,610);ctx.textAlign='left';
+}
+function update(){
+    updateParticles();updateFloats();
+    if(G.shake>0)G.shake-=0.5;
+    if(G.flash>0)G.flash--;
+}
+function draw(){
+    ctx.save();
+    if(G.shake>0)ctx.translate((Math.random()-0.5)*G.shake,(Math.random()-0.5)*G.shake);
+    switch(G.state){
+        case STATE_MENU:drawMenu(ctx);break;
+        case STATE_PLAYING:drawGame(ctx);break;
+        case STATE_OVER:drawGameOver(ctx);break;
+        case STATE_PAUSE:drawGame(ctx);break;
+    }
+    if(G.flash>0){ctx.globalAlpha=G.flash/20;ctx.fillStyle=G.flashColor;ctx.fillRect(0,0,W,H);ctx.globalAlpha=1;}
+    ctx.restore();
+}
+function handlePointerDown(e){
+    initAudio();const p=getPos(e);
+    if(G.state===STATE_MENU){
+        for(let i=0;i<CLASSES.length;i++)if(hitBtn(p,'cls'+i)){startGame(i);return;}
+    }else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){G.state=STATE_MENU;return;}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;return;}
+    }else if(G.state===STATE_PLAYING){
+        if(G.inShop){
+            for(let i=0;i<G.shopItems.length;i++)if(hitBtn(p,'shop'+i)){buyItem(G.shopItems[i]);return;}
+            if(hitBtn(p,'nextStage')){nextStage();return;}
+        }else{
+            if(hitBtn(p,'attack')){playerAttack();return;}
+            if(hitBtn(p,'end')){endPlayerTurn();return;}
+            const hrs=cardRectsHand();
+            for(const r of hrs){
+                if(rectHit(p,r)){
+                    if(G.selectedCard===r.card.uid){useSkillCard(r.card);G.selectedCard=null;}
+                    else{G.selectedCard=r.card.uid;sfxBtn();}
+                    return;
+                }
+            }
+            if(p.y>0&&p.y<200&&G.selectedCard==null&&G.playerTurn&&!G.animating){playerAttack();return;}
+            G.selectedCard=null;
+        }
+    }
+}
+function handlePointerMove(e){
+    const p=getPos(e);G.hoverCard=null;
+    if(G.state!==STATE_PLAYING)return;
+    const hrs=cardRectsHand();for(const r of hrs)if(rectHit(p,r)){G.hoverCard=r.card.uid;return;}
+}
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('touchstart',e=>{e.preventDefault();handlePointerDown(e);},{passive:false});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();handlePointerMove(e);},{passive:false});
+canvas.addEventListener('touchend',e=>{e.preventDefault();},{passive:false});
+const ACHIEVEMENTS=[
+    {id:'win1',name:'新兵入伍',desc:'首胜达成！',cond:g=>G.wins>=1,reward:'★ 解锁称号'},
+    {id:'win5',name:'百战百胜',desc:'累计5胜',cond:g=>G.wins>=5,reward:'★★ 精锐战士'},
+    {id:'win10',name:'传奇英雄',desc:'累计10胜',cond:g=>G.wins>=10,reward:'★★★ 史诗传说'},
+    {id:'kill30',name:'屠戮战神',desc:'累计击杀30个敌方',cond:g=>G.totalKills>=30,reward:'⚔ +战斗威望'},
+    {id:'heal80',name:'神圣祭司',desc:'累计治疗80点生命',cond:g=>G.totalHeal>=80,reward:'💚 +神圣威望'},
+    {id:'dmg200',name:'毁灭打击',desc:'累计造成200伤害',cond:g=>G.totalDmg>=200,reward:'🔥 +毁灭威望'},
+    {id:'equip6',name:'装备大师',desc:'单局装备6件装备',cond:g=>G.maxEquip>=6,reward:'🛡 +装备威望'},
+    {id:'spell8',name:'法术连击',desc:'单局释放8张技能卡',cond:g=>G.spellCount>=8,reward:'✨ +法术威望'},
+    {id:'fullHero',name:'英雄无敌',desc:'同一队伍5名英雄同时存活',cond:g=>G.maxHeroes>=5,reward:'👥 +团队威望'},
+    {id:'turn25',name:'持久战王',desc:'单局坚持25回合',cond:g=>G.maxTurns>=25,reward:'⏳ +耐久威望'},
+    {id:'class3',name:'职业精通',desc:'单局使用3个不同职业英雄',cond:g=>G.uniqueClasses>=3,reward:'🎯 +职业威望'},
+    {id:'bossLich',name:'巫妖王之怒',desc:'击败巫妖Boss',cond:g=>G.bossKills>=1,reward:'👑 传说之王！'}
+];
+function loadAchievements(){try{const s=localStorage.getItem('hero_ach');if(s)G.achUnlocked=JSON.parse(s);}catch(e){}}
+function saveAchievements(){try{localStorage.setItem('hero_ach',JSON.stringify(G.achUnlocked));}catch(e){}}
+function checkAchievements(){for(const a of ACHIEVEMENTS){if(G.achUnlocked.indexOf(a.id)<0&&a.cond(G)){G.achUnlocked.push(a.id);G.achQueue.push(a);saveAchievements();G.floats.push({text:'🏆 '+a.name,x:W/2,y:H/2-50,vx:0,vy:-0.8,life:180,color:'#ffd700',size:22});playTone(660,0.12,'sine',0.2);setTimeout(()=>playTone(880,0.14,'sine',0.2),110);}}}
+
+const TUTORIAL_STEPS=[
+    {title:'⚔️ 欢迎加入英雄征战',text:'这是一款英雄卡牌策略对战游戏！招募不同职业英雄，为他们装备武器护甲，释放强力技能摧毁对手城堡！',pos:{x:W/2,y:H/2-40}},
+    {title:'💰 金币系统',text:'每回合获得金币招募英雄或购买装备。左上角数字显示价格，合理分配经济是胜利关键！',pos:{x:W/2,y:260}},
+    {title:'🃏 三种卡牌',text:'英雄卡:召唤战场;装备卡:给英雄装备(点击英雄后选装备);技能卡:直接释放效果。',pos:{x:W/2,y:H-150}},
+    {title:'⚔️ 战斗规则',text:'双方英雄自动战斗,攻击对面前排(随机)。英雄倒下后轮到城堡血量,将对方城堡血量清零获胜!',pos:{x:W/2,y:420}},
+    {title:'🏆 荣耀之路',text:'从1级新手到10级Boss战！收集所有成就成为传奇英雄！',pos:{x:W/2,y:160}}
+];
+
+function wrapText(text,x,y,maxW,lineH,align){
+    const lines=[];let cur='';
+    if(text.indexOf('\n')>=0){const ps=text.split('\n');for(const p of ps){
+        const chars=p.split('');cur='';for(const ch of chars){
+            const t2=cur+ch;if(ctx.measureText(t2).width>maxW){lines.push(cur);cur=ch;}else cur=t2;
+        }lines.push(cur);}
+    }else{
+        const chars=text.split('');for(const ch of chars){
+            const t2=cur+ch;if(ctx.measureText(t2).width>maxW){lines.push(cur);cur=ch;}else cur=t2;
+        }lines.push(cur);}
+    ctx.textAlign=align||'left';
+    for(let i=0;i<lines.length;i++){ctx.fillText(lines[i],x,y+i*lineH);}
+}
+function addLog(msg,type){G.log.push({m:msg,t:type||'info',time:Date.now()});if(G.log.length>200)G.log.shift();}
+
+const THEME_COLOR='#1565c0',THEME_LIGHT='#64b5f6',THEME_BG='#0a1929';
+function drawPauseMenu(){
+    ctx.fillStyle='rgba(10,25,41,0.94)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=THEME_COLOR;roundRect(80,120,W-160,H-260,20,true,false);
+    ctx.strokeStyle=THEME_LIGHT;ctx.lineWidth=3;roundRect(80,120,W-160,H-260,20,false,true);
+    ctx.fillStyle='#fff';ctx.font='bold 30px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('⏸ 游戏暂停',W/2,175);
+    const btns=[
+        {y:240,t:'▶ 继续游戏',c:'#4caf50',id:'resume'},
+        {y:310,t:'📖 新手教程',c:'#2196f3',id:'tutorial'},
+        {y:380,t:'🏆 成就图鉴',c:'#ff9800',id:'ach'},
+        {y:450,t:'🔊 音效: '+(G.mute?'关':'开'),c:'#673ab7',id:'mute'},
+        {y:520,t:'🔄 重开本局',c:'#f44336',id:'restart'},
+        {y:590,t:'🏠 返回菜单',c:'#607d8b',id:'menu'}
+    ];
+    G.pauseBtns=[];
+    for(const b of btns){
+        ctx.fillStyle=b.c;roundRect(110,b.y,W-220,55,15,true,false);
+        ctx.fillStyle='#fff';ctx.font='bold 20px Microsoft YaHei';ctx.fillText(b.t,W/2,b.y+36);
+        G.pauseBtns.push({x:110,y:b.y,w:W-220,h:55,id:b.id});
+    }
+}
+function drawTutorial(){
+    ctx.fillStyle='rgba(0,0,0,0.9)';ctx.fillRect(0,0,W,H);
+    const s=TUTORIAL_STEPS[G.tutStep];
+    ctx.fillStyle='rgba(21,101,192,0.97)';roundRect(50,200,W-100,360,24,true,false);
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=3;roundRect(50,200,W-100,360,24,false,true);
+    ctx.fillStyle='#ffd700';ctx.font='bold 26px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText(s.title,W/2,260);
+    ctx.fillStyle='#fff';ctx.font='17px Microsoft YaHei';
+    wrapText(s.text,W/2,310,W-160,30,'center');
+    ctx.fillStyle='rgba(255,255,255,0.25)';ctx.font='14px Microsoft YaHei';
+    ctx.fillText('('+(G.tutStep+1)+'/'+TUTORIAL_STEPS.length+')',W/2,485);
+    ctx.fillStyle='#ffd700';roundRect(80,510,140,45,12,true,false);
+    ctx.fillStyle='#333';ctx.font='bold 16px Microsoft YaHei';
+    ctx.fillText(G.tutStep>0?'◀ 上一步':'跳过',150,540);
+    ctx.fillStyle='#4caf50';roundRect(W-220,510,140,45,12,true,false);
+    ctx.fillStyle='#fff';
+    ctx.fillText(G.tutStep<TUTORIAL_STEPS.length-1?'下一步 ▶':'开始征战!',W-150,540);
+    G.tutBtns=[{x:80,y:510,w:140,h:45,id:'prev'},{x:W-220,y:510,w:140,h:45,id:'next'}];
+}
+function drawAchievements(){
+    ctx.fillStyle='rgba(10,25,41,0.96)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#0d47a1';roundRect(30,60,W-60,H-130,18,true,false);
+    ctx.strokeStyle=THEME_LIGHT;ctx.lineWidth=2;roundRect(30,60,W-60,H-130,18,false,true);
+    ctx.fillStyle='#ffd700';ctx.font='bold 26px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('🏆 成就图鉴 ('+G.achUnlocked.length+'/'+ACHIEVEMENTS.length+')',W/2,100);
+    const un=ACHIEVEMENTS.length>0?Math.floor(G.achUnlocked.length*100/ACHIEVEMENTS.length):0;
+    ctx.fillStyle='rgba(255,255,255,0.1)';roundRect(60,120,W-120,14,7,true,false);
+    ctx.fillStyle='#4caf50';roundRect(60,120,(W-120)*un/100,14,7,true,false);
+    ctx.fillStyle='#fff';ctx.font='12px Microsoft YaHei';ctx.fillText(un+'%',W/2,131);
+    const perPage=6;const page=G.achPage;const start=page*perPage;
+    for(let i=0;i<perPage;i++){
+        const idx=start+i;if(idx>=ACHIEVEMENTS.length)break;
+        const a=ACHIEVEMENTS[idx];const unlocked=G.achUnlocked.indexOf(a.id)>=0;
+        const y=160+i*76;const w=W-80;
+        ctx.fillStyle=unlocked?'rgba(255,215,0,0.12)':'rgba(255,255,255,0.04)';
+        roundRect(40,y,w,68,10,true,false);
+        ctx.strokeStyle=unlocked?'#ffd700':'rgba(255,255,255,0.1)';ctx.lineWidth=1;
+        roundRect(40,y,w,68,10,false,true);
+        ctx.font='32px Arial';ctx.textAlign='left';
+        ctx.fillText(unlocked?'🏅':'🔒',58,y+44);
+        ctx.fillStyle=unlocked?'#fff':'#888';ctx.font='bold 16px Microsoft YaHei';
+        ctx.fillText(a.name,100,y+26);
+        ctx.font='12px Microsoft YaHei';ctx.fillStyle=unlocked?'#ccc':'#666';
+        ctx.fillText(a.desc,100,y+46);
+        ctx.fillStyle=unlocked?'#ffd700':'#555';ctx.textAlign='right';ctx.font='11px Microsoft YaHei';
+        ctx.fillText(a.reward,W-52,y+44);
+    }
+    const totalPages=Math.ceil(ACHIEVEMENTS.length/perPage);
+    ctx.fillStyle='#fff';ctx.font='13px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('第 '+(page+1)+' / '+totalPages+' 页',W/2,H-105);
+    ctx.fillStyle=page>0?'#2196f3':'#555';roundRect(60,H-85,110,38,10,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 15px Microsoft YaHei';
+    ctx.fillText(page>0?'◀ 上一页':'--',115,H-60);
+    ctx.fillStyle=page<totalPages-1?'#2196f3':'#555';roundRect(W-170,H-85,110,38,10,true,false);
+    ctx.fillStyle='#fff';
+    ctx.fillText(page<totalPages-1?'下一页 ▶':'--',W-115,H-60);
+    ctx.fillStyle='#f44336';roundRect(W/2-60,H-85,120,38,10,true,false);
+    ctx.fillStyle='#fff';ctx.fillText('✕ 关闭',W/2,H-60);
+    G.achBtns=[{x:60,y:H-85,w:110,h:38,id:'prev'},{x:W-170,y:H-85,w:110,h:38,id:'next'},{x:W/2-60,y:H-85,w:120,h:38,id:'close'}];
+}
+function drawBattleLog(){
+    if(!G.showLog)return;
+    ctx.fillStyle='rgba(0,0,0,0.9)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(20,40,60,0.98)';roundRect(30,70,W-60,H-140,12,true,false);
+    ctx.strokeStyle='#888';ctx.lineWidth=2;roundRect(30,70,W-60,H-140,12,false,true);
+    ctx.fillStyle='#ffd700';ctx.font='bold 22px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('📜 战斗日志',W/2,105);
+    ctx.fillStyle='#eee';ctx.font='13px Microsoft YaHei';ctx.textAlign='left';
+    const logs=G.log.slice(-26);let y=135;
+    for(let i=logs.length-1;i>=0;i--){y+=20;if(y>H-110)break;
+        const l=logs[i];
+        ctx.fillStyle=l.t==='player'?'#81d4fa':(l.t==='enemy'?'#ef9a9a':'#fff59d');
+        ctx.fillText('• '+l.m,50,y);
+    }
+    ctx.fillStyle='#f44336';roundRect(W/2-60,H-70,120,40,12,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 16px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('✕ 关闭日志',W/2,H-44);
+    G.logBtn={x:W/2-60,y:H-70,w:120,h:40,id:'close'};
+}
+function drawCardDetail(){
+    if(!G.detCard)return;
+    const c=G.detCard;const pw=300,ph=440;const px=W/2-pw/2,py=H/2-ph/2;
+    ctx.fillStyle='rgba(0,0,0,0.88)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(30,50,80,0.98)';roundRect(px,py,pw,ph,20,true,false);
+    const cmap={'warrior':'#d32f2f','mage':'#7b1fa2','rogue':'#455a64','priest':'#fbc02d','hunter':'#388e3c','knight':'#1976d2'};
+    const nmap={'warrior':'战士','mage':'法师','rogue':'刺客','priest':'祭司','hunter':'猎人','knight':'骑士'};
+    const cc=c.type==='hero'?(cmap[c.cls]||'#888'):(c.type==='equip'?'#8d6e63':'#0288d1');
+    const cn=c.type==='hero'?(nmap[c.cls]||'英雄'):(c.type==='equip'?'装备':'技能');
+    ctx.strokeStyle=cc;ctx.lineWidth=4;roundRect(px,py,pw,ph,20,false,true);
+    ctx.fillStyle=cc;roundRect(px+16,py+16,36,36,18,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 18px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText(c.cost,px+34,py+40);
+    ctx.font='42px Arial';ctx.fillText(c.emoji||'⚔',W/2,py+100);
+    ctx.fillStyle='#fff';ctx.font='bold 22px Microsoft YaHei';
+    ctx.fillText(c.name,W/2,py+145);
+    ctx.fillStyle='#aaa';ctx.font='13px Microsoft YaHei';
+    ctx.fillText(cn+'卡  ['+(c.rar||'N')+']',W/2,py+170);
+    if(c.type==='hero'){
+        ctx.fillStyle='#e53935';roundRect(px+20,py+185,52,36,10,true,false);
+        ctx.fillStyle='#fff';ctx.font='bold 18px Microsoft YaHei';ctx.textAlign='left';
+        ctx.fillText('⚔'+c.atk,px+28,py+210);
+        ctx.fillStyle='#43a047';roundRect(px+pw-72,py+185,52,36,10,true,false);
+        ctx.fillStyle='#fff';ctx.textAlign='right';
+        ctx.fillText('❤'+c.hp,px+pw-28,py+210);
+    }else if(c.type==='equip'){
+        ctx.fillStyle='rgba(141,110,99,0.3)';roundRect(px+20,py+185,pw-40,50,10,true,false);
+        ctx.fillStyle='#fff';ctx.font='bold 14px Microsoft YaHei';ctx.textAlign='center';
+        const eqAtk=c.atkBuff||0,eqHp=c.hpBuff||0;
+        ctx.fillText((eqAtk>0?'⚔ +'+eqAtk+'  ':'')+(eqHp>0?'❤ +'+eqHp:''),W/2,py+217);
+    }
+    ctx.fillStyle='rgba(255,255,255,0.08)';roundRect(px+20,py+250,pw-40,110,10,true,false);
+    ctx.fillStyle='#fff';ctx.font='14px Microsoft YaHei';ctx.textAlign='left';
+    wrapText('效果: '+(c.skill||c.desc||'无'),px+36,py+275,pw-72,24,'left');
+    ctx.fillStyle='#ffd700';ctx.font='12px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('征战之路 Lv.'+G.level+' 已解锁英雄: 6/6',W/2,py+385);
+    ctx.fillStyle='#2196f3';roundRect(W/2-55,py+400,110,32,12,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 15px Microsoft YaHei';
+    ctx.fillText('✕ 关闭',W/2,py+422);
+    G.detBtn={x:W/2-55,y:py+400,w:110,h:32,id:'close'};
+}
+function drawMenuExtras(){
+    ctx.fillStyle='rgba(255,255,255,0.06)';roundRect(20,H-200,W-40,110,14,true,false);
+    ctx.fillStyle='#ffd700';ctx.font='bold 14px Microsoft YaHei';ctx.textAlign='left';
+    ctx.fillText('📊 征战统计',38,H-178);
+    ctx.fillStyle='#ccc';ctx.font='12px Microsoft YaHei';
+    ctx.fillText('胜场: '+G.wins+'     击杀累计: '+G.totalKills,38,H-152);
+    ctx.fillText('总伤害: '+G.totalDmg+'     总治疗: '+G.totalHeal,38,H-132);
+    ctx.fillText('金币累计: '+G.totalGold+'     最佳关卡: Lv.'+G.bestLevel,38,H-112);
+    ctx.fillStyle='rgba(255,255,255,0.05)';roundRect(W-175,H-198,145,106,12,true,false);
+    ctx.fillStyle='#fff';ctx.font='13px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('🏆 '+G.achUnlocked.length+'/'+ACHIEVEMENTS.length,W-102,H-175);
+    ctx.font='11px Microsoft YaHei';ctx.fillStyle='#ccc';
+    ctx.fillText('成就完成度',W-102,H-158);
+    const un=ACHIEVEMENTS.length>0?Math.floor(G.achUnlocked.length*100/ACHIEVEMENTS.length):0;
+    ctx.fillStyle='rgba(255,255,255,0.1)';roundRect(W-165,H-145,125,12,6,true,false);
+    ctx.fillStyle='#4caf50';roundRect(W-165,H-145,125*un/100,12,6,true,false);
+    ctx.fillStyle='#fff';ctx.font='10px Microsoft YaHei';ctx.fillText(un+'%',W-102,H-135);
+    ctx.fillStyle=THEME_COLOR;roundRect(W-160,H-122,115,26,10,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 12px Microsoft YaHei';
+    ctx.fillText('📖 成就图鉴',W-102,H-104);
+    G.menuBtns=G.menuBtns||[];G.menuBtns.push({x:W-160,y:H-122,w:115,h:26,id:'ach_menu'});
+}
+function handleExtraPointer(p){
+    if(G.state===STATE_PAUSE){
+        if(G.pauseBtns){for(const b of G.pauseBtns){if(rectHit(p,b)){
+            sfxBtn();if(b.id==='resume'){G.state=STATE_PLAYING;}
+            else if(b.id==='tutorial'){G.tutStep=0;G.showTutorial=true;}
+            else if(b.id==='ach'){G.achPage=0;G.showAch=true;G.state=STATE_MENU;}
+            else if(b.id==='mute'){G.mute=!G.mute;if(G.mute&&audioCtx)audioCtx.suspend();else if(!G.mute&&audioCtx)audioCtx.resume();}
+            else if(b.id==='restart'){newGame();}
+            else if(b.id==='menu'){G.state=STATE_MENU;}
+            return true;}}}return true;
+    }
+    if(G.showTutorial){
+        if(G.tutBtns){for(const b of G.tutBtns){if(rectHit(p,b)){
+            sfxBtn();if(b.id==='prev'){if(G.tutStep>0)G.tutStep--;else{G.showTutorial=false;G.showAch=false;}}
+            else{if(G.tutStep<TUTORIAL_STEPS.length-1)G.tutStep++;else{G.showTutorial=false;if(G.level===1)newGame();}}
+            return true;}}}return true;
+    }
+    if(G.showAch){
+        if(G.achBtns){for(const b of G.achBtns){if(rectHit(p,b)){
+            sfxBtn();if(b.id==='prev'&&G.achPage>0)G.achPage--;
+            else if(b.id==='next'){const tp=Math.ceil(ACHIEVEMENTS.length/6);if(G.achPage<tp-1)G.achPage++;}
+            else if(b.id==='close'){G.showAch=false;}
+            return true;}}}return true;
+    }
+    if(G.showLog){if(G.logBtn&&rectHit(p,G.logBtn)){G.showLog=false;sfxBtn();return true;}return true;}
+    if(G.detCard){if(G.detBtn&&rectHit(p,G.detBtn)){G.detCard=null;sfxBtn();return true;}return true;}
+    if(G.state===STATE_MENU&&G.menuBtns){for(const b of G.menuBtns){if(rectHit(p,b)){sfxBtn();if(b.id==='ach_menu'){G.achPage=0;G.showAch=true;}return true;}}}
+    return false;
+}
+let _origDraw=draw;draw=function(){
+    _origDraw();
+    if(G.state===STATE_PAUSE)drawPauseMenu();
+    else if(G.showTutorial)drawTutorial();
+    else if(G.showAch)drawAchievements();
+    if(G.showLog)drawBattleLog();
+    if(G.detCard)drawCardDetail();
+    if(G.state===STATE_MENU)drawMenuExtras();
+    if(G.achQueue&&G.achQueue.length>0){
+        const a=G.achQueue[0];if(a._t===undefined)a._t=0;a._t++;
+        ctx.save();ctx.globalAlpha=Math.max(0,1-Math.abs(a._t-150)/150);
+        ctx.fillStyle='rgba(21,101,192,0.95)';roundRect(W/2-135,H/2-50,270,70,14,true,false);
+        ctx.strokeStyle='#ffd700';ctx.lineWidth=2;roundRect(W/2-135,H/2-50,270,70,14,false,true);
+        ctx.fillStyle='#ffd700';ctx.font='30px Arial';ctx.textAlign='center';
+        ctx.fillText('🏆',W/2,H/2-15);
+        ctx.fillStyle='#fff';ctx.font='bold 16px Microsoft YaHei';
+        ctx.fillText('成就解锁! '+a.name,W/2,H/2+8);
+        ctx.fillStyle='#ccc';ctx.font='12px Microsoft YaHei';
+        ctx.fillText(a.reward,W/2,H/2+26);
+        ctx.restore();if(a._t>300)G.achQueue.shift();
+    }
+};
+let _origUpdate=update;update=function(){_origUpdate();if(G.state===STATE_PLAYING)checkAchievements();};
+let _origHPD=handlePointerDown;handlePointerDown=function(e){
+    initAudio();const p=getPos(e);
+    if(handleExtraPointer(p))return;
+    if(G.state===STATE_PLAYING){
+        if(p.x>W-58&&p.y>14&&p.x<W-14&&p.y<50){G.state=STATE_PAUSE;sfxBtn();return;}
+        if(p.x>14&&p.y>14&&p.x<62&&p.y<46){G.showLog=true;sfxBtn();return;}
+    }
+    _origHPD(e);
+    if(G.state===STATE_PLAYING&&G.hoverCard){for(const c of G.hand)if(c.uid===G.hoverCard){G.detCard=c;break;}}
+};
+
+function gameLoop(){requestAnimationFrame(gameLoop);update();draw();}
+loadAchievements();if(G.achUnlocked===undefined)G.achUnlocked=[];
+gameLoop();
+})();
+</script>
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try { if (typeof startGame === 'function') startGame(); } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

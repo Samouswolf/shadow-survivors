@@ -1,0 +1,1412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>你画我猜</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:linear-gradient(135deg,#ffecd2 0%,#fcb69f 100%);overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#fcb69f;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=720;
+
+const WORDS = [
+    {w:"苹果",h:["水果","红色","圆形","牛顿"],cat:"食物"},
+    {w:"太阳",h:["天空","白天","热","发光"],cat:"自然"},
+    {w:"狗",h:["动物","宠物","汪汪","忠诚"],cat:"动物"},
+    {w:"猫",h:["动物","宠物","喵喵","抓老鼠"],cat:"动物"},
+    {w:"手机",h:["电器","打电话","智能","触屏"],cat:"科技"},
+    {w:"西瓜",h:["水果","夏天","绿色","黑色籽"],cat:"食物"},
+    {w:"房子",h:["住人","屋顶","窗户","家"],cat:"建筑"},
+    {w:"飞机",h:["交通工具","天上飞","快","大"],cat:"交通"},
+    {w:"雨伞",h:["下雨","挡雨","折叠","五颜六色"],cat:"日用品"},
+    {w:"篮球",h:["运动","圆形","橙色","投篮"],cat:"体育"},
+    {w:"蝴蝶",h:["昆虫","美丽","翅膀","花"],cat:"动物"},
+    {w:"眼镜",h:["戴在眼睛上","近视","两片镜片","看清楚"],cat:"日用品"},
+    {w:"冰淇淋",h:["夏天吃","冷","甜","蛋筒"],cat:"食物"},
+    {w:"熊猫",h:["动物","中国国宝","黑白","竹子"],cat:"动物"},
+    {w:"月亮",h:["天上","晚上","圆","嫦娥"],cat:"自然"},
+    {w:"铅笔",h:["文具","写字","木头","橡皮擦"],cat:"学习"},
+    {w:"书包",h:["上学","装书","背在背上","学生"],cat:"学习"},
+    {w:"电脑",h:["电器","上网","办公","键盘"],cat:"科技"},
+    {w:"医生",h:["职业","医院","看病","白大褂"],cat:"职业"},
+    {w:"蛋糕",h:["生日","甜点","奶油","蜡烛"],cat:"食物"},
+    {w:"火车",h:["交通工具","铁轨","长","呜呜"],cat:"交通"},
+    {w:"兔子",h:["动物","长耳朵","爱吃萝卜","跳"],cat:"动物"},
+    {w:"老虎",h:["动物","森林之王","条纹","凶猛"],cat:"动物"},
+    {w:"花",h:["植物","美丽","香","春天"],cat:"植物"},
+    {w:"树",h:["植物","高","叶子","绿色"],cat:"植物"},
+    {w:"冰箱",h:["电器","厨房","冷","放食物"],cat:"家电"},
+    {w:"电视",h:["电器","看节目","遥控器","屏幕"],cat:"家电"},
+    {w:"筷子",h:["餐具","中国","吃饭","一双"],cat:"日用品"},
+    {w:"青蛙",h:["动物","呱呱","绿","跳"],cat:"动物"},
+    {w:"鱼",h:["动物","水里游","鳃","鳞片"],cat:"动物"},
+    {w:"蜜蜂",h:["昆虫","采蜜","嗡嗡","黄黑"],cat:"动物"},
+    {w:"草莓",h:["水果","红色","小籽","甜"],cat:"食物"},
+    {w:"自行车",h:["交通工具","两个轮子","脚蹬","环保"],cat:"交通"},
+    {w:"鸟",h:["动物","翅膀","飞","叽叽喳喳"],cat:"动物"},
+    {w:"护士",h:["职业","医院","照顾病人","白衣天使"],cat:"职业"},
+    {w:"警察",h:["职业","抓坏人","制服","警车"],cat:"职业"},
+    {w:"老师",h:["职业","学校","上课","黑板"],cat:"职业"},
+    {w:"厨师",h:["职业","做饭","餐厅","帽子"],cat:"职业"},
+    {w:"雪人",h:["冬天","雪","胡萝卜鼻子","围巾"],cat:"其他"},
+    {w:"彩虹",h:["自然现象","下雨后","七种颜色","弯弯的"],cat:"自然"}
+];
+
+const COLORS = ['#000000','#ff0000','#ff6b00','#ffe600','#00c853','#00bcd4','#2979ff','#9c27b0','#795548','#ffffff'];
+const BRUSH_SIZES = [3,6,10,16,24];
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'sine';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxBtn(){playTone(650,0.08,'sine',0.12)}
+function sfxDraw(){playTone(500+Math.random()*200,0.02,'sine',0.06)}
+function sfxCorrect(){playTone(880,0.1,'sine',0.2);setTimeout(()=>playTone(1100,0.15,'sine',0.18),80)}
+function sfxWrong(){playTone(250,0.15,'sawtooth',0.15)}
+function sfxWin(){playTone(523,0.1,'sine',0.2);setTimeout(()=>playTone(659,0.1,'sine',0.2),100);setTimeout(()=>playTone(784,0.15,'sine',0.2),200);setTimeout(()=>playTone(1046,0.3,'sine',0.2),350)}
+function sfxTick(){playTone(900,0.03,'square',0.08)}
+function sfxReveal(){playTone(700,0.08,'triangle',0.15);setTimeout(()=>playTone(1000,0.12,'triangle',0.15),80)}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const drawCanvas=document.createElement('canvas');
+drawCanvas.width=420;drawCanvas.height=340;
+const dctx=drawCanvas.getContext('2d');
+dctx.fillStyle='#fff';dctx.fillRect(0,0,420,340);
+
+const G={
+    state:STATE_MENU,
+    currentWord:null,
+    wordsDone:[],
+    score:0,
+    highScore:0,
+    rounds:0,
+    maxRounds:10,
+    guessInput:'',
+    inputActive:false,
+    hintsShown:0,
+    btnRects:{},
+    particles:[],
+    paused:false,
+    bgShapes:[],
+    color:0,
+    brush:1,
+    drawing:false,
+    lastX:0,lastY:0,
+    phase:0,
+    timeLeft:0,
+    drawTime:60,
+    guessTime:30,
+    timerActive:false,
+    guessers:[],
+    correctCount:0,
+    skipCount:0,
+    floatMsgs:[],
+    hintUnlocked:false,
+    showHintBar:false,
+    resultShown:false,
+    revealAnim:0,
+    drawerName:'画家'
+};
+
+G.highScore=parseInt(Storage.load('drawguess_high','0'));
+
+for(let i=0;i<30;i++){
+    G.bgShapes.push({
+        x:Math.random()*W,
+        y:Math.random()*H,
+        s:8+Math.random()*20,
+        vy:-0.3-Math.random()*0.5,
+        vx:(Math.random()-0.5)*0.4,
+        r:Math.random()*Math.PI*2,
+        vr:(Math.random()-0.5)*0.02,
+        shape:Math.floor(Math.random()*3),
+        a:0.12+Math.random()*0.1
+    });
+}
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color,textColor,fontSize,disabled){
+    G.btnRects[name]={x:x,y:y,w:w,h:h,disabled:disabled};
+    ctx.fillStyle=disabled?'rgba(150,150,150,0.4)':(color||'#fcb69f');
+    roundRect(ctx,x,y,w,h,10);
+    ctx.fill();
+    ctx.strokeStyle=disabled?'rgba(255,255,255,0.2)':'rgba(255,255,255,0.55)';
+    ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,10);
+    ctx.stroke();
+    ctx.fillStyle=disabled?'#bbb':(textColor||'#fff');
+    ctx.font='bold '+(fontSize||16)+'px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && !r.disabled && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+function updateShapes(){
+    for(const s of G.bgShapes){
+        s.y+=s.vy;s.x+=s.vx;s.r+=s.vr;
+        if(s.y+s.s<0){s.y=H+s.s;s.x=Math.random()*W}
+        if(s.x<-s.s)s.x=W+s.s;if(s.x>W+s.s)s.x=-s.s;
+    }
+}
+function drawShapes(ctx){
+    for(const s of G.bgShapes){
+        ctx.save();ctx.translate(s.x,s.y);ctx.rotate(s.r);ctx.globalAlpha=s.a;
+        ctx.fillStyle='#fff';
+        if(s.shape===0){ctx.beginPath();ctx.arc(0,0,s.s/2,0,Math.PI*2);ctx.fill()}
+        else if(s.shape===1){ctx.fillRect(-s.s/2,-s.s/2,s.s,s.s)}
+        else{ctx.beginPath();ctx.moveTo(0,-s.s/2);ctx.lineTo(s.s/2,s.s/2);ctx.lineTo(-s.s/2,s.s/2);ctx.closePath();ctx.fill()}
+        ctx.restore();
+    }
+    ctx.globalAlpha=1;
+}
+
+function spawnParticles(x,y,color,count){
+    for(let i=0;i<(count||15);i++){
+        G.particles.push({
+            x:x,y:y,
+            vx:(Math.random()-0.5)*10,
+            vy:(Math.random()-0.5)*10-3,
+            life:50,maxLife:50,
+            size:3+Math.random()*4,
+            color:color
+        });
+    }
+}
+function updateParticles(){
+    for(let i=G.particles.length-1;i>=0;i--){
+        const p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.vy+=0.25;p.life--;
+        if(p.life<=0) G.particles.splice(i,1);
+    }
+}
+function drawParticles(ctx){
+    for(const p of G.particles){
+        ctx.globalAlpha=p.life/p.maxLife;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+
+function addFloat(x,y,text,color){
+    G.floatMsgs.push({x:x,y:y,text:text,color:color||'#fff',life:50,vy:-1.2});
+}
+function updateFloat(){
+    for(let i=G.floatMsgs.length-1;i>=0;i--){
+        const f=G.floatMsgs[i];f.y+=f.vy;f.life--;
+        if(f.life<=0) G.floatMsgs.splice(i,1);
+    }
+}
+function drawFloat(ctx){
+    for(const f of G.floatMsgs){
+        ctx.globalAlpha=f.life/50;
+        ctx.fillStyle=f.color;
+        ctx.font='bold 18px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(f.text,f.x,f.y);
+    }
+    ctx.globalAlpha=1;ctx.textAlign='left';
+}
+
+window.addEventListener('keydown',function(e){
+    G.keys=G.keys||{};G.keys[e.key.toLowerCase()]=true;
+    if(e.key==='Escape'){if(G.state===STATE_PLAYING)togglePause()}
+    if(G.state===STATE_PLAYING && G.inputActive){
+        if(e.key==='Backspace'){G.guessInput=G.guessInput.slice(0,-1);sfxBtn()}
+        else if(e.key==='Enter'){submitGuess()}
+        else if(e.key.length===1){G.guessInput+=e.key;sfxBtn()}
+    }
+    initAudio();
+});
+window.addEventListener('keyup',function(e){if(G.keys)G.keys[e.key.toLowerCase()]=false});
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){startGame();return}
+        if(hitBtn(p,'r5')){G.maxRounds=5;sfxBtn();return}
+        if(hitBtn(p,'r10')){G.maxRounds=10;sfxBtn();return}
+        if(hitBtn(p,'r20')){G.maxRounds=20;sfxBtn();return}
+    } else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;return}
+    } else if(G.state===STATE_PLAYING && !G.paused){
+        if(hitBtn(p,'pause')){togglePause();return}
+        if(G.phase===0){
+            if(hitBtn(p,'startDraw')){startDrawing();return}
+            if(hitBtn(p,'skipWord')){pickWord(true);return}
+        } else if(G.phase===1){
+            for(let i=0;i<COLORS.length;i++){if(hitBtn(p,'col'+i)){G.color=i;sfxBtn();return}}
+            for(let i=0;i<BRUSH_SIZES.length;i++){if(hitBtn(p,'sz'+i)){G.brush=i;sfxBtn();return}}
+            if(hitBtn(p,'eraser')){G.color=COLORS.length-1;sfxBtn();return}
+            if(hitBtn(p,'clear')){clearCanvas();return}
+            if(hitBtn(p,'showHint')){showNextHint();return}
+            if(hitBtn(p,'openGuess')){G.inputActive=true;sfxBtn();return}
+            if(hitBtn(p,'doneDraw')){doneDrawing();return}
+            if(onCanvas(p)){
+                G.drawing=true;
+                const cp=toCanvas(p);
+                G.lastX=cp.x;G.lastY=cp.y;
+                drawAt(cp.x,cp.y);
+            }
+        } else if(G.phase===2){
+            if(hitBtn(p,'openGuess')){G.inputActive=true;sfxBtn();return}
+            if(hitBtn(p,'submitGuess')){submitGuess();return}
+            if(hitBtn(p,'cancelGuess')){G.inputActive=false;G.guessInput='';sfxBtn();return}
+            if(hitBtn(p,'giveUp')){giveUp();return}
+        } else if(G.phase===3){
+            if(hitBtn(p,'nextWord')){nextRound();return}
+        }
+    }
+}
+function handlePointerMove(e){
+    if(G.drawing && G.phase===1){
+        const p=getPos(e);
+        if(onCanvas(p)){
+            const cp=toCanvas(p);
+            drawLine(G.lastX,G.lastY,cp.x,cp.y);
+            G.lastX=cp.x;G.lastY=cp.y;
+            if(Math.random()<0.3)sfxDraw();
+        } else {
+            G.drawing=false;
+        }
+    }
+}
+function handlePointerUp(e){G.drawing=false}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e)},{passive:false});
+
+const CANVAS_X=30,CANVAS_Y=160,CANVAS_W=420,CANVAS_H=340;
+function onCanvas(p){return p.x>=CANVAS_X&&p.x<=CANVAS_X+CANVAS_W&&p.y>=CANVAS_Y&&p.y<=CANVAS_Y+CANVAS_H}
+function toCanvas(p){return{x:p.x-CANVAS_X,y:p.y-CANVAS_Y}}
+function clearCanvas(){dctx.fillStyle='#fff';dctx.fillRect(0,0,CANVAS_W,CANVAS_H);sfxBtn()}
+function drawAt(x,y){
+    dctx.fillStyle=COLORS[G.color];
+    const sz=BRUSH_SIZES[G.brush];
+    dctx.beginPath();dctx.arc(x,y,sz/2,0,Math.PI*2);dctx.fill();
+}
+function drawLine(x1,y1,x2,y2){
+    dctx.strokeStyle=COLORS[G.color];
+    dctx.lineWidth=BRUSH_SIZES[G.brush];
+    dctx.lineCap='round';dctx.lineJoin='round';
+    dctx.beginPath();dctx.moveTo(x1,y1);dctx.lineTo(x2,y2);dctx.stroke();
+}
+
+function pickWord(skip){
+    if(skip){G.skipCount++;G.score=Math.max(0,G.score-20);addFloat(W/2,140,'跳过 -20','#ff6b6b')}
+    let pool=[];
+    for(let i=0;i<WORDS.length;i++){if(!G.wordsDone.includes(i))pool.push(i)}
+    if(pool.length===0){G.wordsDone=[];pool=[];for(let i=0;i<WORDS.length;i++)pool.push(i)}
+    const idx=pool[Math.floor(Math.random()*pool.length)];
+    G.currentWord=WORDS[idx];
+    G.wordsDone.push(idx);
+    G.hintsShown=0;
+    G.hintUnlocked=false;
+    clearCanvas();
+    G.phase=0;
+    G.guessInput='';G.inputActive=false;
+    G.resultShown=false;G.revealAnim=0;
+    sfxBtn();
+}
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.score=0;G.rounds=0;G.wordsDone=[];
+    G.correctCount=0;G.skipCount=0;
+    G.color=0;G.brush=1;
+    nextRound();
+    sfxWin();
+    spawnParticles(W/2,H/2,'#ffd700',25);
+}
+
+function endGame(){
+    G.state=STATE_OVER;
+    if(G.score>G.highScore){G.highScore=G.score;Storage.save('drawguess_high',G.highScore)}
+    sfxWin();
+}
+
+function togglePause(){G.paused=!G.paused;sfxBtn()}
+
+function startDrawing(){
+    G.phase=1;
+    G.timerActive=true;
+    G.timeLeft=G.drawTime*60;
+    G.color=0;G.brush=1;
+    sfxReveal();
+    addFloat(W/2,130,'🎨 开始作画！','#4ecdc4');
+}
+
+function doneDrawing(){
+    G.phase=2;
+    G.timerActive=true;
+    G.timeLeft=G.guessTime*60;
+    sfxBtn();
+}
+
+function showNextHint(){
+    if(G.hintsShown>=G.currentWord.h.length+1){return}
+    G.hintsShown++;
+    G.score=Math.max(0,G.score-10);
+    sfxBtn();
+    addFloat(W/2,140,'💡 提示 -10分','#ffe66d');
+}
+
+function submitGuess(){
+    if(!G.guessInput)return;
+    const g=G.guessInput.trim();
+    G.inputActive=false;
+    const w=G.currentWord.w;
+    const correct=g===w||w.includes(g)||g.includes(w);
+    if(correct){
+        const timeBonus=Math.floor(G.timeLeft/30);
+        const hintPenalty=G.hintsShown*15;
+        const base=G.phase===1?200:150;
+        const total=Math.max(30,base+timeBonus*3-hintPenalty);
+        G.score+=total;
+        G.correctCount++;
+        G.phase=3;G.resultShown=true;
+        G.timerActive=false;
+        sfxCorrect();
+        spawnParticles(W/2,330,'#4ecdc4',30);
+        addFloat(W/2,135,'🎉 猜对了！+'+total,'#4ecdc4');
+    } else {
+        sfxWrong();
+        addFloat(W/2,130,'✗ 不对，再试试','#ff6b6b');
+    }
+    G.guessInput='';
+}
+
+function giveUp(){
+    G.phase=3;G.resultShown=true;G.revealAnim=1;
+    G.timerActive=false;
+    G.score=Math.max(0,G.score-40);
+    sfxWrong();
+    addFloat(W/2,135,'答案是：'+G.currentWord.w,'#ff6b6b');
+}
+
+function nextRound(){
+    G.rounds++;
+    if(G.rounds>=G.maxRounds){endGame();return}
+    pickWord(false);
+    sfxBtn();
+}
+
+function update(){
+    updateShapes();updateParticles();updateFloat();
+    if(G.state!==STATE_PLAYING||G.paused) return;
+    if(G.timerActive){
+        G.timeLeft--;
+        if(G.timeLeft<=0){
+            G.timerActive=false;
+            if(G.phase===1)doneDrawing();
+            else if(G.phase===2){giveUp()}
+        }
+        if(G.timeLeft===300||G.timeLeft===180||G.timeLeft===60)sfxTick();
+    }
+}
+
+function drawBackground(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#ffecd2');g.addColorStop(1,'#fcb69f');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    drawShapes(ctx);
+}
+
+function drawHUD(ctx){
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    roundRect(ctx,10,10,W-20,72,12);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.8)';ctx.lineWidth=2;
+    roundRect(ctx,10,10,W-20,72,12);ctx.stroke();
+    ctx.fillStyle='#555';ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('第',25,32);
+    ctx.font='bold 22px Arial';ctx.fillStyle='#ff6b6b';
+    ctx.fillText((G.rounds+1)+'/'+G.maxRounds,45,32);
+    ctx.font='bold 14px "Microsoft YaHei"';ctx.fillStyle='#555';
+    ctx.fillText('回合',45+50,32);
+    ctx.textAlign='center';
+    const phaseText=['选词','作画中','猜词中','结果'][G.phase];
+    const tc=['#795548','#2979ff','#00c853','#9c27b0'][G.phase];
+    ctx.fillStyle=tc;ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.fillText('🎯 '+phaseText,W/2,30);
+    if(G.timerActive){
+        const t=Math.ceil(G.timeLeft/60);
+        ctx.fillStyle=t<=10?'#ff5252':'#555';
+        ctx.font='bold 20px Arial';
+        ctx.fillText('⏱ '+t+'s',W/2,57);
+    }
+    ctx.textAlign='right';ctx.fillStyle='#555';
+    ctx.font='bold 14px "Microsoft YaHei"';ctx.fillText('得分',W-25,32);
+    ctx.font='bold 24px Arial';ctx.fillStyle='#ff6b00';
+    ctx.fillText(G.score,W-25,58);
+    ctx.textAlign='left';
+    ctx.fillStyle='rgba(0,0,0,0.45)';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('✓猜对 '+G.correctCount+'  ✗跳过 '+G.skipCount,W/2,76);
+    ctx.textAlign='left';
+}
+
+function drawCanvas(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.12)';
+    roundRect(ctx,CANVAS_X+4,CANVAS_Y+4,CANVAS_W,CANVAS_H,14);ctx.fill();
+    ctx.fillStyle='#fff';
+    roundRect(ctx,CANVAS_X,CANVAS_Y,CANVAS_W,CANVAS_H,14);ctx.fill();
+    ctx.strokeStyle='#9c27b0';ctx.lineWidth=3;
+    roundRect(ctx,CANVAS_X,CANVAS_Y,CANVAS_W,CANVAS_H,14);ctx.stroke();
+    ctx.drawImage(drawCanvas,CANVAS_X,CANVAS_Y,CANVAS_W,CANVAS_H);
+}
+
+function drawPalette(ctx){
+    if(G.phase!==1) return;
+    const py=CANVAS_Y+CANVAS_H+8;
+    const sx=30,ex=W-30;
+    const gap=(ex-sx)/COLORS.length;
+    for(let i=0;i<COLORS.length;i++){
+        const x=sx+gap*i+gap/2-14;
+        G.btnRects['col'+i]={x:x,y:py,w:28,h:28,disabled:false};
+        ctx.fillStyle=COLORS[i];
+        ctx.beginPath();ctx.arc(x+14,py+14,13,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle=G.color===i?'#ff6b6b':'rgba(0,0,0,0.2)';
+        ctx.lineWidth=G.color===i?3:1.5;
+        ctx.beginPath();ctx.arc(x+14,py+14,13,0,Math.PI*2);ctx.stroke();
+        if(i===COLORS.length-1){ctx.strokeStyle='#999';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x+6,py+22);ctx.lineTo(x+22,py+6);ctx.stroke()}
+    }
+    const sy=py+40;
+    for(let i=0;i<BRUSH_SIZES.length;i++){
+        const x=sx+50+i*42;
+        G.btnRects['sz'+i]={x:x,y:sy,w:34,h:30,disabled:false};
+        ctx.fillStyle=G.brush===i?'#fff2e0':'rgba(255,255,255,0.5)';
+        roundRect(ctx,x,y,34,30,8);ctx.fill();
+        ctx.strokeStyle=G.brush===i?'#ff6b00':'rgba(0,0,0,0.15)';ctx.lineWidth=2;
+        roundRect(ctx,x,y,34,30,8);ctx.stroke();
+        ctx.fillStyle='#333';ctx.beginPath();
+        ctx.arc(x+17,sy+15,BRUSH_SIZES[i]/2,0,Math.PI*2);ctx.fill();
+    }
+    drawBtn(ctx,sx+290,sy,60,30,'🧽 橡皮','eraser','#fff','#555',13);
+    drawBtn(ctx,sx+355,sy,55,30,'🗑 清空','clear','#fff59d','#555',13);
+}
+
+function drawWordArea(ctx){
+    if(G.phase===0){
+        ctx.fillStyle='rgba(255,255,255,0.75)';
+        roundRect(ctx,30,100,W-60,55,12);ctx.fill();
+        ctx.strokeStyle='#ff6b00';ctx.lineWidth=2;
+        roundRect(ctx,30,100,W-60,55,12);ctx.stroke();
+        ctx.fillStyle='#ff6b00';ctx.font='bold 15px "Microsoft YaHei"';
+        ctx.textAlign='center';ctx.fillText('📝 你要画的词语是：',W/2,118);
+        ctx.fillStyle='#2979ff';ctx.font='bold 28px "Microsoft YaHei"';
+        if(G.revealAnim<1){G.revealAnim+=0.04}
+        const txt=G.currentWord.w;
+        const ww=ctx.measureText(txt).width;
+        const show=Math.floor(txt.length*Math.min(1,G.revealAnim));
+        ctx.fillText(txt.substring(0,show)+(G.revealAnim<1?'_':''),W/2,146);
+        drawBtn(ctx,40,CANVAS_Y+CANVAS_H+10,190,50,'🎨 开始作画','startDraw','#00c853','#fff',17);
+        drawBtn(ctx,W-230,CANVAS_Y+CANVAS_H+10,190,50,'⏭ 换词 -20分','skipWord','rgba(255,255,255,0.8)','#666',16);
+        ctx.textAlign='left';
+    } else {
+        ctx.fillStyle='rgba(255,255,255,0.7)';
+        roundRect(ctx,30,98,W-60,60,12);ctx.fill();
+        if(G.phase===1){
+            ctx.fillStyle='#2979ff';ctx.font='bold 15px "Microsoft YaHei"';
+            ctx.textAlign='left';ctx.fillText('🎨 画家正在画...',40,120);
+            ctx.font='13px "Microsoft YaHei"';ctx.fillStyle='#666';
+            ctx.fillText('类别：'+G.currentWord.cat,40,143);
+            if(G.hintsShown>0){
+                ctx.textAlign='right';ctx.fillStyle='#00c853';ctx.font='bold 13px "Microsoft YaHei"';
+                for(let i=0;i<G.hintsShown;i++){
+                    if(i<G.currentWord.h.length)
+                        ctx.fillText('💡'+G.currentWord.h[i],W-40,122+i*18);
+                }
+            }
+            ctx.textAlign='left';
+        } else if(G.phase===2){
+            ctx.fillStyle='#ff6b00';ctx.font='bold 15px "Microsoft YaHei"';
+            ctx.textAlign='left';ctx.fillText('🤔 猜一猜画家画的是什么？',40,120);
+            ctx.font='13px "Microsoft YaHei"';ctx.fillStyle='#666';
+            ctx.fillText('已用提示：'+G.hintsShown+'/'+(G.currentWord.h.length+1)+'  (每个-10分)',40,143);
+            if(G.hintsShown>0){
+                ctx.textAlign='right';ctx.fillStyle='#00c853';ctx.font='bold 13px "Microsoft YaHei"';
+                for(let i=0;i<G.hintsShown;i++){
+                    if(i<G.currentWord.h.length)
+                        ctx.fillText('💡'+G.currentWord.h[i],W-40,122+i*18);
+                }
+                ctx.textAlign='left';
+            }
+        } else if(G.phase===3){
+            ctx.textAlign='center';
+            ctx.font='bold 15px "Microsoft YaHei"';
+            ctx.fillStyle=G.correctCount>G.rounds-G.skipCount-G.correctCount?'#00c853':'#ff5252';
+            ctx.fillText(G.correctCount>G.rounds-G.skipCount-G.correctCount?'🎉 正确！':'😢 正确答案是：',W/2,118);
+            ctx.font='bold 28px "Microsoft YaHei"';ctx.fillStyle='#ff6b00';
+            ctx.fillText(G.currentWord.w,W/2,146);
+            ctx.textAlign='left';
+        }
+    }
+}
+
+function drawBottomActions(ctx){
+    if(G.phase===1){
+        drawPalette(ctx);
+        const by=CANVAS_Y+CANVAS_H+108;
+        drawBtn(ctx,15,by,145,45,'💡 提示-10','showHint',G.hintsShown<G.currentWord.h.length+1?'#ffe66d':'#ccc','#333',14,G.hintsShown>=G.currentWord.h.length+1);
+        drawBtn(ctx,168,by,145,45,'✅ 完成了','doneDraw','#00bcd4','#fff',15);
+        drawBtn(ctx,W-160,by,145,45,'❓ 我要猜词','openGuess','#9c27b0','#fff',15);
+    } else if(G.phase===2){
+        const by=CANVAS_Y+CANVAS_H+15;
+        drawBtn(ctx,15,by,130,42,'💡 提示-10','showHint',G.hintsShown<G.currentWord.h.length+1?'#ffe66d':'#ccc','#333',13,G.hintsShown>=G.currentWord.h.length+1);
+        drawBtn(ctx,153,by,175,42,'✏️ 输入答案猜测','openGuess','#00c853','#fff',14);
+        drawBtn(ctx,W-148,by,135,42,'😵 放弃-40','giveUp','#ff5252','#fff',13);
+    } else if(G.phase===3){
+        const by=CANVAS_Y+CANVAS_H+18;
+        drawBtn(ctx,W/2-100,by,200,55,'▶ 下一个词','nextWord','#ff6b00','#fff',18);
+    }
+    drawBtn(ctx,W-60,90,45,32,'⏸','pause','rgba(255,255,255,0.6)','#555');
+}
+
+function drawGuessPanel(ctx){
+    if(!G.inputActive)return;
+    ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(0,0,W,H);
+    const pw=420,ph=260,cx=W/2,cy=H/2;
+    ctx.fillStyle='rgba(255,255,255,0.98)';
+    roundRect(ctx,cx-pw/2,cy-ph/2,pw,ph,20);ctx.fill();
+    ctx.strokeStyle='#ff6b00';ctx.lineWidth=4;
+    roundRect(ctx,cx-pw/2,cy-ph/2,pw,ph,20);ctx.stroke();
+    ctx.fillStyle='#ff6b00';ctx.font='bold 26px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.fillText('✏️ 输入你的答案',cx,cy-ph/2+45);
+    ctx.font='14px "Microsoft YaHei"';ctx.fillStyle='#666';
+    ctx.fillText('(答对有高分奖励，不扣分哦～)',cx,cy-ph/2+72);
+    ctx.fillStyle='#fff2e0';
+    roundRect(ctx,cx-180,cy-30,360,55,12);ctx.fill();
+    ctx.strokeStyle='#ff6b00';ctx.lineWidth=2;
+    roundRect(ctx,cx-180,cy-30,360,55,12);ctx.stroke();
+    ctx.fillStyle='#222';ctx.font='bold 26px "Microsoft YaHei"';
+    const d=G.guessInput+(Date.now()/400%2<1?'|':'');
+    ctx.fillText(d,cx,cy+5);
+    drawBtn(ctx,cx-180,cy+45,170,52,'取消','cancelGuess','#ccc','#555',16);
+    drawBtn(ctx,cx+10,cy+45,170,52,'✅ 提交答案','submitGuess','#00c853','#fff',16);
+    ctx.textAlign='left';
+}
+
+function drawMenu(ctx){
+    drawBackground(ctx);
+    ctx.fillStyle='rgba(255,255,255,0.2)';ctx.fillRect(0,0,W,H);
+    const f=Math.sin(Date.now()/500)*8;
+    ctx.save();ctx.translate(W/2,110+f);
+    ctx.globalAlpha=0.3;
+    const col=['#ff6b00','#2979ff','#ffe66d'];
+    for(let i=0;i<3;i++){ctx.fillStyle=col[i];ctx.beginPath();ctx.arc(-50+i*50,0,50-i*8,0,Math.PI*2);ctx.fill()}
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#fff';ctx.font='bold 56px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.fillText('🎨 你画',0,15);
+    ctx.restore();
+    ctx.fillStyle='#ff6b00';ctx.font='bold 56px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.fillText('我猜 🤔',W/2,190);
+    ctx.fillStyle='#fff';ctx.font='bold 18px Arial';
+    ctx.fillText('DRAW AND GUESS',W/2,220);
+    ctx.fillStyle='#555';ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.fillText('选择回合数',W/2,260);
+    drawBtn(ctx,W/2-160,290,100,55,'5回合','r5',G.maxRounds===5?'#fff':'rgba(255,255,255,0.7)',G.maxRounds===5?'#ff6b00':'#555',16);
+    drawBtn(ctx,W/2-50,290,100,55,'10回合','r10',G.maxRounds===10?'#fff':'rgba(255,255,255,0.7)',G.maxRounds===10?'#ff6b00':'#555',16);
+    drawBtn(ctx,W/2+60,290,100,55,'20回合','r20',G.maxRounds===20?'#fff':'rgba(255,255,255,0.7)',G.maxRounds===20?'#ff6b00':'#555',16);
+    ctx.fillStyle='#fff';ctx.font='bold 17px "Microsoft YaHei"';
+    const bxx=W/2-190,byy=360,bww=380,bhh=150;
+    ctx.fillStyle='rgba(255,255,255,0.55)';
+    roundRect(ctx,bxx,byy,bww,bhh,16);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.9)';ctx.lineWidth=2;
+    roundRect(ctx,bxx,byy,bww,bhh,16);ctx.stroke();
+    ctx.fillStyle='#555';ctx.textAlign='center';
+    ctx.fillText('📖 玩法说明',W/2,byy+28);
+    ctx.font='14px "Microsoft YaHei"';ctx.fillStyle='#444';
+    ctx.fillText('① 选择一个词，在画板上画出来',W/2,byy+56);
+    ctx.fillText('② 画完后可以自己猜，或让朋友们猜',W/2,byy+80);
+    ctx.fillText('③ 看提示 -10分 / 换词 -20分 / 放弃 -40分',W/2,byy+104);
+    ctx.fillText('④ 越快猜对 剩余时间加分越多！',W/2,byy+128);
+    ctx.textAlign='left';
+    ctx.fillStyle='#ff6b00';ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.fillText('🏆 最高分: '+G.highScore,W/2,545);
+    drawBtn(ctx,W/2-130,570,260,70,'🎉 开始游戏','start','#fff','#ff6b00',22);
+    ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('40+词库 · 多种颜色画笔 · 3种笔刷大小',W/2,665);
+    ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText('ESC 暂停游戏',W/2,695);
+    ctx.textAlign='left';
+}
+
+function drawGame(ctx){
+    drawBackground(ctx);
+    drawHUD(ctx);
+    drawCanvas(ctx);
+    drawWordArea(ctx);
+    drawBottomActions(ctx);
+    drawParticles(ctx);
+    drawFloat(ctx);
+    drawGuessPanel(ctx);
+    if(G.paused){
+        ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,W,H);
+        ctx.fillStyle='#fff';ctx.font='bold 48px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText('⏸ 暂停',W/2,H/2-20);
+        ctx.font='18px "Microsoft YaHei"';ctx.fillStyle='rgba(255,255,255,0.7)';
+        ctx.fillText('按 ESC 继续游戏',W/2,H/2+30);ctx.textAlign='left';
+    }
+}
+
+function drawGameOver(ctx){
+    drawBackground(ctx);
+    ctx.fillStyle='rgba(0,0,0,0.35)';ctx.fillRect(0,0,W,H);
+    const isNew=G.score>=G.highScore&&G.score>0;
+    ctx.fillStyle=isNew?'#ffd700':'#fff';
+    ctx.font='bold 44px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText(isNew?'🏆 新纪录!':'🎊 游戏结束',W/2,115);
+    ctx.fillStyle='#fff';ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('最终得分',W/2,175);
+    ctx.fillStyle='#ff6b00';ctx.font='bold 96px Arial';
+    ctx.fillText(G.score,W/2,280);
+    ctx.fillStyle='rgba(255,255,255,0.95)';ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.fillText(G.maxRounds+'回合 · 猜对 '+G.correctCount+' 个 · 跳过/放弃 '+G.skipCount+' 个',W/2,330);
+    const acc=G.rounds>0?Math.round(G.correctCount/G.maxRounds*100):0;
+    ctx.fillText('完成率: '+acc+'%',W/2,358);
+    ctx.fillStyle='#ffd700';ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.fillText('🏆 最高分纪录: '+G.highScore,W/2,410);
+    const ratings=[
+        {min:1500,t:'灵魂画手 🎨',c:'#ffd700'},
+        {min:1000,t:'绘画大师 🖌',c:'#f093fb'},
+        {min:600,t:'小有名气 ✏️',c:'#4ecdc4'},
+        {min:300,t:'初出茅庐 📝',c:'#a8e6cf'},
+        {min:0,t:'再接再厉 💪',c:'#ff8b94'}
+    ];
+    let ra=ratings[ratings.length-1];
+    for(const r of ratings){if(G.score>=r.min){ra=r;break}}
+    ctx.fillStyle=ra.c;ctx.font='bold 32px "Microsoft YaHei"';
+    ctx.fillText(ra.t,W/2,470);
+    drawBtn(ctx,W/2-115,520,230,65,'🔄 再来一局','restart','#fff','#ff6b00',20);
+    drawBtn(ctx,W/2-80,595,160,45,'🏠 返回菜单','menu','rgba(255,255,255,0.5)','#555',16);
+    ctx.textAlign='left';
+}
+
+function draw(){
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+        case STATE_PAUSE: drawGame(ctx); break;
+    }
+}
+
+function gameLoop(){
+    requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+
+gameLoop();
+
+const EXTRA_W = ["长颈鹿","大象","老虎","狮子","猴子","兔子","松鼠","熊猫","北极熊","海豚","鲨鱼","章鱼","蝴蝶","蜜蜂","蚂蚁","青蛙","蛇","乌龟","鳄鱼","老鹰","汉堡包","披萨","寿司","咖啡","冰淇淋","三明治","啤酒","奶茶","汤圆","馒头","火锅","烧烤","煎饼果子","臭豆腐","烤鸭","炸酱面","麻辣烫","小龙虾","小笼包","网球","高尔夫","跳水","击剑","射箭","拳击","柔道","举重","自行车","赛艇","手机","耳机","充电宝","摄像头","路由器","机械键盘","鼠标","硬盘","显示器","投影仪","向日葵","玫瑰花","仙人掌","郁金香","荷花","菊花","梅花","桃花","樱花","薰衣草","雨伞","剪刀","梳子","牙刷","毛巾","书包","枕头","被子","拖鞋","眼镜","跑步","跳舞","游泳","唱歌","睡觉","吃饭","洗澡","读书","画画","开车","飞机","火车","自行车","摩托车","地铁","公交车","出租车","轮船","热气球","火箭"];
+if(typeof WORDS!=='undefined')WORDS.push(...EXTRA_W);
+
+const ACHIEVEMENTS = [
+    {id:'first_win',name:'初出茅庐',desc:'完成第一局游戏',icon:'🌱',unlocked:false},
+    {id:'score_500',name:'小有斩获',desc:'单局得分突破500',icon:'💰',unlocked:false},
+    {id:'score_1000',name:'渐入佳境',desc:'单局得分突破1000',icon:'🏅',unlocked:false},
+    {id:'score_2000',name:'出类拔萃',desc:'单局得分突破2000',icon:'🏆',unlocked:false},
+    {id:'combo_5',name:'五连绝世',desc:'单局连续答对5题',icon:'🔥',unlocked:false},
+    {id:'combo_10',name:'十全十美',desc:'单局连续答对10题',icon:'💥',unlocked:false},
+    {id:'all_hint',name:'勤学好问',desc:'一局内使用9次提示',icon:'💡',unlocked:false},
+    {id:'no_hint',name:'独立自主',desc:'一局零提示答对8题',icon:'🦅',unlocked:false},
+    {id:'full_score',name:'完美通关',desc:'一局80%正确率10题以上',icon:'⭐',unlocked:false},
+    {id:'game_10',name:'勤奋好学',desc:'累计游玩10局',icon:'🎮',unlocked:false},
+    {id:'game_30',name:'脑力达人',desc:'累计游玩30局',icon:'🧠',unlocked:false},
+    {id:'q_100',name:'百战不殆',desc:'累计答对100道题',icon:'📚',unlocked:false},
+    {id:'best',name:'名留青史',desc:'打破历史最高分纪录',icon:'👑',unlocked:false},
+    {id:'party1',name:'派对气氛组',desc:'5个玩家同玩一局',icon:'🎉',unlocked:false},
+    {id:'speed',name:'闪电手速',desc:'10秒内完成一次作答',icon:'⚡',unlocked:false},
+    {id:'tryhard',name:'锲而不舍',desc:'连续打开游戏3天',icon:'📅',unlocked:false}
+];
+const SK='draw_stats_v1';
+const STAT={
+    totalGames:parseInt(Storage.load(SK+'_g','0')),
+    totalCorrect:parseInt(Storage.load(SK+'_c','0')),
+    totalWrong:parseInt(Storage.load(SK+'_w','0')),
+    bestCombo:parseInt(Storage.load(SK+'_bc','0')),
+    totalHintUsed:parseInt(Storage.load(SK+'_h','0')),
+    bestScore:parseInt(Storage.load(SK+'_bs','0')),
+    unlocked:JSON.parse(Storage.load(SK+'_unlock','[]'))
+};
+for(const a of ACHIEVEMENTS){if(STAT.unlocked.includes(a.id))a.unlocked=true}
+function saveStat(){
+    Storage.save(SK+'_g',STAT.totalGames);Storage.save(SK+'_c',STAT.totalCorrect);
+    Storage.save(SK+'_w',STAT.totalWrong);Storage.save(SK+'_bc',STAT.bestCombo);
+    Storage.save(SK+'_h',STAT.totalHintUsed);Storage.save(SK+'_bs',STAT.bestScore);
+    Storage.save(SK+'_unlock',JSON.stringify(STAT.unlocked));
+}
+function unlockAchieve(id){
+    const a=ACHIEVEMENTS.find(x=>x.id===id);
+    if(!a||a.unlocked)return;
+    a.unlocked=true;if(!STAT.unlocked.includes(id))STAT.unlocked.push(id);saveStat();
+    if(typeof addFloat==='function')addFloat(W/2,H/2-100,'成就解锁：'+a.name+' '+a.icon,'#ffd700');
+    if(typeof spawnParticles==='function')spawnParticles(W/2,H/2-100,'#ffd700',30);
+}
+const SEK='draw_settings_v1';
+const SETTINGS={
+    soundOn:Storage.load(SEK+'_snd','1')==='1',
+    vibOn:Storage.load(SEK+'_vib','1')==='1',
+    theme:parseInt(Storage.load(SEK+'_th','0')||'0'),
+    showTimer:Storage.load(SEK+'_t','1')==='1'
+};
+function saveSettings(){
+    Storage.save(SEK+'_snd',SETTINGS.soundOn?'1':'0');Storage.save(SEK+'_vib',SETTINGS.vibOn?'1':'0');
+    Storage.save(SEK+'_th',String(SETTINGS.theme));Storage.save(SEK+'_t',SETTINGS.showTimer?'1':'0');
+}
+const THEMES=[
+    {name:'樱花粉紫',bg1:'#fbc2eb',bg2:'#a6c1ee',accent:'#9c27b0'},
+    {name:'森林清新',bg1:'#a8e063',bg2:'#56ab2f',accent:'#33691e'},
+    {name:'海洋蔚蓝',bg1:'#4facfe',bg2:'#00f2fe',accent:'#01579b'},
+    {name:'日落黄昏',bg1:'#fa709a',bg2:'#fee140',accent:'#e65100'},
+    {name:'深夜黑金',bg1:'#232526',bg2:'#414345',accent:'#ffd700'},
+    {name:'薄荷清凉',bg1:'#a1ffce',bg2:'#faffd1',accent:'#00695c'}
+];
+function applyTheme(){
+    const th=THEMES[SETTINGS.theme%THEMES.length];
+    document.body.style.background=`linear-gradient(135deg,${th.bg1} 0%,${th.bg2} 100%)`;
+}
+const STATE_SETTINGS=101,STATE_ACHIEVEMENTS=102,STATE_HELP=103,STATE_STATS=104;
+
+function updateAchievementsAfterGame(){
+    STAT.totalGames++;
+    if(G){
+        STAT.totalCorrect+=G.correct||0;STAT.totalWrong+=G.wrong||0;
+        STAT.bestCombo=Math.max(STAT.bestCombo,G.maxCombo||0);
+        STAT.bestScore=Math.max(STAT.bestScore,G.score||0);
+        STAT.totalHintUsed+=G.hintsUsed||0;
+    }
+    if(STAT.totalGames>=1)unlockAchieve('first_win');
+    if((G.score||0)>=500)unlockAchieve('score_500');
+    if((G.score||0)>=1000)unlockAchieve('score_1000');
+    if((G.score||0)>=2000)unlockAchieve('score_2000');
+    if((G.maxCombo||0)>=5)unlockAchieve('combo_5');
+    if((G.maxCombo||0)>=10)unlockAchieve('combo_10');
+    if(STAT.totalGames>=10)unlockAchieve('game_10');
+    if(STAT.totalGames>=30)unlockAchieve('game_30');
+    if(STAT.totalCorrect>=100)unlockAchieve('q_100');
+    if(G&&G.highScore&&G.score>G.highScore)unlockAchieve('best');
+    saveStat();
+}
+const _dmo=typeof drawMenu==='function'?drawMenu:null;
+function drawMenuEx(ctx){
+    if(_dmo)_dmo(ctx);
+    const by=668,bw=92,bh=34;
+    if(typeof drawBtn==='function'){
+        drawBtn(ctx,15,by,bw,bh,'设置','openSettings','rgba(255,255,255,0.6)','#444',13);
+        drawBtn(ctx,120,by,bw,bh,'成就','openAch','rgba(255,255,255,0.6)','#444',13);
+        drawBtn(ctx,225,by,bw,bh,'统计','openStats','rgba(255,255,255,0.6)','#444',13);
+        drawBtn(ctx,330,by,bw,bh,'帮助','openHelp','rgba(255,255,255,0.6)','#444',13);
+    }
+}
+function drawSubPageBackdrop(ctx,title){
+    ctx.fillStyle='rgba(255,255,255,0.97)';
+    if(typeof roundRect==='function'){
+        roundRect(ctx,12,90,W-24,H-185,22);ctx.fill();
+        ctx.strokeStyle=THEMES[SETTINGS.theme%THEMES.length].accent;ctx.lineWidth=3;
+        roundRect(ctx,12,90,W-24,H-185,22);ctx.stroke();
+    }
+    ctx.fillStyle=THEMES[SETTINGS.theme%THEMES.length].accent;
+    ctx.font='bold 24px "Microsoft YaHei"';ctx.textAlign='center';ctx.fillText(title,W/2,124);
+    if(typeof drawBtn==='function')drawBtn(ctx,W-60,98,42,28,'x','closeSub','rgba(255,100,100,0.3)','#c62828',14);
+}
+function drawBackground(ctx){
+    const th=THEMES[SETTINGS.theme%THEMES.length];
+    const g=ctx.createLinearGradient(0,0,W,H);
+    g.addColorStop(0,th.bg1);g.addColorStop(1,th.bg2);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+}
+function drawSettingsPage(ctx){
+    drawBackground(ctx);drawSubPageBackdrop(ctx,'游戏设置');
+    let y=160;
+    const items=[
+        {k:'soundOn',n:'音效',v:SETTINGS.soundOn},
+        {k:'vibOn',n:'震动反馈',v:SETTINGS.vibOn},
+        {k:'showTimer',n:'显示倒计时',v:SETTINGS.showTimer}
+    ];
+    for(const it of items){
+        ctx.fillStyle='#333';ctx.font='bold 17px "Microsoft YaHei"';ctx.textAlign='left';ctx.fillText(it.n,35,y+20);
+        const val=SETTINGS[it.k];
+        if(typeof drawBtn==='function')drawBtn(ctx,W-135,y,110,42,val?'开启':'关闭','set_'+it.k,val?'#43e97b':'#ff8a80',val?'#1b5e20':'#b71c1c',14);
+        y+=62;
+    }
+    ctx.fillStyle='#333';ctx.font='bold 17px "Microsoft YaHei"';ctx.textAlign='left';ctx.fillText('界面主题',35,y+20);
+    for(let i=0;i<THEMES.length;i++){
+        const th=THEMES[i];const c=i%3,r=Math.floor(i/3);
+        const bx=W/2-160+c*110,by=y+45+r*48;
+        if(G.btnRects)G.btnRects['theme_'+i]={x:bx,y:by,w:100,h:40,disabled:false};
+        const gg=ctx.createLinearGradient(bx,by,bx,by+40);gg.addColorStop(0,th.bg1);gg.addColorStop(1,th.bg2);
+        ctx.fillStyle=gg;if(typeof roundRect==='function'){
+            roundRect(ctx,bx,by,100,40,10);ctx.fill();
+            ctx.strokeStyle=SETTINGS.theme===i?'#ff6b00':'rgba(0,0,0,0.15)';
+            ctx.lineWidth=SETTINGS.theme===i?3:1.5;roundRect(ctx,bx,by,100,40,10);ctx.stroke();
+        }
+        ctx.fillStyle='#333';ctx.font='bold 12px "Microsoft YaHei"';ctx.textAlign='center';ctx.fillText(th.name,bx+50,by+24);
+    }
+    y+=45+48*2+20;
+    if(typeof drawBtn==='function'){
+        drawBtn(ctx,35,y,W-70,48,'重置存档与成就','resetData','#ef5350','#fff',16);
+        drawBtn(ctx,W/2-70,H-120,140,42,'返回菜单','backMain','#9c27b0','#fff',16);
+    }
+    ctx.textAlign='left';
+}
+function drawAchievementsPage(ctx){
+    drawBackground(ctx);
+    const uc=ACHIEVEMENTS.filter(a=>a.unlocked).length;
+    drawSubPageBackdrop(ctx,'成就系统 ('+uc+'/'+ACHIEVEMENTS.length+')');
+    const pct=uc/ACHIEVEMENTS.length;
+    ctx.fillStyle='rgba(0,0,0,0.08)';
+    if(typeof roundRect==='function')roundRect(ctx,35,145,W-70,22,11);ctx.fill();
+    ctx.fillStyle=THEMES[SETTINGS.theme%THEMES.length].accent;
+    if(typeof roundRect==='function')roundRect(ctx,35,145,(W-70)*pct,22,11);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 13px Arial';ctx.textAlign='center';ctx.fillText(uc+' / '+ACHIEVEMENTS.length,W/2,160);
+    const sy=185;
+    for(let i=0;i<ACHIEVEMENTS.length;i++){
+        const a=ACHIEVEMENTS[i];const y=sy+i*50;if(y>H-130)break;
+        ctx.fillStyle=a.unlocked?'rgba(255,215,0,0.12)':'rgba(0,0,0,0.04)';
+        if(typeof roundRect==='function'){
+            roundRect(ctx,30,y,W-60,44,10);ctx.fill();
+            ctx.strokeStyle=a.unlocked?'#ffc107':'rgba(0,0,0,0.08)';ctx.lineWidth=1.5;
+            roundRect(ctx,30,y,W-60,44,10);ctx.stroke();
+        }
+        ctx.font='28px serif';ctx.textAlign='left';
+        if(a.unlocked)ctx.fillText(a.icon,48,y+32);
+        else{ctx.globalAlpha=0.3;ctx.fillText('?',48,y+32);ctx.globalAlpha=1}
+        ctx.fillStyle=a.unlocked?'#333':'#999';ctx.font='bold 15px "Microsoft YaHei"';
+        ctx.textAlign='left';ctx.fillText(a.name,90,y+20);
+        ctx.font='12px "Microsoft YaHei"';ctx.fillStyle=a.unlocked?'#555':'#aaa';ctx.fillText(a.desc,90,y+38);
+    }
+    if(typeof drawBtn==='function')drawBtn(ctx,W/2-70,H-120,140,42,'返回菜单','backMain','#9c27b0','#fff',16);
+    ctx.textAlign='left';
+}
+function drawStatsPage(ctx){
+    drawBackground(ctx);drawSubPageBackdrop(ctx,'个人游戏统计');
+    const cw=W-70;
+    const hs=G?(G.highScore||0):0;
+    const stats=[
+        {k:'游戏总场次',v:String(STAT.totalGames),c:'#e91e63'},
+        {k:'累计答对',v:String(STAT.totalCorrect),c:'#43e97b'},
+        {k:'累计答错跳过',v:String(STAT.totalWrong),c:'#ef5350'},
+        {k:'最高连击',v:String(STAT.bestCombo),c:'#ff9800'},
+        {k:'使用提示次数',v:String(STAT.totalHintUsed),c:'#00bcd4'},
+        {k:'历史最高分',v:String(Math.max(STAT.bestScore,hs)),c:'#4caf50'}
+    ];
+    let y=155;
+    for(let i=0;i<stats.length;i++){
+        const s=stats[i];
+        ctx.fillStyle=i%2===0?'rgba(0,0,0,0.03)':'rgba(0,0,0,0.0)';
+        if(typeof roundRect==='function')roundRect(ctx,35,y,cw,50,8);ctx.fill();
+        ctx.fillStyle='#333';ctx.font='bold 15px "Microsoft YaHei"';ctx.textAlign='left';ctx.fillText(s.k,55,y+30);
+        ctx.fillStyle=s.c;ctx.font='bold 22px Arial';ctx.textAlign='right';ctx.fillText(s.v,W-55,y+32);y+=52;
+    }
+    const acc=STAT.totalCorrect+STAT.totalWrong>0?Math.round(STAT.totalCorrect/(STAT.totalCorrect+STAT.totalWrong)*100):0;
+    ctx.fillStyle='rgba(156,39,176,0.08)';
+    if(typeof roundRect==='function'){
+        roundRect(ctx,35,y,cw,50,12);ctx.fill();
+        ctx.strokeStyle='rgba(156,39,176,0.35)';ctx.lineWidth=1.5;roundRect(ctx,35,y,cw,50,12);ctx.stroke();
+    }
+    ctx.fillStyle='#333';ctx.font='bold 15px "Microsoft YaHei"';ctx.textAlign='left';ctx.fillText('历史综合正确率',55,y+30);
+    ctx.font='bold 22px Arial';ctx.textAlign='right';ctx.fillStyle='#9c27b0';ctx.fillText(acc+'%',W-55,y+32);
+    if(typeof drawBtn==='function')drawBtn(ctx,W/2-70,H-120,140,42,'返回菜单','backMain','#9c27b0','#fff',16);
+    ctx.textAlign='left';
+}
+function drawHelpPage(ctx){
+    drawBackground(ctx);drawSubPageBackdrop(ctx,'帮助 · 游戏说明');
+    const lines=[
+        ['游戏目标','按照游戏规则完成挑战，获得最高分！'],
+        ['得分规则','回答越快、使用提示越少，单题得分越高。'],
+        ['连击系统','连续答对会累计连击，提供额外奖励加分。'],
+        ['提示系统','每题可以使用提示解锁线索，每次会扣少量分数。'],
+        ['跳过答案','看答案或跳过题目会扣分并打断当前连击。'],
+        ['成就系统','游戏内有16个成就可解锁，永久保存在本机。'],
+        ['统计系统','完整记录游戏场次、正确率、历史最高等数据。'],
+        ['设置系统','支持开关音效、震动、倒计时，6套主题自由切换！'],
+        ['多人派对','适合2-8人一起娱乐，轮流答题，输了喝酒大冒险！'],
+        ['操作方式','鼠标点击或触屏点击按钮即可，手机平板都支持。'],
+        ['快捷键','键盘1234选择，Enter确认，ESC返回菜单。'],
+        ['数据存储','全部数据存于localStorage，清浏览器数据会丢失。']
+    ];
+    let y=148;
+    for(const [k,v] of lines){
+        if(y>H-140)break;
+        ctx.fillStyle='rgba(156,39,176,0.07)';
+        if(typeof roundRect==='function')roundRect(ctx,30,y,W-60,38,8);ctx.fill();
+        ctx.fillStyle='#9c27b0';ctx.font='bold 13px "Microsoft YaHei"';ctx.textAlign='left';ctx.fillText(k,45,y+18);
+        ctx.fillStyle='#555';ctx.font='12px "Microsoft YaHei"';ctx.fillText(v,160,y+18);
+        y+=42;
+    }
+    if(typeof drawBtn==='function')drawBtn(ctx,W/2-70,H-120,140,42,'返回菜单','backMain','#9c27b0','#fff',16);
+    ctx.textAlign='left';
+}
+const origPointerDown=typeof handlePointerDown==='function'?handlePointerDown:function(){};
+function hitBtn2(p,name){
+    const r=G.btnRects[name];if(!r||r.disabled)return false;
+    return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;
+}
+function handlePointerDown2(e){
+    const p=typeof getPos==='function'?getPos(e):{x:0,y:0};
+    const st=G.state;
+    if(st===STATE_MENU){
+        if(hitBtn2(p,'openSettings')){G.state=STATE_SETTINGS;return}
+        if(hitBtn2(p,'openAch')){G.state=STATE_ACHIEVEMENTS;return}
+        if(hitBtn2(p,'openStats')){G.state=STATE_STATS;return}
+        if(hitBtn2(p,'openHelp')){G.state=STATE_HELP;return}
+    } else if(st===STATE_SETTINGS||st===STATE_ACHIEVEMENTS||st===STATE_HELP||st===STATE_STATS){
+        if(hitBtn2(p,'closeSub')||hitBtn2(p,'backMain')){G.state=STATE_MENU;return}
+        if(st===STATE_SETTINGS){
+            if(hitBtn2(p,'set_soundOn')){SETTINGS.soundOn=!SETTINGS.soundOn;saveSettings();return}
+            if(hitBtn2(p,'set_vibOn')){SETTINGS.vibOn=!SETTINGS.vibOn;saveSettings();return}
+            if(hitBtn2(p,'set_showTimer')){SETTINGS.showTimer=!SETTINGS.showTimer;saveSettings();return}
+            if(hitBtn2(p,'resetData')){
+                if(confirm('确定清除所有存档、统计和成就吗？无法恢复！')){
+                    for(const k of ['_g','_c','_w','_bc','_h','_bs','_unlock'])Storage.remove(SK+k);
+                    STAT.totalGames=0;STAT.totalCorrect=0;STAT.totalWrong=0;STAT.bestCombo=0;
+                    STAT.totalHintUsed=0;STAT.bestScore=0;STAT.unlocked=[];
+                    for(const a of ACHIEVEMENTS)a.unlocked=false;if(G)G.highScore=0;saveStat();
+                }
+                return;
+            }
+            for(let i=0;i<THEMES.length;i++){
+                if(hitBtn2(p,'theme_'+i)){SETTINGS.theme=i;saveSettings();applyTheme();return}
+            }
+        }
+    }
+    return origPointerDown(e);
+}
+if(typeof canvas!=='undefined'){
+    canvas.addEventListener('mousedown',handlePointerDown2);
+    canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown2(e)},{passive:false});
+}
+const origDraw=typeof draw==='function'?draw:function(){};
+function drawEx(){
+    switch(G.state){
+        case STATE_SETTINGS:drawSettingsPage(ctx);break;
+        case STATE_ACHIEVEMENTS:drawAchievementsPage(ctx);break;
+        case STATE_HELP:drawHelpPage(ctx);break;
+        case STATE_STATS:drawStatsPage(ctx);break;
+        case STATE_MENU:drawMenuEx(ctx);break;
+        default:origDraw();
+    }
+}
+window.cancelAnimationFrame(window.__raf||0);
+(function loop2(){window.__raf=requestAnimationFrame(loop2);if(typeof update==='function')update();drawEx()})();
+
+// ==================== LV/EXP 等级系统 ====================
+const LV_XP_TABLE=[0,50,120,220,360,550,800,1150,1600,2200,3000,4000,5500,7500,10000,14000,20000];
+const LV_KEY='draw_lv_v1';
+let LV={level:parseInt(Storage.load(LV_KEY+'_l','1')),xp:parseInt(Storage.load(LV_KEY+'_x','0'))};
+function saveLv(){Storage.save(LV_KEY+'_l',LV.level);Storage.save(LV_KEY+'_x',LV.xp);}
+function addXp(amt){
+    LV.xp+=amt;
+    while(LV.level<LV_XP_TABLE.length-1 && LV.xp>=LV_XP_TABLE[LV.level]){
+        LV.xp-=LV_XP_TABLE[LV.level];LV.level++;
+        if(typeof addFloat==='function')addFloat(W/2,H/2,'升级！Lv.'+LV.level,'#ffd700');
+        if(typeof spawnParticles==='function')spawnParticles(W/2,H/2,'#ffd700',60);
+    }
+    saveLv();
+}
+function getLvProgress(){
+    const cur=LV_XP_TABLE[Math.min(LV.level,LV_XP_TABLE.length-1)]||1;
+    return Math.min(1,LV.xp/cur);
+}
+function drawLevelBadge(ctx,x,y,size){
+    const rad=size/2;
+    ctx.save();ctx.translate(x,y);
+    const g=ctx.createRadialGradient(0,0,2,0,0,rad);
+    g.addColorStop(0,'#fff176');g.addColorStop(0.6,'#ffd700');g.addColorStop(1,'#ff8f00');
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,rad,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#b26a00';ctx.lineWidth=size/18;ctx.stroke();
+    ctx.fillStyle='#5d2f00';ctx.font='bold '+Math.floor(rad*0.9)+'px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(String(LV.level),0,2);
+    ctx.restore();
+}
+
+// ==================== 本地排行榜 ====================
+const LB_KEY='draw_lb_v1';
+function loadLeaderboard(){try{return JSON.parse(Storage.load(LB_KEY,'[]'))||[]}catch(e){return []}}
+function saveLeaderboard(lb){Storage.save(LB_KEY,JSON.stringify(lb))}
+function addToLeaderboard(score,name){
+    const lb=loadLeaderboard();
+    lb.push({score,name:name||'玩家',date:new Date().toLocaleDateString()});
+    lb.sort((a,b)=>b.score-a.score);
+    saveLeaderboard(lb.slice(0,10));
+}
+function drawLeaderboard(ctx,lb,x,y,w,h,accent){
+    if(!lb)lb=loadLeaderboard();
+    ctx.save();
+    ctx.fillStyle='rgba(255,255,255,0.95)';
+    if(typeof roundRect==='function'){roundRect(ctx,x,y,w,h,14);ctx.fill();}
+    ctx.strokeStyle=accent;ctx.lineWidth=3;
+    if(typeof roundRect==='function'){roundRect(ctx,x,y,w,h,14);ctx.stroke();}
+    ctx.fillStyle=accent;ctx.font='bold 16px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🏆 排行榜 TOP 10',x+w/2,y+24);
+    for(let i=0;i<Math.min(10,lb.length);i++){
+        const yy=y+48+i*26;
+        const medals=['🥇','🥈','🥉'];
+        const pre=i<3?medals[i]:('  '+(i+1)+' ');
+        ctx.font='13px "Microsoft YaHei"';ctx.textAlign='left';ctx.fillStyle='#333';
+        ctx.fillText(pre,x+14,yy);
+        ctx.fillStyle=i<3?'#c62828':'#333';ctx.font='bold 13px Arial';ctx.textAlign='right';
+        ctx.fillText(String(lb[i].score),x+w-70,yy);
+        ctx.fillStyle='#888';ctx.font='11px Arial';ctx.textAlign='right';
+        ctx.fillText(lb[i].date||'',x+w-14,yy);
+    }
+    if(lb.length===0){ctx.fillStyle='#999';ctx.font='13px "Microsoft YaHei"';ctx.textAlign='center';ctx.fillText('暂无记录，快去挑战吧！',x+w/2,y+h/2);}
+    ctx.restore();
+}
+
+// ==================== 每日挑战系统 ====================
+const DAILY_KEY='draw_daily_v1';
+function getDailySeed(){
+    const d=new Date();return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();
+}
+function getDailyStatus(){
+    const today=getDailySeed();
+    const prev=parseInt(Storage.load(DAILY_KEY+'_d','0'));
+    const best=parseInt(Storage.load(DAILY_KEY+'_b','0'));
+    const done=prev===today;
+    return {today,best:done?best:0,done};
+}
+function setDailyDone(score){
+    const s=getDailyStatus();
+    if(s.today!==parseInt(Storage.load(DAILY_KEY+'_d','0')) || score>s.best){
+        Storage.save(DAILY_KEY+'_d',String(s.today));
+        Storage.save(DAILY_KEY+'_b',String(score));
+    }
+}
+function seededRand(seed){let t=seed+0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}
+
+// ==================== 更多成就钩子 ====================
+function checkSpeedAchieve(t){if(t&&t<10)unlockAchieve('speed')}
+function checkPartyAchieve(players){if(players&&players>=5)unlockAchieve('party1')}
+function checkTryhardAchieve(){
+    const KEY='draw_streak_v1';
+    const today=new Date().toDateString();
+    const rec=JSON.parse(Storage.load(KEY,'{"last":"","days":0}'));
+    if(rec.last!==today){
+        const y=new Date(Date.now()-86400000).toDateString();
+        if(rec.last===y)rec.days++;else rec.days=1;
+        rec.last=today;Storage.save(KEY,JSON.stringify(rec));
+    }
+    if(rec.days>=3)unlockAchieve('tryhard');
+}
+
+// ==================== 更丰富的动画粒子系统 ====================
+const TRAILS=[];
+function addTrail(x,y,color){TRAILS.push({x,y,color,life:1})}
+function updateTrails(){for(let i=TRAILS.length-1;i>=0;i--){const t=TRAILS[i];t.life-=0.03;t.y+=0.6;if(t.life<=0)TRAILS.splice(i,1)}}
+function drawTrails(ctx){
+    for(const t of TRAILS){ctx.globalAlpha=t.life*0.7;ctx.fillStyle=t.color;ctx.beginPath();ctx.arc(t.x,t.y,4*t.life+1,0,Math.PI*2);ctx.fill()}
+    ctx.globalAlpha=1;
+}
+
+// ==================== 更多菜单内容 ====================
+const _oldDrawMenuEx=typeof drawMenuEx==='function'?drawMenuEx:(typeof drawMenu==='function'?drawMenu:function(){});
+function drawMenuExtended2(ctx){
+    _oldDrawMenuEx(ctx);
+    // 等级徽章
+    drawLevelBadge(ctx,42,108,42);
+    ctx.fillStyle='#fff';ctx.font='bold 12px "Microsoft YaHei"';ctx.textAlign='left';
+    ctx.fillText('Lv.'+LV.level,70,102);
+    // 经验条
+    ctx.fillStyle='rgba(0,0,0,0.25)';
+    if(typeof roundRect==='function')roundRect(ctx,70,110,130,10,5);ctx.fill();
+    const pg=getLvProgress();
+    ctx.fillStyle='#ffd700';
+    if(typeof roundRect==='function')roundRect(ctx,70,110,130*pg,10,5);ctx.fill();
+    // 每日挑战
+    const ds=getDailyStatus();
+    if(typeof drawBtn==='function'){
+        drawBtn(ctx,W-140,90,125,38,ds.done?('✓ 今日最佳:'+ds.best):'🌟 每日挑战','dailyBtn',ds.done?'#bdbdbd':'#ff9800','#fff',13);
+    }
+    // 排行榜按钮
+    if(typeof drawBtn==='function'){
+        drawBtn(ctx,W-140,136,125,34,'🏆 排行榜','lbBtn','rgba(255,255,255,0.8)','#333',13);
+    }
+    checkTryhardAchieve();
+    updateTrails();
+    drawTrails(ctx);
+}
+// 排行榜模态状态
+const STATE_LEADERBOARD=105;
+const STATE_DAILY=106;
+function drawLeaderboardPage(ctx){
+    drawBackground(ctx);drawSubPageBackdrop(ctx,'🏆 本地排行榜 TOP 10');
+    drawLeaderboard(ctx,null,35,155,W-70,H-290,THEMES[SETTINGS.theme%THEMES.length].accent);
+    if(typeof drawBtn==='function')drawBtn(ctx,W/2-70,H-120,140,42,'返回菜单','backMain','#9c27b0','#fff',16);
+}
+function drawDailyChallengePage(ctx){
+    drawBackground(ctx);drawSubPageBackdrop(ctx,'🌟 每日挑战');
+    const ds=getDailyStatus();
+    const y=170;
+    ctx.fillStyle='#333';ctx.textAlign='center';
+    ctx.font='bold 20px "Microsoft YaHei"';ctx.fillText('挑战日期：'+String(ds.today).slice(0,4)+'/'+String(ds.today).slice(4,6)+'/'+String(ds.today).slice(6,8),W/2,y);
+    ctx.font='bold 16px "Microsoft YaHei"';ctx.fillStyle=ds.done?'#4caf50':'#ff5722';
+    ctx.fillText(ds.done?'✓ 今日已完成，最佳：'+ds.best:'今日挑战进行中！完成后奖励双倍经验！',W/2,y+40);
+    ctx.font='14px "Microsoft YaHei"';ctx.fillStyle='#666';
+    ctx.fillText('每日0点自动刷新，使用当日种子题目，记录每日最佳',W/2,y+75);
+    ctx.fillText('奖励：完成每日挑战额外奖励500 XP',W/2,y+100);
+    ctx.fillText('历史最佳排行榜可在主菜单查看',W/2,y+125);
+    // 双倍加成说明
+    ctx.fillStyle='rgba(255,152,0,0.08)';
+    if(typeof roundRect==='function'){roundRect(ctx,50,y+155,W-100,80,12);ctx.fill();
+    ctx.strokeStyle='rgba(255,152,0,0.4)';ctx.lineWidth=2;roundRect(ctx,50,y+155,W-100,80,12);ctx.stroke();}
+    ctx.fillStyle='#e65100';ctx.font='bold 15px "Microsoft YaHei"';
+    ctx.fillText('🎁 完成今日挑战 = 500 XP额外奖励',W/2,y+188);
+    ctx.font='13px "Microsoft YaHei"';ctx.fillText('直接返回主菜单，使用正常开始按钮即可完成当日挑战',W/2,y+212);
+    if(typeof drawBtn==='function')drawBtn(ctx,W/2-70,H-120,140,42,'返回菜单','backMain','#9c27b0','#fff',16);
+    ctx.textAlign='left';
+}
+const _origDrawEx2=typeof drawEx==='function'?drawEx:(typeof draw==='function'?draw:function(){});
+function drawEx2(){
+    switch(G.state){
+        case STATE_LEADERBOARD:drawLeaderboardPage(ctx);break;
+        case STATE_DAILY:drawDailyChallengePage(ctx);break;
+        case STATE_MENU:drawMenuExtended2(ctx);break;
+        default:_origDrawEx2();
+    }
+}
+// 点击钩子扩展
+const _origPD2=typeof handlePointerDown2==='function'?handlePointerDown2:(typeof handlePointerDown==='function'?handlePointerDown:function(){});
+function handlePointerDown3(e){
+    const p=typeof getPos==='function'?getPos(e):{x:0,y:0};
+    const st=G.state;
+    if(st===STATE_MENU){
+        if(hitBtn2(p,'lbBtn')){G.state=STATE_LEADERBOARD;return}
+        if(hitBtn2(p,'dailyBtn')){G.state=STATE_DAILY;return}
+    } else if(st===STATE_LEADERBOARD||st===STATE_DAILY){
+        if(hitBtn2(p,'closeSub')||hitBtn2(p,'backMain')){G.state=STATE_MENU;return}
+    }
+    return _origPD2(e);
+}
+if(typeof canvas!=='undefined'){
+    canvas.addEventListener('mousedown',handlePointerDown3);
+    canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown3(e)},{passive:false});
+}
+window.cancelAnimationFrame(window.__raf3||0);
+(function loop3(){window.__raf3=requestAnimationFrame(loop3);if(typeof update==='function')update();drawEx2()})();
+
+// 自动保存排行榜（在结束时）
+const _origUAAG=typeof updateAchievementsAfterGame==='function'?updateAchievementsAfterGame:function(){};
+if(typeof window!=='undefined'){
+    window['draw_postGame']=function(score){
+        _origUAAG();
+        addToLeaderboard(score,'玩家'+LV.level);
+        addXp(50+Math.floor(score/20));
+        setDailyDone(score);
+    }
+}
+
+applyTheme();
+})();
+</script>
+<div class="ad-banner-container"
+ id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>高尔夫一杆进洞</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1b4332;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#52b788;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+<canvas id="c"></canvas>
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+const W=480,H=720;
+const BALL_R=8;
+const HOLE_R=14;
+const FRICTION=0.985;
+const STOP_SPEED=0.15;
+const MAX_POWER=18;
+const TOTAL_HOLES=9;
+let audioCtx=null;
+function initAudio(){if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;try{
+        const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+        o.type=type||'square';o.frequency.value=freq;
+        g.gain.value=vol||0.15;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxSwing(){playTone(300,0.08,'sawtooth',0.12);setTimeout(()=>playTone(200,0.06,'triangle',0.1),50)}
+function sfxHole(){playTone(523,0.1,'sine',0.2);setTimeout(()=>playTone(659,0.1,'sine',0.2),80);setTimeout(()=>playTone(784,0.2,'sine',0.22),160)}
+function sfxBump(){playTone(150,0.05,'square',0.1)}
+function sfxWater(){playTone(100,0.2,'sawtooth',0.15);setTimeout(()=>playTone(80,0.15,'sine',0.1),100)}
+function sfxSand(){playTone(120,0.15,'triangle',0.08)}
+function sfxBirdie(){playTone(659,0.08,'sine',0.18);setTimeout(()=>playTone(784,0.08,'sine',0.18),60);setTimeout(()=>playTone(988,0.2,'sine',0.2),120)}
+function sfxBtn(){playTone(600,0.06,'sine',0.1)}
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){const r=W/H;let cw=window.innerWidth,ch=window.innerHeight;if(cw/ch>r)ch=cw/r;else cw=ch*r;canvas.width=cw;canvas.height=ch;scale=cw/W;ctx.setTransform(scale,0,0,scale,0,0);}
+window.addEventListener('resize',resize);resize();
+const HOLES=[
+    {par:3,ball:{x:80,y:600},hole:{x:380,y:120},fairway:[{x:40,y:540,w:400,h:140},{x:200,y:400,w:240,h:180},{x:280,y:80,w:180,h:360}],sand:[{x:320,y:380,r:50}],water:[],trees:[{x:150,y:300},{x:220,y:500},{x:400,y:300}]},
+    {par:4,ball:{x:80,y:620},hole:{x:400,y:100},fairway:[{x:40,y:560,w:400,h:120},{x:80,y:200,w:160,h:400},{x:80,y:60,w:360,h:180}],sand:[{x:180,y:420,r:45},{x:300,y:150,r:55}],water:[{x:200,y:280,w:120,h:60}],trees:[{x:60,y:350},{x:350,y:350},{x:250,y:550}]},
+    {par:5,ball:{x:60,y:640},hole:{x:420,y:80},fairway:[{x:20,y:580,w:200,h:120},{x:140,y:400,w:200,h:220},{x:260,y:200,w:200,h:240},{x:300,y:40,w:160,h:200}],sand:[{x:200,y:500,r:40},{x:340,y:300,r:50}],water:[{x:80,y:450,w:80,h:80}],trees:[{x:100,y:380},{x:380,y:180},{x:200,y:150},{x:420,y:400}]},
+    {par:3,ball:{x:240,y:640},hole:{x:240,y:100},fairway:[{x:160,y:80,w:160,h:600}],sand:[{x:120,y:300,r:45},{x:360,y:300,r:45}],water:[],trees:[{x:80,y:200},{x:400,y:200},{x:80,y:500},{x:400,y:500}]},
+    {par:4,ball:{x:80,y:600},hole:{x:400,y:600},fairway:[{x:40,y:540,w:400,h:140},{x:340,y:200,w:120,h:400},{x:100,y:140,w:360,h:120}],sand:[{x:200,y:560,r:50},{x:250,y:180,r:45}],water:[{x:60,y:300,w:240,h:100}],trees:[{x:120,y:500},{x:380,y:300},{x:200,y:100}]},
+    {par:4,ball:{x:60,y:100},hole:{x:420,y:620},fairway:[{x:20,y:60,w:180,h:120},{x:100,y:140,w:200,h:300},{x:200,y:380,w:260,h:300}],sand:[{x:280,y:200,r:50},{x:300,y:560,r:45}],water:[{x:60,y:420,w:120,h:80}],trees:[{x:350,y:150},{x:150,y:450},{x:400,y:400}]},
+    {par:3,ball:{x:80,y:360},hole:{x:400,y:360},fairway:[{x:40,y:280,w:400,h:180}],sand:[{x:180,y:280,r:40},{x:180,y:460,r:40},{x:340,y:280,r:40},{x:340,y:460,r:40}],water:[],trees:[{x:60,y:200},{x:60,y:520},{x:420,y:200},{x:420,y:520}]},
+    {par:5,ball:{x:240,y:640},hole:{x:240,y:80},fairway:[{x:120,y:560,w:240,h:140},{x:60,y:280,w:140,h:320},{x:280,y:280,w:140,h:320},{x:160,y:60,w:160,h:260}],sand:[{x:240,y:440,r:60}],water:[{x:180,y:280,w:120,h:80}],trees:[{x:40,y:450},{x:440,y:450},{x:100,y:150},{x:380,y:150}]},
+    {par:4,ball:{x:80,y:620},hole:{x:400,y:100},fairway:[{x:40,y:560,w:400,h:120},{x:40,y:80,w:120,h:540},{x:40,y:40,w:400,h:120},{x:320,y:80,w:120,h:540}],sand:[{x:100,y:400,r:45},{x:380,y:400,r:45},{x:240,y:100,r:50}],water:[{x:180,y:200,w:120,h:200}],trees:[{x:200,y:550},{x:280,y:550},{x:100,y:200},{x:380,y:200}]}
+];
+function inRect(px,py,rx,ry,rw,rh){return px>=rx&&px<=rx+rw&&py>=ry&&py<=ry+rh;}
+function inCircle(px,py,cx,cy,cr){const d=Math.hypot(px-cx,py-cy);return d<=cr;}
+function inFairway(x,y,hole){for(const f of hole.fairway)if(inRect(x,y,f.x,f.y,f.w,f.h))return true;return false;}
+function inSand(x,y,hole){for(const s of hole.sand)if(inCircle(x,y,s.x,s.y,s.r))return true;return false;}
+function inWater(x,y,hole){for(const w of hole.water)if(inRect(x,y,w.x,w.y,w.w,w.h))return true;return false;}
+const G={
+    state:STATE_MENU,score:0,highScore:0,
+    currentHole:0,strokes:0,totalScore:0,holeScores:[],
+    ball:{x:0,y:0,vx:0,vy:0,moving:false},
+    hole:null,aimAngle:0,power:0,powerDir:1,charging:false,
+    keys:{},ptrStart:null,ptrCurrent:null,ptrDown:false,
+    btnRects:{},paused:false,resultTimer:0,lastPos:null,penalty:0,
+    holeMsg:'',holeMsgLife:0,msgColor:'#fff',showTrail:true,trail:[]
+};
+G.highScore=parseInt(Storage.load('golf_high','0'));
+function resetHole(){
+    const h=HOLES[G.currentHole];
+    G.hole=h;
+    G.ball.x=h.ball.x;G.ball.y=h.ball.y;
+    G.ball.vx=0;G.ball.vy=0;G.ball.moving=false;
+    G.strokes=0;G.penalty=0;G.trail=[];
+    G.lastPos={x:h.ball.x,y:h.ball.y};
+}
+function startGame(){
+    G.state=STATE_PLAYING;
+    G.currentHole=0;G.totalScore=0;G.holeScores=[];
+    resetHole();
+}
+function nextHole(){
+    const parScore=G.strokes-G.hole.par;
+    G.holeScores.push({hole:G.currentHole+1,par:G.hole.par,strokes:G.strokes,diff:parScore});
+    G.totalScore+=parScore;
+    if(G.currentHole<TOTAL_HOLES-1){
+        G.currentHole++;
+        resetHole();
+    }else{
+        G.state=STATE_OVER;
+        if(G.totalScore<G.highScore||G.highScore===0){
+            G.highScore=G.totalScore;
+            Storage.save('golf_high',String(G.highScore));
+        }
+    }
+}
+function getHoleMsg(strokes,par){
+    const diff=strokes-par;
+    if(strokes===1)return{msg:'一杆进洞!',color:'#ffd700',sfx:()=>{sfxHole();setTimeout(sfxBirdie,200)}};
+    if(diff<=-2)return{msg:'老鹰!',color:'#74c0fc',sfx:sfxBirdie};
+    if(diff===-1)return{msg:'小鸟!',color:'#52b788',sfx:sfxBirdie};
+    if(diff===0)return{msg:'标准杆',color:'#fff',sfx:sfxHole};
+    if(diff===1)return{msg:'柏忌',color:'#ffd43b',sfx:sfxHole};
+    if(diff===2)return{msg:'双柏忌',color:'#ff922b',sfx:sfxHole};
+    return{msg:'+ '+diff,color:'#ff6b6b',sfx:sfxHole};
+}
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+function drawBtn(ctx,x,y,w,h,text,name,color){
+    G.btnRects[name]={x,y,w,h};
+    ctx.fillStyle=color||'#52b788';ctx.strokeStyle='#fff';ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,8);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 16px "Microsoft YaHei"';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);ctx.textBaseline='alphabetic';
+}
+function hitBtn(p,name){const r=G.btnRects[name];return r&&p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+function getPos(e){const rect=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};}
+window.addEventListener('keydown',function(e){
+    G.keys[e.code]=true;
+    if(G.state===STATE_PLAYING&&!G.ball.moving){
+        if(e.code==='Space'){e.preventDefault();if(!G.charging){G.charging=true;G.power=0;G.powerDir=1;}}
+        if(e.code==='ArrowLeft')G.aimAngle-=0.05;
+        if(e.code==='ArrowRight')G.aimAngle+=0.05;
+    }
+    if(e.code==='Escape'){if(G.state===STATE_PLAYING)G.state=STATE_PAUSE;else if(G.state===STATE_PAUSE)G.state=STATE_PLAYING;}
+    initAudio();
+});
+window.addEventListener('keyup',function(e){
+    G.keys[e.code]=false;
+    if(e.code==='Space'&&G.charging){
+        G.charging=false;
+        hitBall(G.power);
+    }
+});
+canvas.addEventListener('mousedown',function(e){const p=getPos(e);onPointerDown(p);});
+canvas.addEventListener('mousemove',function(e){const p=getPos(e);onPointerMove(p);});
+canvas.addEventListener('mouseup',function(e){const p=getPos(e);onPointerUp(p);});
+canvas.addEventListener('touchstart',function(e){e.preventDefault();const p=getPos(e);onPointerDown(p);},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();const p=getPos(e);onPointerMove(p);},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();if(e.changedTouches.length){const t=e.changedTouches[0];const rect=canvas.getBoundingClientRect();onPointerUp({x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale});}},{passive:false});
+var _sbtn=document.getElementById('start-game-btn');
+if(_sbtn)_sbtn.addEventListener('click',function(){initAudio();startGame();this.style.display='none';});
+function onPointerDown(p){
+    initAudio();
+    if(G.state===STATE_MENU)return;
+    if(G.state===STATE_PAUSE){
+        if(hitBtn(p,'resume')){G.state=STATE_PLAYING;sfxBtn();}
+        if(hitBtn(p,'quit')){G.state=STATE_MENU;sfxBtn();}
+        return;
+    }
+    if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();sfxBtn();}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;sfxBtn();}
+        return;
+    }
+    if(G.ball.moving)return;
+    if(hitBtn(p,'next')){if(G.resultTimer<=0){nextHole();G.resultTimer=0;}sfxBtn();return;}
+    G.ptrStart={x:p.x,y:p.y};G.ptrCurrent={x:p.x,y:p.y};G.ptrDown=true;
+}
+function onPointerMove(p){
+    if(G.ptrDown&&!G.ball.moving){G.ptrCurrent={x:p.x,y:p.y};}
+}
+function onPointerUp(p){
+    if(G.ptrDown&&!G.ball.moving&&G.ptrStart){
+        const dx=G.ptrStart.x-G.ptrCurrent.x;
+        const dy=G.ptrStart.y-G.ptrCurrent.y;
+        const dist=Math.hypot(dx,dy);
+        if(dist>20){
+            G.aimAngle=Math.atan2(dy,dx);
+            G.power=Math.min(dist/15,MAX_POWER);
+            hitBall(G.power);
+        }
+    }
+    G.ptrDown=false;G.ptrStart=null;G.ptrCurrent=null;
+}
+function hitBall(power){
+    const vx=Math.cos(G.aimAngle)*power;
+    const vy=Math.sin(G.aimAngle)*power;
+    G.ball.vx=vx;G.ball.vy=vy;G.ball.moving=true;
+    G.strokes++;
+    G.trail=[];
+    sfxSwing();
+}
+function updateBall(){
+    if(!G.ball.moving)return;
+    const bx=G.ball.x,by=G.ball.y;
+    let friction=FRICTION;
+    if(inSand(bx,by,G.hole)){friction=0.92;if(Math.random()<0.02)sfxSand();}
+    if(inWater(bx,by,G.hole)){
+        sfxWater();
+        G.ball.x=G.lastPos.x;G.ball.y=G.lastPos.y;
+        G.ball.vx=0;G.ball.vy=0;G.ball.moving=false;
+        G.penalty++;G.strokes++;
+        G.holeMsg='落水!+1杆';G.holeMsgLife=90;G.msgColor='#ff6b6b';
+        return;
+    }
+    if(G.showTrail){
+        G.trail.push({x:bx,y:by});
+
+<!-- [QA-PATCH ads-v1b] 广告4组件HTML（兜底） -->
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content"><p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div></div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+<script>/* [QA-PATCH ads-v1b] 赞助+广告 打开/关闭绑定（兜底） */
+(function(){
+  try{
+    var sp=document.getElementById('sponsorPanel'),sb=document.getElementById('sponsorBtn'),sc=document.getElementById('sponsorClose');
+    if(sp && sb){ sb.addEventListener('click', function(e){ try{e.stopPropagation();sp.style.display='flex';sp.style.setProperty('pointer-events','auto');}catch(x){} }); }
+    if(sp && sc){ sc.addEventListener('click', function(){ try{sp.style.display='none';sp.style.setProperty('pointer-events','none');}catch(x){} }); }
+    if(sp){ sp.addEventListener('click', function(){sp.style.setProperty('pointer-events','auto');}, true); }
+  }catch(e){}
+  try{
+    var ia=document.getElementById('interstitialAd'),si=document.getElementById('skipInterstitial');
+    if(ia && si){ si.addEventListener('click', function(){ try{ia.style.display='none';ia.style.setProperty('pointer-events','none');}catch(x){} }); }
+    if(ia){ ia.addEventListener('click', function(){ia.style.setProperty('pointer-events','auto');}, true); }
+    try{ var __s=false; function __si(){ if(__s||!ia)return; __s=true; ia.style.display='flex'; ia.style.setProperty('pointer-events','auto'); }
+      window.addEventListener('load', function(){ setTimeout(__si, 4000); }); }catch(x){}
+  }catch(e){}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+
+}}}
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

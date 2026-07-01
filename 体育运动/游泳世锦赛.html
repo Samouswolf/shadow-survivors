@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>游泳世锦赛</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f2027;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#ff6b35;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=720;
+const TOTAL_DISTANCE=100;
+const GOLD_TIME=47.0;
+const SILVER_TIME=51.0;
+const BRONZE_TIME=55.0;
+const LANE_COUNT=3;
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'square';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxStrokePerfect(){playTone(880,0.07,'sine',0.2);setTimeout(()=>playTone(1318,0.1,'sine',0.18),50)}
+function sfxStrokeNormal(){playTone(660,0.07,'triangle',0.14)}
+function sfxStrokeMiss(){playTone(180,0.2,'sawtooth',0.22)}
+function sfxBreath(){playTone(500,0.1,'sine',0.12);setTimeout(()=>playTone(700,0.15,'sine',0.12),80)}
+function sfxSplash(){playTone(250,0.12,'sawtooth',0.15);setTimeout(()=>playTone(150,0.1,'sawtooth',0.12),40)}
+function sfxFinish(){playTone(523,0.1,'sine',0.2);setTimeout(()=>playTone(659,0.1,'sine',0.2),100);setTimeout(()=>playTone(784,0.12,'sine',0.2),200);setTimeout(()=>playTone(1046,0.3,'sine',0.25),300)}
+function sfxBtn(){playTone(600,0.06,'sine',0.1)}
+function sfxWhistle(){playTone(1200,0.08,'sine',0.2);setTimeout(()=>playTone(1500,0.15,'sine',0.2),80)}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+let bubbles=[];
+function spawnBubbles(x,y,count){
+    count=count||5;
+    for(let i=0;i<count;i++){
+        bubbles.push({
+            x:x+(Math.random()-0.5)*20,
+            y:y,
+            vx:(Math.random()-0.5)*1,
+            vy:-0.5-Math.random()*1.5,
+            life:25+Math.random()*20,
+            maxLife:45,
+            size:2+Math.random()*4
+        });
+    }
+}
+function spawnSplash(x,y){
+    for(let i=0;i<12;i++){
+        bubbles.push({
+            x:x+(Math.random()-0.5)*30,
+            y:y,
+            vx:(Math.random()-0.5)*4,
+            vy:-1-Math.random()*3,
+            life:20+Math.random()*15,
+            maxLife:35,
+            size:2+Math.random()*3,
+            splash:true
+        });
+    }
+}
+function updateBubbles(){
+    for(let i=bubbles.length-1;i>=0;i--){
+        const b=bubbles[i];
+        b.x+=b.vx;b.y+=b.vy;
+        if(!b.splash)b.vx+=(Math.random()-0.5)*0.2;
+        b.life--;
+        if(b.life<=0||b.y<-10) bubbles.splice(i,1);
+    }
+}
+function drawBubbles(ctx){
+    for(const b of bubbles){
+        ctx.globalAlpha=Math.min(1,b.life/b.maxLife)*(b.splash?1:0.7);
+        ctx.strokeStyle=b.splash?'rgba(200,230,255,0.8)':'rgba(180,220,255,0.6)';
+        ctx.fillStyle=b.splash?'rgba(220,240,255,0.7)':'rgba(200,230,255,0.4)';
+        ctx.lineWidth=1;
+        ctx.beginPath();
+        ctx.arc(b.x,b.y,b.size,0,Math.PI*2);
+        if(b.splash)ctx.fill();
+        ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+}
+
+const G={
+    state:STATE_MENU,
+    distance:0,
+    time:0,
+    bestTime:parseFloat(Storage.load('swim_highscore','999.99')),
+    oxygen:100,
+    maxOxygen:100,
+    stroke_count:0,
+    perfectCount:0,
+    goodCount:0,
+    missCount:0,
+    breathPerfectCount:0,
+    breathNormalCount:0,
+    breathMissCount:0,
+    combo:0,
+    comboTimer:0,
+    maxCombo:0,
+    perfectStreak:0,
+    maxPerfectStreak:0,
+    achievements:JSON.parse(Storage.load('swim_achv','[]')),
+    totalRaces:parseInt(Storage.load('swim_races','0')),
+    totalStrokes:parseInt(Storage.load('swim_strokes','0')),
+    totalBreaths:parseInt(Storage.load('swim_breaths','0')),
+    goldRaces:parseInt(Storage.load('swim_gold','0')),
+    breathInterval:0,
+    nextBreathAt:4,
+    needBreath:false,
+    strokePos:0,
+    strokeDir:1,
+    strokeSpeed:0.032,
+    breathPos:0,
+    breathDir:1,
+    breathSpeed:0.025,
+    breathWindow:false,
+    ai:[
+        {distance:0,name:'泳将A',lane:0,strength:0.85,color:'#e53935',anim:0,penalty:0},
+        {distance:0,name:'选手B',lane:2,strength:0.92,color:'#43a047',anim:0,penalty:0}
+    ],
+    btnRects:{},
+    keys:{},
+    paused:false,
+    scorePopups:[],
+    floatTexts:[],
+    particles:[],
+    splashParticles:[],
+    shockwaves:[],
+    banners:[],
+    lastStrokeTime:0,
+    screenShake:0,
+    flashColor:null,
+    flashTimer:0,
+    strokeCd:0,
+    breathCd:0,
+    ranks:null,
+    playerFinished:false,
+    waterWave:0
+};
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    ctx.fillStyle=color||'#ff6b35';
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:(e.changedTouches?e.changedTouches[0]:e);
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+function addScorePopup(x,y,text,color){
+    G.scorePopups.push({x:x,y:y,text:text,life:45,maxLife:45,color:color||'#ffd700'});
+}
+
+function addFloatText(x,y,text,color){
+    G.floatTexts.push({x:x,y:y,text:text,life:60,maxLife:60,color:color||'#fff',phase:Math.random()*Math.PI*2});
+}
+
+function addShockwave(x,y,color,baseR){
+    G.shockwaves.push({x:x,y:y,r:3,maxR:baseR||70,life:35,maxLife:35,color:color||'#fff'});
+}
+
+function addBanner(text,color,bonusY){
+    G.banners.push({text:text,color:color||'#fff',life:75,maxLife:75,yOff:bonusY||0});
+}
+
+function spawnParticles(x,y,color,n){
+    n=n||8;
+    for(let i=0;i<n;i++){
+        const a=Math.random()*Math.PI*2;
+        const s=0.5+Math.random()*3;
+        G.particles.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-0.5,life:30+Math.random()*20,maxLife:45,color:color,size:1.5+Math.random()*3});
+    }
+}
+
+function spawnBigSplash(x,y,color){
+    for(let i=0;i<18;i++){
+        const a=-Math.PI*0.2-Math.random()*Math.PI*0.6;
+        const s=2+Math.random()*4;
+        G.splashParticles.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:35+Math.random()*15,maxLife:45,color:color,size:2+Math.random()*4,g:0.12});
+    }
+}
+
+function breakCombo(reason){
+    if(G.combo>=5) addFloatText(W/2,300,'连击断! '+G.combo+' 连','#ef5350');
+    G.combo=0;G.comboTimer=0;G.perfectStreak=0;
+}
+
+function incrementCombo(pts,x,y,col){
+    G.combo++;
+    if(G.combo>50)G.combo=50;
+    G.maxCombo=Math.max(G.maxCombo,G.combo);
+    G.comboTimer=260;
+    const base=pts||10;
+    const mul=G.combo>=25?3:G.combo>=15?2.2:G.combo>=8?1.6:G.combo>=4?1.2:1;
+    if(mul>1) addScorePopup(x||W/2,(y||180)-10,'X'+mul+' 连击!',col||'#ff5722');
+    if(G.combo===5) addBanner('🔥 5 连击! 加速!','#ff9800',110);
+    if(G.combo===12) addBanner('💪 12 连击! 浪里白条!','#03a9f4',150);
+    if(G.combo===25) addBanner('🌊 25 连击! 水中闪电!','#e91e63',190);
+    if(G.combo===40) addBanner('👑 40 连击! 水上之王!','#ffd700',220);
+    return Math.round(base*mul);
+}
+
+function unlockAchievement(id){
+    if(G.achievements.indexOf(id)<0){
+        G.achievements.push(id);
+        const achNames={
+            first_race:'🌊 初次下水',
+            strokes_200:'🏊 划水机器',
+            perfect_20:'🎯 精准手',
+            perfect_streak_10:'✨ 完美节奏',
+            combo_25:'🔥 水中飞鱼',
+            gold_medal:'🥇 金冠选手',
+            all_breath_ok:'💨 换气大师',
+            beat_both_ai:'🏆 冠军荣耀'
+        };
+        addBanner('🏅 '+achNames[id]+' 解锁!','#ffd700',140);
+        sfxFinish();
+        saveAll();
+    }
+}
+
+function saveAll(){
+    Storage.save('swim_highscore',G.bestTime);
+    Storage.save('swim_achv',JSON.stringify(G.achievements));
+    Storage.save('swim_races',G.totalRaces);
+    Storage.save('swim_strokes',G.totalStrokes);
+    Storage.save('swim_breaths',G.totalBreaths);
+    Storage.save('swim_gold',G.goldRaces);
+}
+
+function doStroke(){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    if(G.strokeCd>0)return;
+    G.strokeCd=8;
+    G.stroke_count++;
+    G.breathInterval++;
+    const pos=G.strokePos;
+    const d=Math.abs(pos-0.5);
+    let dist,type,oxyCost;
+    if(d<0.09){
+        dist=1.4;type='PERFECT';oxyCost=3;
+        G.perfectCount++;G.combo++;G.comboTimer=260;G.maxCombo=Math.max(G.maxCombo,G.combo);G.perfectStreak++;G.maxPerfectStreak=Math.max(G.maxPerfectStreak,G.perfectStreak);
+        sfxStrokePerfect();
+        const bonus=G.combo>=25?1.9:G.combo>=15?1.55:G.combo>=8?1.25:G.combo>=4?1.1:1;
+        dist*=bonus;
+        if(bonus>1) addScorePopup(W/2,278,'X'+bonus,'#00e676');
+        addScorePopup(W/2,260,'PERFECT +'+dist.toFixed(1)+'m','#4caf50');
+        G.flashColor='rgba(76,175,80,0.12)';G.flashTimer=8;
+        spawnParticles(W/2,H/2+30,'#69f0ae',10);
+        spawnBigSplash(W/2,H/2+10,'rgba(200,250,255,0.7)');
+        addShockwave(W/2,H/2+40,'#81c784',70);
+        if(G.perfectStreak===5) addBanner('🎯 完美x5!','#4caf50',120);
+        if(G.perfectStreak===10) addBanner('✨ 完美x10! 水中神!','#03a9f4',155);
+        if(G.perfectStreak===20) addBanner('👑 完美x20! 菲尔普斯!','#ffd700',200);
+        if(G.combo===5) addBanner('🔥 5 连击! 加速!','#ff9800',100);
+        if(G.combo===12) addBanner('💪 12 连击! 浪里白条!','#03a9f4',145);
+        if(G.combo===25) addBanner('🌊 25 连击! 水中闪电!','#e91e63',185);
+        if(G.combo===40) addBanner('👑 40 连击! 水上之王!','#ffd700',220);
+    }else if(d<0.25){
+        dist=1.0;type='GOOD';oxyCost=4;
+        G.goodCount++;G.combo++;G.comboTimer=220;G.maxCombo=Math.max(G.maxCombo,G.combo);G.perfectStreak=0;
+        sfxStrokeNormal();
+        addScorePopup(W/2,260,'GOOD +1.0m','#ffeb3b');
+        G.flashColor='rgba(255,235,59,0.08)';G.flashTimer=6;
+        spawnParticles(W/2,H/2+30,'#fff59d',5);
+    }else{
+        dist=0.5;type='MISS';oxyCost=8;
+        G.missCount++;
+        breakCombo('(MISS)');
+        sfxStrokeMiss();
+        addScorePopup(W/2,260,'MISS +0.5m','#f44336');
+        G.flashColor='rgba(244,67,54,0.18)';G.flashTimer=10;
+        G.screenShake=10;
+        spawnParticles(W/2,H/2+30,'#ef5350',8);
+    }
+    G.distance=Math.min(TOTAL_DISTANCE,G.distance+dist);
+    G.oxygen=Math.max(0,G.oxygen-oxyCost);
+    G.strokeDir=G.strokeDir>0?-1:1;
+    G.strokePos+=(G.strokeDir*0.03);
+    G.strokePos=Math.max(0,Math.min(1,G.strokePos));
+    spawnSplash(W/2,H/2);
+    spawnBubbles(W/2-15,H/2+30,3);
+    if(G.breathInterval>=G.nextBreathAt&&!G.needBreath){
+        G.needBreath=true;
+        G.breathWindow=true;
+        G.breathPos=0;G.breathDir=1;
+        addScorePopup(W/2,210,'⚠ 需要换气! 按↑/上滑','#ff9800');
+    }
+    if(G.distance>=TOTAL_DISTANCE&&!G.playerFinished){
+        finishRace();
+    }
+}
+
+function doBreath(){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    if(G.breathCd>0)return;
+    if(!G.needBreath){
+        addScorePopup(W/2,210,'还不需要换气','#90a4ae');
+        return;
+    }
+    G.breathCd=15;
+    const pos=G.breathPos;
+    const d=Math.abs(pos-0.5);
+    let restore,type;
+    if(d<0.12){
+        restore=55;type='完美换气';
+        G.breathPerfectCount++;
+        sfxBreath();
+        addScorePopup(W/2,210,'💨 '+type+' +55O₂','#29b6f6');
+        spawnBigSplash(W/2,H/2-20,'rgba(180,240,255,0.8)');
+        addShockwave(W/2,H/2-25,'#4fc3f7',60);
+        spawnBubbles(W/2,H/2,10);
+        if(G.breathPerfectCount===10) addBanner('💨 完美换气x10!','#03a9f4',130);
+    }else if(d<0.3){
+        restore=35;type='正常换气';
+        G.breathNormalCount++;
+        sfxBreath();
+        addScorePopup(W/2,210,'💨 '+type+' +35O₂','#4fc3f7');
+        spawnBubbles(W/2,H/2,5);
+    }else{
+        restore=15;type='呛水';
+        G.breathMissCount++;
+        breakCombo('(呛水)');
+        sfxStrokeMiss();
+        addScorePopup(W/2,210,'💧 '+type+' +15O₂','#ef5350');
+        G.screenShake=12;
+        spawnParticles(W/2,H/2-20,'#ef5350',10);
+        G.flashColor='rgba(244,67,54,0.2)';G.flashTimer=12;
+    }
+    G.oxygen=Math.min(G.maxOxygen,G.oxygen+restore);
+    G.needBreath=false;
+    G.breathWindow=false;
+    G.breathInterval=0;
+    G.nextBreathAt=3+Math.floor(Math.random()*3);
+    spawnSplash(W/2,H/2-20);
+}
+
+function finishRace(){
+    G.playerFinished=true;
+    for(let a=0;a<500;a++){
+        for(const ai of G.ai){
+            if(ai.distance<TOTAL_DISTANCE){
+                ai.distance=Math.min(TOTAL_DISTANCE,ai.distance+ai.strength*0.04*(1+Math.sin(a*0.1)*0.2));
+            }
+        }
+        if(G.ai.every(a=>a.distance>=TOTAL_DISTANCE))break;
+    }
+    const finalTime=G.time/60;
+    G.time=Math.ceil(finalTime*100)/100*60;
+    const all=[
+        {name:'你',distance:G.distance,time:G.time/60,isPlayer:true,color:'#ffd700'},
+    ];
+    for(const ai of G.ai){
+        all.push({name:ai.name,distance:ai.distance,time:Math.max(finalTime,finalTime-(ai.distance-G.distance)*0.1)+(Math.random()*0.6),isPlayer:false,color:ai.color});
+    }
+    all.sort((a,b)=>{
+        if(a.distance>=TOTAL_DISTANCE&&b.distance>=TOTAL_DISTANCE)return a.time-b.time;
+        return b.distance-a.distance;
+    });
+    G.ranks=all;
+    const idx=all.findIndex(x=>x.isPlayer);
+    G.totalRaces++;
+    G.totalStrokes+=G.stroke_count;
+    G.totalBreaths+=Math.max(1,G.breathPerfectCount+G.breathNormalCount+G.breathMissCount);
+    const isNewBest=idx>=0&&G.distance>=TOTAL_DISTANCE&&finalTime<G.bestTime;
+    if(isNewBest){
+        G.bestTime=Math.ceil(finalTime*100)/100;
+    }
+    if(idx===0) G.goldRaces++;
+    unlockAchievement('first_race');
+    if(G.totalStrokes>=200) unlockAchievement('strokes_200');
+    if(G.perfectCount>=20) unlockAchievement('perfect_20');
+    if(G.maxPerfectStreak>=10) unlockAchievement('perfect_streak_10');
+    if(G.maxCombo>=25) unlockAchievement('combo_25');
+    if(finalTime<=GOLD_TIME&&G.distance>=TOTAL_DISTANCE) unlockAchievement('gold_medal');
+    if(G.breathMissCount===0&&G.breathNormalCount+G.breathPerfectCount>=4) unlockAchievement('all_breath_ok');
+    if(idx===0) unlockAchievement('beat_both_ai');
+    saveAll();
+    G.state=STATE_OVER;
+    sfxFinish();
+}
+
+let lastPointerY=null;
+window.addEventListener('keydown',function(e){
+    G.keys[e.key.toLowerCase()]=true;
+    const k=e.key.toLowerCase();
+    if(k===' '||k==='enter'){
+        e.preventDefault();
+        initAudio();
+        if(G.state===STATE_MENU){sfxWhistle();startGame();return;}
+        if(G.state===STATE_OVER){startGame();return;}
+        if(G.state===STATE_PLAYING&&!G.paused){doStroke();}
+    }
+    if(k==='escape'){
+        if(G.state===STATE_PLAYING){togglePause();}
+        else if(G.state===STATE_PAUSE){togglePause();}
+    }
+    if(G.state===STATE_PLAYING && !G.paused){
+        if(k==='arrowup'||k==='w'){doBreath();}
+    }
+    initAudio();
+});
+window.addEventListener('keyup',function(e){
+    G.keys[e.key.toLowerCase()]=false;
+});
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    lastPointerY=p.y;
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){sfxWhistle();startGame();return}
+    } else if(G.state===STATE_PAUSE){
+        if(hitBtn(p,'resume')){togglePause();return}
+        if(hitBtn(p,'quit_pause')){G.state=STATE_MENU;G.paused=false;sfxBtn();return}
+    } else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;return}
+    } else if(G.state===STATE_PLAYING && !G.paused){
+        doStroke();
+    }
+}
+function handlePointerMove(e){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    const p=getPos(e);
+    if(lastPointerY!==null&&p.y-lastPointerY<-30){
+        doBreath();
+        lastPointerY=p.y;
+    }
+}
+function handlePointerUp(e){
+    lastPointerY=null;
+}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e)},{passive:false});
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.distance=0;
+    G.time=0;
+    G.oxygen=100;
+    G.stroke_count=0;
+    G.perfectCount=0;G.goodCount=0;G.missCount=0;
+    G.breathPerfectCount=0;G.breathNormalCount=0;G.breathMissCount=0;
+    G.combo=0;G.comboTimer=0;G.maxCombo=0;G.perfectStreak=0;G.maxPerfectStreak=0;
+    G.breathInterval=0;
+    G.nextBreathAt=4;
+    G.needBreath=false;
+    G.strokePos=0;
+    G.strokeDir=1;
+    G.strokeSpeed=0.032;
+    G.breathPos=0;
+    G.breathDir=1;
+    G.breathWindow=false;
+    G.scorePopups=[];
+    G.floatTexts=[];G.particles=[];G.splashParticles=[];G.shockwaves=[];G.banners=[];
+    bubbles=[];
+    G.paused=false;
+    G.screenShake=0;
+    G.flashColor=null;
+    G.flashTimer=0;
+    G.strokeCd=0;
+    G.breathCd=0;
+    G.ranks=null;
+    G.playerFinished=false;
+    G.waterWave=0;
+    for(const ai of G.ai){
+        ai.distance=0;
+        ai.anim=0;
+        ai.penalty=0;
+        ai.strength=0.8+Math.random()*0.17;
+    }
+    G.ai[1].strength=0.86+Math.random()*0.1;
+    sfxBtn();
+}
+
+function togglePause(){
+    if(G.state===STATE_PLAYING){G.state=STATE_PAUSE;G.paused=true;}
+    else if(G.state===STATE_PAUSE){G.state=STATE_PLAYING;G.paused=false;}
+    sfxBtn();
+}
+
+function update(){
+    G.waterWave+=0.05;
+    if(G.state!==STATE_PLAYING||G.paused) return;
+    G.time++;
+    G.strokePos+=G.strokeDir*G.strokeSpeed;
+    if(G.strokePos<=0){G.strokePos=0;G.strokeDir=1;}
+    if(G.strokePos>=1){G.strokePos=1;G.strokeDir=-1;}
+    if(G.needBreath){
+        G.breathPos+=G.breathDir*G.breathSpeed;
+        if(G.breathPos<=0){G.breathPos=0;G.breathDir=1;}
+        if(G.breathPos>=1){G.breathPos=1;G.breathDir=-1;}
+    }
+    if(G.strokeCd>0)G.strokeCd--;
+    if(G.breathCd>0)G.breathCd--;
+    if(G.flashTimer>0)G.flashTimer--;
+    if(G.screenShake>0)G.screenShake*=0.85;
+    if(G.comboTimer>0){G.comboTimer--;if(G.comboTimer<=0){breakCombo('(超时)');}}
+    G.oxygen=Math.max(0,G.oxygen-0.02);
+    if(G.needBreath)G.oxygen=Math.max(0,G.oxygen-0.12);
+    if(G.oxygen<=0){
+        if(G.time%90===0){
+            addScorePopup(W/2,285,'缺氧! 速度下降','#ef5350');
+        }
+    }
+    const oxyFactor=G.oxygen>40?1:G.oxygen>10?0.75:0.55;
+    for(const ai of G.ai){
+        if(ai.distance<TOTAL_DISTANCE){
+            ai.anim+=0.15;
+            let spd=ai.strength*0.032;
+            if(ai.penalty>0){ai.penalty--;spd*=0.5;}
+            if(Math.random()<0.01)ai.penalty=30+Math.floor(Math.random()*20);
+            ai.distance=Math.min(TOTAL_DISTANCE,ai.distance+spd);
+        }
+    }
+    for(let i=G.scorePopups.length-1;i>=0;i--){
+        const s=G.scorePopups[i];
+        s.y-=1.2;s.life--;
+        if(s.life<=0) G.scorePopups.splice(i,1);
+    }
+    for(let i=G.floatTexts.length-1;i>=0;i--){
+        const f=G.floatTexts[i];
+        f.y-=0.6;f.life--;
+        f.x+=Math.sin((f.maxLife-f.life)*0.3)*0.6;
+        if(f.life<=0) G.floatTexts.splice(i,1);
+    }
+    for(let i=G.particles.length-1;i>=0;i--){
+        const p=G.particles[i];
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.04;p.vx*=0.98;p.life--;
+        if(p.life<=0) G.particles.splice(i,1);
+    }
+    for(let i=G.splashParticles.length-1;i>=0;i--){
+        const p=G.splashParticles[i];
+        p.x+=p.vx;p.y+=p.vy;p.vy+=p.g||0.1;p.life--;
+        if(p.life<=0||p.y>H) G.splashParticles.splice(i,1);
+    }
+    for(let i=G.shockwaves.length-1;i>=0;i--){
+        const w=G.shockwaves[i];
+        w.r+=(w.maxR-w.r)*0.12;w.life--;
+        if(w.life<=0) G.shockwaves.splice(i,1);
+    }
+    for(let i=G.banners.length-1;i>=0;i--){
+        G.banners[i].life--;
+        if(G.banners[i].life<=0) G.banners.splice(i,1);
+    }
+    if(Math.random()<0.05){
+        spawnBubbles(Math.random()*W,H*0.2+Math.random()*(H*0.55),1);
+    }
+    updateBubbles();
+}
+
+function laneY(laneIdx){
+    const poolTop=190,poolBottom=H-210;
+    const laneH=(poolBottom-poolTop)/LANE_COUNT;
+    return poolTop+laneH*laneIdx+laneH/2;
+}
+function laneScreenX(dist){
+    const poolLeft=40,poolRight=W-40;
+    return poolLeft+(poolRight-poolLeft)*(dist/TOTAL_DISTANCE);
+}
+
+function drawPool(ctx){
+    const poolTop=185,poolBottom=H-205;
+    const poolLeft=35,poolRight=W-35;
+    const bgG=ctx.createLinearGradient(0,0,0,H);
+    bgG.addColorStop(0,'#87ceeb');
+    bgG.addColorStop(1,'#4fc3f7');
+    ctx.fillStyle=bgG;
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,0.7)';
+    for(let i=0;i<20;i++){
+        const x=(i*150+Math.sin(G.waterWave+i)*5)%(W+50)-25;
+        const y=60+(i%4)*30;
+        ctx.beginPath();
+        ctx.ellipse(x,y,35,5,0.2+Math.sin(G.waterWave*0.5+i)*0.1,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    roundRect(ctx,poolLeft-8,poolTop-10,poolRight-poolLeft+16,poolBottom-poolTop+20,6);
+    ctx.fill();
+    ctx.strokeStyle='#1565c0';ctx.lineWidth=3;
+    roundRect(ctx,poolLeft-8,poolTop-10,poolRight-poolLeft+16,poolBottom-poolTop+20,6);
+    ctx.stroke();
+    const waterG=ctx.createLinearGradient(poolLeft,poolTop,poolRight,poolBottom);
+    waterG.addColorStop(0,'#4dd0e1');
+    waterG.addColorStop(0.5,'#26c6da');
+    waterG.addColorStop(1,'#00acc1');
+    ctx.fillStyle=waterG;
+    roundRect(ctx,poolLeft,poolTop,poolRight-poolLeft,poolBottom-poolTop,4);
+    ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.08)';
+    for(let y=poolTop;y<poolBottom;y+=15){
+        const wobble=Math.sin(y*0.05+G.waterWave)*4;
+        ctx.fillRect(poolLeft,y+wobble,poolRight-poolLeft,2);
+    }
+    ctx.fillStyle='rgba(255,255,255,0.12)';
+    for(let x=poolLeft;x<poolRight;x+=25){
+        const wobble=Math.sin(x*0.05+G.waterWave*0.8)*3;
+        ctx.fillRect(x,poolTop+wobble,2,poolBottom-poolTop);
+    }
+    const laneH=(poolBottom-poolTop)/LANE_COUNT;
+    ctx.strokeStyle='rgba(255,255,255,0.7)';ctx.lineWidth=3;
+    ctx.setLineDash([12,10]);
+    for(let i=1;i<LANE_COUNT;i++){
+        const y=poolTop+laneH*i;
+        ctx.lineDashOffset=-G.waterWave*20;
+        ctx.beginPath();ctx.moveTo(poolLeft,y);ctx.lineTo(poolRight,y);ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.strokeStyle='rgba(255,255,255,0.9)';ctx.lineWidth=4;
+    for(let x of [poolLeft+5,poolRight-5]){
+        ctx.beginPath();ctx.moveTo(x,poolTop);ctx.lineTo(x,poolBottom);ctx.stroke();
+    }
+    for(let i=0;i<LANE_COUNT;i++){
+        const y=poolTop+laneH*i+laneH/2;
+        ctx.fillStyle='rgba(255,255,255,0.9)';
+        ctx.font='bold 14px Arial';ctx.textAlign='center';
+        ctx.fillText(i===0?'3':i===1?'2':'1',poolLeft-18,y+5);
+        ctx.fillText(i===0?'3':i===1?'2':'1',poolRight+18,y+5);
+    }
+    ctx.fillStyle='#fff';
+    ctx.font='bold 10px Arial';ctx.textAlign='center';
+    for(let m=0;m<=100;m+=10){
+        const x=laneScreenX(m);
+        ctx.fillText(m+'m',x,poolTop-18);
+        ctx.fillText(m+'m',x,poolBottom+15);
+    }
+    ctx.textAlign='left';
+}
+
+function drawSwimmer(ctx,x,y,color,isPlayer,anim,breathing){
+    const bodyW=18,bodyL=55;
+    const phase=anim;
+    const armPhase=Math.sin(phase*1.2);
+    const legPhase=Math.sin(phase*1.6);
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.fillStyle='rgba(0,0,0,0.25)';
+    ctx.beginPath();ctx.ellipse(0,5,bodyL*0.5,bodyW*0.7,0,0,Math.PI*2);ctx.fill();
+    ctx.rotate(breathing?Math.sin(phase*3)*0.08-0.05:0);
+    ctx.strokeStyle=color;ctx.lineWidth=5;ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(-bodyL*0.35,0);
+    ctx.quadraticCurveTo(-bodyL*0.35-armPhase*10,-15,-bodyL*0.2-armPhase*22,-8-armPhase*10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(bodyL*0.35,0);
+    ctx.quadraticCurveTo(bodyL*0.35+armPhase*10,15,bodyL*0.2+armPhase*22,8+armPhase*10);
+    ctx.stroke();
+    const bodyG=ctx.createLinearGradient(-bodyL/2,-bodyW/2,bodyL/2,bodyW/2);
+    bodyG.addColorStop(0,color);
+    bodyG.addColorStop(1,isPlayer?'#fff59d':'#ffe0b2');
+    ctx.fillStyle=bodyG;
+    roundRect(ctx,-bodyL/2,-bodyW/2,bodyL,bodyW,bodyW/2);
+    ctx.fill();
+    ctx.strokeStyle=isPlayer?'#f57f17':'#6d4c41';ctx.lineWidth=1.5;
+    roundRect(ctx,-bodyL/2,-bodyW/2,bodyL,bodyW,bodyW/2);
+    ctx.stroke();
+    if(isPlayer){
+        ctx.fillStyle='#d32f2f';
+        ctx.fillRect(-8,-bodyW/2+2,16,5);
+        ctx.fillStyle='#fff';
+        ctx.font='bold 8px Arial';ctx.textAlign='center';
+        ctx.fillText('CHN',0,-bodyW/2+6);
+    }
+    ctx.strokeStyle=color;ctx.lineWidth=5;
+    ctx.beginPath();
+    ctx.moveTo(-bodyL*0.45,2);
+    ctx.lineTo(-bodyL*0.55-legPhase*10,-6-legPhase*5);
+    ctx.lineTo(-bodyL*0.65-legPhase*14,-12-legPhase*8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-bodyL*0.45,-2);
+    ctx.lineTo(-bodyL*0.55+legPhase*10,6+legPhase*5);
+    ctx.lineTo(-bodyL*0.65+legPhase*14,12+legPhase*8);
+    ctx.stroke();
+    ctx.fillStyle=isPlayer?'#ffe0b2':'#ffcc80';
+    const headOffset=breathing?10+Math.sin(phase*4)*3:0;
+    const headRot=breathing?0.3:0;
+    ctx.save();
+    ctx.translate(bodyL*0.45+headOffset*0.3,0);
+    ctx.rotate(headRot);
+    ctx.beginPath();ctx.ellipse(0,0,11,9,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=isPlayer?'#f57f17':'#6d4c41';ctx.lineWidth=1.5;ctx.stroke();
+    if(breathing){
+        ctx.fillStyle='#fff';
+        ctx.beginPath();ctx.ellipse(6,1,4,3,0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#212121';
+        ctx.beginPath();ctx.arc(7,1,1.5,0,Math.PI*2);ctx.fill();
+    }else{
+        ctx.fillStyle='rgba(33,150,243,0.6)';
+        ctx.beginPath();ctx.ellipse(0,-1,10,7,0,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#1565c0';ctx.lineWidth=1;ctx.stroke();
+    }
+    ctx.restore();
+    ctx.textAlign='left';
+    ctx.restore();
+    if(isPlayer && breathing){
+        ctx.fillStyle='rgba(255,255,255,0.9)';
+        ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText('💨',x+30,y-20);
+        ctx.textAlign='left';
+    }
+}
+
+function drawHUD(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.65)';
+    roundRect(ctx,10,10,W-20,165,10);ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('距离',25,32);
+    const pct=G.distance/TOTAL_DISTANCE;
+    const barX=70,barY=20,barW=W-160,barH=18;
+    ctx.fillStyle='#01579b';
+    roundRect(ctx,barX,barY,barW,barH,5);ctx.fill();
+    const trackG=ctx.createLinearGradient(barX,barY,barX+barW,barY);
+    trackG.addColorStop(0,'#00bcd4');trackG.addColorStop(1,'#26c6da');
+    ctx.fillStyle=trackG;
+    roundRect(ctx,barX,barY,barW*pct,barH,5);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1;
+    roundRect(ctx,barX,barY,barW,barH,5);ctx.stroke();
+    for(let m=25;m<=75;m+=25){
+        const lp=barX+barW*(m/100);
+        ctx.strokeStyle='rgba(255,255,255,0.3)';
+        ctx.beginPath();ctx.moveTo(lp,barY);ctx.lineTo(lp,barY+barH);ctx.stroke();
+    }
+    const playerMarkX=barX+barW*pct;
+    ctx.fillStyle='#ffd700';
+    ctx.beginPath();
+    ctx.moveTo(playerMarkX,barY-2);
+    ctx.lineTo(playerMarkX-5,barY-10);
+    ctx.lineTo(playerMarkX+5,barY-10);
+    ctx.closePath();ctx.fill();
+    for(const ai of G.ai){
+        const apct=ai.distance/TOTAL_DISTANCE;
+        const ax=barX+barW*apct;
+        ctx.fillStyle=ai.color;
+        ctx.fillRect(ax-2,barY+2,4,barH-4);
+    }
+    ctx.fillStyle='#fff';
+    ctx.font='bold 12px Arial';
+    ctx.textAlign='right';
+    ctx.fillText(G.distance.toFixed(1)+'m / '+TOTAL_DISTANCE+'m',W-25,34);
+    ctx.fillStyle='#00e5ff';
+    ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('⏱ 时间',25,64);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 28px Arial';
+    const curTime=G.time/60;
+    ctx.fillText(curTime.toFixed(2)+'s',90,67);
+    ctx.textAlign='center';
+    ctx.fillStyle='#fff';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText('O₂ 氧气',W/2,64);
+    const oxyX=W/2-90,oxyY=72,oxyW=180,oxyH=14;
+    ctx.fillStyle='#263238';
+    roundRect(ctx,oxyX,oxyY,oxyW,oxyH,4);ctx.fill();
+    const oxyPct=G.oxygen/G.maxOxygen;
+    const og=ctx.createLinearGradient(oxyX,oxyY,oxyX+oxyW,oxyY);
+    if(oxyPct>0.5){og.addColorStop(0,'#00e676');og.addColorStop(1,'#69f0ae');}
+    else if(oxyPct>0.2){og.addColorStop(0,'#ffea00');og.addColorStop(1,'#ffab40');}
+    else{og.addColorStop(0,'#ff5252');og.addColorStop(1,'#ff1744');}
+    ctx.fillStyle=og;
+    roundRect(ctx,oxyX,oxyY,oxyW*oxyPct,oxyH,4);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1;
+    roundRect(ctx,oxyX,oxyY,oxyW,oxyH,4);ctx.stroke();
+    if(G.needBreath){
+        const breathePulse=0.5+0.5*Math.sin(G.time*0.3);
+        ctx.strokeStyle='rgba(255,152,0,'+(0.4+breathePulse*0.6)+')';
+        ctx.lineWidth=3;
+        roundRect(ctx,oxyX-4,oxyY-4,oxyW+8,oxyH+8,6);
+        ctx.stroke();
+    }
+    ctx.fillStyle='#fff';
+    ctx.font='bold 10px Arial';
+    ctx.fillText(Math.round(G.oxygen)+'%',W/2,oxyY+11);
+    ctx.textAlign='right';
+    ctx.fillStyle='#4fc3f7';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText('划次',W-25,64);
+    ctx.font='bold 22px Arial';
+    ctx.fillStyle='#fff';
+    ctx.fillText(G.stroke_count,W-25,88);
+    ctx.textAlign='left';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillStyle='#aaa';
+    ctx.fillText('金牌 <'+GOLD_TIME.toFixed(1)+'s  银牌 <'+SILVER_TIME.toFixed(1)+'s  铜牌 <'+BRONZE_TIME.toFixed(1)+'s',25,108);
+    if(G.bestTime<999){
+        ctx.fillStyle='#ffd700';
+        ctx.fillText('🏆 最佳: '+G.bestTime.toFixed(2)+'s',25,125);
+    }else{
+        ctx.fillStyle='#aaa';
+        ctx.fillText('🏆 最佳: --',25,125);
+    }
+    ctx.textAlign='right';
+    const nextBreathHint=G.needBreath?'⚠ 请换气!':'下次换气: 还需'+Math.max(0,G.nextBreathAt-G.breathInterval)+'划';
+    ctx.fillStyle=G.needBreath?'#ff9800':'#4fc3f7';
+    ctx.font='bold 11px "Microsoft YaHei"';
+    ctx.fillText(nextBreathHint,W-25,108);
+    ctx.fillStyle='#aaa';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('划水: 空格/点击   换气: ↑/上滑',W-25,125);
+    ctx.textAlign='left';
+    const heat=Math.min(1,(G.perfectCount+G.goodCount*0.6)/30);
+    const heatX=25,heatY=140,heatW=W-190,heatH=8;
+    ctx.fillStyle='rgba(0,0,0,0.35)';
+    roundRect(ctx,heatX,heatY,heatW,heatH,4);ctx.fill();
+    const hg=ctx.createLinearGradient(heatX,0,heatX+heatW,0);
+    hg.addColorStop(0,'#42a5f5');hg.addColorStop(0.5,'#ffee58');hg.addColorStop(1,'#e53935');
+    ctx.fillStyle=hg;
+    roundRect(ctx,heatX+1,heatY+1,Math.max(1,(heatW-2)*heat),6,3);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.8)';ctx.font='10px "Microsoft YaHei"';
+    ctx.textAlign='right';ctx.fillText('状态热度 '+(heat*100).toFixed(0)+'%',W-140,heatY+7);
+    ctx.textAlign='left';
+    if(G.combo>=2){
+        const bob=Math.sin(Date.now()/80)*3;
+        ctx.save();
+        const sc=1+0.05*Math.min(20,G.combo);
+        ctx.translate(W-85+bob,148);
+        ctx.scale(sc,sc);
+        const cCol=G.combo>=25?'#e040fb':G.combo>=12?'#ff5252':G.combo>=5?'#ff9800':'#ffd700';
+        ctx.shadowColor=cCol;ctx.shadowBlur=12;
+        ctx.font='bold '+Math.min(36,16+G.combo*0.9)+'px "Microsoft YaHei"';
+        ctx.textAlign='right';
+        ctx.strokeStyle='#000';ctx.lineWidth=3;
+        ctx.strokeText(G.combo+' 连击!',55,8);
+        ctx.fillStyle=cCol;
+        ctx.fillText(G.combo+' 连击!',55,8);
+        ctx.shadowBlur=0;
+        ctx.restore();
+    }
+    if(G.perfectStreak>=3){
+        ctx.fillStyle='#4caf50';
+        ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.textAlign='right';
+        ctx.fillText('Perfect x'+G.perfectStreak,W-25,168);
+    }
+    ctx.textAlign='left';
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.font='10px "Microsoft YaHei"';
+    ctx.fillText('🎯P '+G.perfectCount+'  G '+G.goodCount+'  M '+G.missCount,25,166);
+    ctx.globalAlpha=1;
+}
+
+function drawStrokeBar(ctx){
+    const barX=30,barY=H-145,barW=W-60,barH=30;
+    ctx.fillStyle='rgba(0,0,0,0.7)';
+    roundRect(ctx,barX-5,barY-5,barW+10,barH+10,8);ctx.fill();
+    const bgG=ctx.createLinearGradient(barX,barY,barX+barW,barY);
+    bgG.addColorStop(0,'#f44336');
+    bgG.addColorStop(0.25,'#ffeb3b');
+    bgG.addColorStop(0.41,'#4caf50');
+    bgG.addColorStop(0.5,'#00e676');
+    bgG.addColorStop(0.59,'#4caf50');
+    bgG.addColorStop(0.75,'#ffeb3b');
+    bgG.addColorStop(1,'#f44336');
+    ctx.fillStyle=bgG;
+    roundRect(ctx,barX,barY,barW,barH,6);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(barX+barW*0.5,barY-3);ctx.lineTo(barX+barW*0.5,barY+barH+3);ctx.stroke();
+    const px=barX+barW*G.strokePos;
+    ctx.fillStyle=Math.abs(G.strokePos-0.5)<0.09?'#00e676':(Math.abs(G.strokePos-0.5)<0.25?'#ffeb3b':'#f44336');
+    ctx.beginPath();
+    ctx.moveTo(px,barY-12);ctx.lineTo(px-9,barY);ctx.lineTo(px+9,barY);
+    ctx.closePath();ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(px,barY+barH+12);ctx.lineTo(px-9,barY+barH);ctx.lineTo(px+9,barY+barH);
+    ctx.closePath();ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(px,barY-12);ctx.lineTo(px,barY+barH+12);ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('🏊 划水节奏',barX,barY-16);
+    ctx.textAlign='right';
+    ctx.fillText('空格 / 点击',barX+barW,barY-16);
+    ctx.textAlign='left';
+}
+
+function drawBreathBar(ctx){
+    const barX=30,barY=H-95,barW=W-60,barH=26;
+    ctx.fillStyle=G.needBreath?'rgba(255,152,0,0.3)':'rgba(0,0,0,0.6)';
+    roundRect(ctx,barX-5,barY-5,barW+10,barH+10,8);
+    if(G.needBreath){
+        const bg2=ctx.createLinearGradient(barX,barY,barX+barW,barY);
+        bg2.addColorStop(0,'#455a64');
+        bg2.addColorStop(0.38,'#29b6f6');
+        bg2.addColorStop(0.5,'#00b0ff');
+        bg2.addColorStop(0.62,'#29b6f6');
+        bg2.addColorStop(1,'#455a64');
+        ctx.fillStyle=bg2;
+    }else{
+        ctx.fillStyle='#37474f';
+    }
+    roundRect(ctx,barX,barY,barW,barH,6);ctx.fill();
+    if(G.needBreath){
+        ctx.strokeStyle='#fff';ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.moveTo(barX+barW*0.45,barY-2);ctx.lineTo(barX+barW*0.45,barY+barH+2);
+        ctx.moveTo(barX+barW*0.55,barY-2);ctx.lineTo(barX+barW*0.55,barY+barH+2);
+        ctx.stroke();
+        const px=barX+barW*G.breathPos;
+        ctx.fillStyle=Math.abs(G.breathPos-0.5)<0.12?'#00b0ff':'#90a4ae';
+        ctx.beginPath();
+        ctx.moveTo(px,barY-10);ctx.lineTo(px-7,barY);ctx.lineTo(px+7,barY);
+        ctx.closePath();ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(px,barY+barH+10);ctx.lineTo(px-7,barY+barH);ctx.lineTo(px+7,barY+barH);
+        ctx.closePath();ctx.fill();
+    }
+    ctx.fillStyle=G.needBreath?'#fff':'#78909c';
+    ctx.font='bold 11px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    if(G.needBreath){
+        ctx.fillText('🌬 换气窗口!  按↑ / 上滑屏幕 换气',barX+3,barY+17);
+    }else{
+        ctx.fillText('🌬 正常游进中...  ('+G.breathInterval+'/'+G.nextBreathAt+' 划)',barX+3,barY+17);
+    }
+    ctx.textAlign='right';
+    ctx.fillText(G.needBreath?'↑ / 上滑':'--',barX+barW-3,barY+17);
+    ctx.textAlign='left';
+}
+
+function drawControls(ctx){
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    roundRect(ctx,10,H-55,W/2-15,42,8);ctx.fill();
+    ctx.strokeStyle='#ff9800';ctx.lineWidth=2;
+    roundRect(ctx,10,H-55,W/2-15,42,8);ctx.stroke();
+    ctx.fillStyle='#e65100';
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('🏊 划水 (点击)',10+(W/2-15)/2,H-28);
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    roundRect(ctx,W/2+5,H-55,W/2-15,42,8);ctx.fill();
+    ctx.strokeStyle='#29b6f6';ctx.lineWidth=2;
+    roundRect(ctx,W/2+5,H-55,W/2-15,42,8);ctx.stroke();
+    ctx.fillStyle='#01579b';
+    ctx.fillText('💨 换气 (上滑)',W/2+5+(W/2-15)/2,H-28);
+    ctx.textAlign='left';
+}
+
+function drawMenu(ctx){
+    ctx.fillStyle='#0f2027';
+    ctx.fillRect(0,0,W,H);
+    const skyG=ctx.createLinearGradient(0,0,0,H*0.5);
+    skyG.addColorStop(0,'#0277bd');skyG.addColorStop(1,'#4fc3f7');
+    ctx.fillStyle=skyG;
+    ctx.fillRect(0,0,W,H*0.5);
+    const waterG=ctx.createLinearGradient(0,H*0.45,0,H);
+    waterG.addColorStop(0,'#00838f');waterG.addColorStop(1,'#006064');
+    ctx.fillStyle=waterG;
+    ctx.fillRect(0,H*0.45,W,H*0.55);
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    for(let i=0;i<40;i++){
+        const x=(i*100+Math.sin(G.waterWave+i*0.5)*20)%(W+40)-20;
+        const y=H*0.48+(i%6)*35;
+        ctx.beginPath();ctx.ellipse(x,y,40,6,0.1+Math.sin(G.waterWave+i)*0.1,0,Math.PI*2);ctx.fill();
+    }
+    drawPool(ctx);
+    for(let i=0;i<LANE_COUNT;i++){
+        drawSwimmer(ctx,laneScreenX(30+Math.sin(Date.now()/500+i)*8),laneY(i),i===1?'#ffd700':(i===0?'#e53935':'#43a047'),i===1,Date.now()/100+i,false);
+    }
+    ctx.fillStyle='rgba(0,0,0,0.45)';
+    roundRect(ctx,20,30,W-40,150,12);ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.strokeStyle='#00e5ff';ctx.lineWidth=5;
+    ctx.font='bold 50px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.strokeText('游泳世锦赛',W/2,85);
+    ctx.fillText('游泳世锦赛',W/2,85);
+    ctx.fillStyle='#4fc3f7';
+    ctx.font='bold 18px Arial';
+    ctx.fillText('SWIMMING  100m  FREESTYLE',W/2,115);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('🏆 目标: 突破 47 秒 夺金牌！',W/2,145);
+    ctx.fillStyle='rgba(255,255,255,0.95)';
+    roundRect(ctx,25,188,W-50,200,12);ctx.fill();
+    ctx.strokeStyle='#0288d1';ctx.lineWidth=2;
+    roundRect(ctx,25,188,W-50,200,12);ctx.stroke();
+    ctx.fillStyle='#01579b';
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.fillText('📖 玩法说明',W/2,215);
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillStyle='#333';
+    ctx.textAlign='left';
+    const tips=[
+        '🏊 空格 / 点击屏幕 = 划水',
+        '   🟢 绿区PERFECT(1.4m)  🟡 黄区GOOD(1.0m)  🔴 红区MISS(0.5m)',
+        '💨 每 3~5 次划水需换气！指针到蓝区按 ↑ 或 上滑屏幕',
+        '🫁 氧气O₂耗尽 → 速度大幅下降，注意节奏！',
+        '🏅 与2名AI对手竞速，看谁先游完100m！',
+        '🥇 <47s金牌  🥈 <51s银牌  🥉 <55s铜牌'
+    ];
+    for(let i=0;i<tips.length;i++){
+        ctx.fillText(tips[i],40,242+i*25);
+    }
+    ctx.textAlign='center';
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 17px "Microsoft YaHei"';
+    if(G.bestTime<999){
+        ctx.fillText('🏆 个人最佳: '+G.bestTime.toFixed(2)+'s',W/2,412);
+    }else{
+        ctx.fillText('🏆 个人最佳: 尚未完成',W/2,412);
+    }
+    ctx.fillStyle='rgba(255,255,255,0.8)';
+    roundRect(ctx,20,428,W-40,82,10);ctx.fill();
+    ctx.strokeStyle='rgba(41,182,246,0.5)';ctx.lineWidth=1.5;
+    roundRect(ctx,20,428,W-40,82,10);ctx.stroke();
+    ctx.fillStyle='#01579b';
+    ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.fillText('📊 累计数据',W/2,448);
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillStyle='#37474f';
+    ctx.fillText('🏊 场次 '+G.totalRaces,34,468);
+    ctx.fillText('💨 换气 '+G.totalBreaths,34,488);
+    ctx.textAlign='center';
+    ctx.fillText('🏅 成就 '+G.achievements.length+' / 8',W/2,468);
+    ctx.fillText('🥇 金牌 '+G.goldRaces+' 次',W/2,488);
+    ctx.textAlign='right';
+    ctx.fillStyle=G.bestTime<47?'#c62828':G.bestTime<55?'#2e7d32':'#455a64';
+    ctx.fillText('📈 金牌差: '+(G.bestTime<999?(G.bestTime>47?'+'+(G.bestTime-47).toFixed(2)+'s':'已夺冠!'):'--'),W-34,468);
+    const medalHint=G.bestTime<47?'已达🥇🥈🥉':G.bestTime<51?'已达🥈🥉':G.bestTime<55?'已达🥉':'未获奖牌';
+    ctx.fillStyle='#37474f';
+    ctx.fillText('🎖 '+medalHint,W-34,488);
+    drawBtn(ctx,W/2-100,520,200,60,'🏊 跳发入水','start','#e53935');
+    if(G.achievements.length>0){
+        ctx.fillStyle='rgba(0,0,0,0.45)';
+        roundRect(ctx,12,592,W-24,62,8);ctx.fill();
+        ctx.fillStyle='#fff';
+        ctx.font='bold 11px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText('🏅 已解锁成就',W/2,610);
+        ctx.font='11px "Microsoft YaHei"';
+        const achNames={first_race:'🌊 初次下水',strokes_200:'🏊 划水机器',perfect_20:'🎯 精准手',perfect_streak_10:'✨ 完美节奏',combo_25:'🔥 水中飞鱼',gold_medal:'🥇 金冠选手',all_breath_ok:'💨 换气大师',beat_both_ai:'🏆 冠军荣耀'};
+        const ids=Object.keys(achNames);let cnt=0;
+        ctx.textAlign='left';
+        for(let i=0;i<ids.length;i++){
+            if(G.achievements.indexOf(ids[i])<0)continue;
+            const col=17+(cnt%3)*155,rowY=628+Math.floor(cnt/3)*15;
+            if(rowY<H-6){
+                ctx.fillStyle='#ffd700';
+                ctx.fillText('★ '+achNames[ids[i]],col,rowY);
+            }
+            cnt++;
+        }
+        ctx.textAlign='left';
+    }
+    ctx.fillStyle='#fff';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('按 空格 / 回车 也可开始  |  Esc 暂停',W/2,706);
+    ctx.textAlign='left';
+}
+
+function drawGame(ctx){
+    const sx=G.screenShake>0.5?(Math.random()-0.5)*G.screenShake:0;
+    const sy=G.screenShake>0.5?(Math.random()-0.5)*G.screenShake:0;
+    ctx.save();
+    ctx.translate(sx,sy);
+    drawPool(ctx);
+    drawBubbles(ctx);
+    const playerScreenX=laneScreenX(G.distance);
+    drawSwimmer(ctx,playerScreenX,laneY(1),'#ffd700',true,G.stroke_count*0.25+G.time*0.02,G.needBreath&&Math.abs(G.breathPos-0.5)<0.2);
+    for(let i=0;i<G.ai.length;i++){
+        const ai=G.ai[i];
+        const laneIdx=i===0?0:2;
+        const asx=laneScreenX(ai.distance);
+        drawSwimmer(ctx,asx,laneY(laneIdx),ai.color,false,ai.anim,ai.penalty>15);
+        ctx.fillStyle=ai.color;
+        ctx.font='bold 10px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(ai.name,asx,laneY(laneIdx)-40);
+    }
+    for(const p of G.splashParticles){
+        ctx.globalAlpha=Math.min(1,p.life/p.maxLife);
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    for(const p of G.particles){
+        ctx.globalAlpha=p.life/p.maxLife;
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    for(const w of G.shockwaves){
+        ctx.globalAlpha=Math.min(1,w.life/w.maxLife*1.2)*0.85;
+        ctx.strokeStyle=w.color;
+        ctx.lineWidth=3.5*(w.life/w.maxLife)+0.5;
+        ctx.beginPath();ctx.arc(w.x,w.y,w.r,0,Math.PI*2);ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+    for(const s of G.scorePopups){
+        ctx.globalAlpha=s.life/s.maxLife;
+        ctx.fillStyle=s.color;
+        const size=s.text.indexOf('PERFECT')>=0?22:s.text.indexOf('MISS')>=0?20:17;
+        ctx.font='bold '+size+'px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(s.text,s.x,s.y);
+    }
+    ctx.globalAlpha=1;
+    for(const f of G.floatTexts){
+        ctx.globalAlpha=Math.min(1,f.life/f.maxLife*1.3);
+        ctx.font='bold '+Math.min(28,22+Math.sin(f.phase+f.life*0.1)*3)+'px "Microsoft YaHei"';
+        ctx.strokeStyle='#000';ctx.lineWidth=3;
+        ctx.textAlign='center';
+        ctx.strokeText(f.text,f.x,f.y);
+        ctx.fillStyle=f.color;
+        ctx.fillText(f.text,f.x,f.y);
+    }
+    ctx.globalAlpha=1;
+    for(const b of G.banners){
+        const a=Math.min(1,b.life/b.maxLife*1.7);
+        ctx.globalAlpha=a;
+        ctx.save();
+        ctx.translate(W/2,180+b.yOff);
+        ctx.shadowColor='#000';ctx.shadowBlur=14;
+        const bw=Math.min(460,14*b.text.length+44);
+        ctx.fillStyle='rgba(0,0,0,0.72)';
+        roundRect(ctx,-bw/2,-28,bw,48,12);ctx.fill();
+        ctx.strokeStyle=b.color;ctx.lineWidth=2.2;
+        roundRect(ctx,-bw/2,-28,bw,48,12);ctx.stroke();
+        ctx.shadowBlur=0;
+        ctx.font='bold 20px "Microsoft YaHei"';
+        ctx.fillStyle=b.color;ctx.textAlign='center';
+        ctx.fillText(b.text,0,4);
+        ctx.restore();
+    }
+    ctx.globalAlpha=1;
+    ctx.textAlign='left';
+    drawHUD(ctx);
+    drawStrokeBar(ctx);
+    drawBreathBar(ctx);
+    drawControls(ctx);
+    if(G.flashTimer>0&&G.flashColor){
+        ctx.fillStyle=G.flashColor;
+        ctx.globalAlpha=G.flashTimer/12;
+        ctx.fillRect(0,0,W,H);
+        ctx.globalAlpha=1;
+    }
+    ctx.restore();
+}
+
+function drawPause(ctx){
+    drawGame(ctx);
+    ctx.fillStyle='rgba(0,0,0,0.78)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 46px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('⏸ 暂停',W/2,H/2-100);
+    ctx.fillStyle='#aaa';
+    ctx.font='15px "Microsoft YaHei"';
+    ctx.fillText('时间: '+(G.time/60).toFixed(2)+'s    游程: '+G.distance.toFixed(1)+'m    O₂: '+Math.round(G.oxygen)+'%',W/2,H/2-60);
+    drawBtn(ctx,W/2-85,H/2-10,170,55,'继续比赛','resume','#4caf50');
+    drawBtn(ctx,W/2-75,H/2+65,150,48,'退出比赛','quit_pause','#607d8b');
+    ctx.fillStyle='#888';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('按 ESC 继续 / 返回',W/2,H/2+150);
+    ctx.textAlign='left';
+}
+
+function getMedal(t){
+    if(t<=GOLD_TIME)return{name:'金牌 · 世界级',color:'#ffd700',emoji:'🥇'};
+    if(t<=SILVER_TIME)return{name:'银牌 · 洲际级',color:'#c0c0c0',emoji:'🥈'};
+    if(t<=BRONZE_TIME)return{name:'铜牌 · 国家级',color:'#cd7f32',emoji:'🥉'};
+    return{name:'完赛纪念',color:'#78909c',emoji:'🎖'};
+}
+
+function drawGameOver(ctx){
+    ctx.fillStyle='#0f2027';
+    ctx.fillRect(0,0,W,H);
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#001a33');g.addColorStop(1,'#004d66');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+    drawPool(ctx);
+    const finalTime=G.time/60;
+    const isNew=finalTime<=G.bestTime&&G.distance>=TOTAL_DISTANCE;
+    const medal=getMedal(finalTime);
+    const cmpWR=GOLD_TIME-finalTime;
+    const rankText=cmpWR<=-8?'D级新手':cmpWR<=-4?'C级业余':cmpWR<=0?'B级健将':cmpWR<=3?'A级国际':cmpWR<=6?'S级巨星':'SSS海神';
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    roundRect(ctx,15,20,W-30,H-40,14);ctx.fill();
+    ctx.fillStyle=isNew?'#ffd700':'#fff';
+    ctx.font='bold 40px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(isNew?'🎉 新纪录!':'🏁 比赛结束',W/2,58);
+    ctx.font='56px Arial';
+    ctx.fillText(medal.emoji,W/2,118);
+    ctx.fillStyle=medal.color;
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.fillText(medal.name+'   段位: '+rankText,W/2,145);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 17px "Microsoft YaHei"';
+    ctx.fillText('你的成绩',W/2,178);
+    ctx.fillStyle=medal.color;
+    ctx.font='bold 64px Arial';
+    ctx.fillText(finalTime.toFixed(2)+'s',W/2,245);
+    if(cmpWR>0){
+        ctx.fillStyle='#69f0ae';ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.fillText('⚡ 距金牌线还差 '+cmpWR.toFixed(2)+'s   加油!',W/2,263);
+    }else if(finalTime<=GOLD_TIME){
+        ctx.fillStyle='#ffd700';ctx.font='bold 13px "Microsoft YaHei"';
+        ctx.fillText('🌟 超越金牌线! 领先 '+(GOLD_TIME-finalTime).toFixed(2)+'s',W/2,263);
+    }
+    if(G.ranks){
+        ctx.fillStyle='rgba(255,255,255,0.95)';
+        roundRect(ctx,20,275,W-40,92,10);ctx.fill();
+        ctx.strokeStyle=medal.color;ctx.lineWidth=2;
+        roundRect(ctx,20,275,W-40,92,10);ctx.stroke();
+        ctx.fillStyle='#01579b';
+        ctx.font='bold 16px "Microsoft YaHei"';
+        ctx.fillText('🏆 最终排名',W/2,298);
+        ctx.font='bold 13px "Microsoft YaHei"';
+        for(let i=0;i<G.ranks.length&&i<4;i++){
+            const r=G.ranks[i];
+            const ry=324+i*22;
+            const medal2=i===0?'🥇':i===1?'🥈':i===2?'🥉':'🏅';
+            ctx.textAlign='left';
+            ctx.fillStyle=r.isPlayer?'#c62828':'#333';
+            ctx.font='bold 13px "Microsoft YaHei"';
+            const txt=medal2+'  第'+(i+1)+'名  '+r.name+(r.isPlayer?' (你)':'');
+            ctx.fillText(txt,40,ry);
+            ctx.textAlign='right';
+            ctx.font='bold 13px Arial';
+            const tt=r.distance>=TOTAL_DISTANCE?r.time.toFixed(2)+'s':r.distance.toFixed(1)+'m';
+            ctx.fillText(tt,W-40,ry);
+        }
+    }
+    ctx.fillStyle='rgba(255,255,255,0.96)';
+    roundRect(ctx,20,378,W-40,186,11);ctx.fill();
+    ctx.strokeStyle=medal.color;ctx.lineWidth=2;
+    roundRect(ctx,20,378,W-40,186,11);ctx.stroke();
+    ctx.fillStyle='#01579b';
+    ctx.font='bold 15px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('📊 赛后报告  ·  第 '+G.totalRaces+' 场',W/2,402);
+    const rows=[
+        ['🥇 金 47.0s',finalTime<=GOLD_TIME?'✅ 夺冠':'+'+(finalTime-GOLD_TIME).toFixed(2)+'s','🏊 总划次',G.stroke_count+' 次'],
+        ['🥈 银 51.0s',finalTime<=SILVER_TIME?'✅ 达标':'+'+(finalTime-SILVER_TIME).toFixed(2)+'s','🎯 命中率',(finalTime>0?Math.round(G.perfectCount/Math.max(1,G.perfectCount+G.goodCount+G.missCount)*100):0)+'%'],
+        ['🥉 铜 55.0s',finalTime<=BRONZE_TIME?'✅ 达标':'+'+(finalTime-BRONZE_TIME).toFixed(2)+'s','🔥 最高连击',G.maxCombo+' 连'],
+        ['💧 换气评价',G.breathMissCount===0?'⭐ 零呛水完美':'呛水 '+G.breathMissCount+' 次','✨ Perfect连',Math.max(0,G.maxPerfectStreak)+' 连'],
+        ['📈 平均配速',(100/Math.max(0.01,finalTime)).toFixed(2)+' m/s = '+((100/Math.max(0.01,finalTime))*3.6).toFixed(0)+'km/h','场次进度','第 '+G.totalRaces+' 场'],
+    ];
+    ctx.font='12px "Microsoft YaHei"';
+    for(let i=0;i<rows.length;i++){
+        const ry=426+i*24;
+        ctx.fillStyle='#666';ctx.textAlign='left';
+        ctx.fillText(rows[i][0],35,ry);
+        ctx.fillStyle='#222';ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.fillText(rows[i][1],165,ry);
+        ctx.font='12px "Microsoft YaHei"';ctx.fillStyle='#666';ctx.textAlign='left';
+        ctx.fillText(rows[i][2],255,ry);
+        ctx.fillStyle='#222';ctx.font='bold 12px "Microsoft YaHei"';ctx.textAlign='right';
+        ctx.fillText(rows[i][3],W-35,ry);
+    }
+    ctx.textAlign='center';
+    const total=G.perfectCount+G.goodCount+G.missCount||1;
+    const perfectPct=Math.round(G.perfectCount/total*100);
+    const grade=perfectPct>=85?'S':perfectPct>=70?'A':perfectPct>=50?'B':perfectPct>=30?'C':'D';
+    ctx.fillStyle='rgba(255,215,0,0.15)';
+    roundRect(ctx,30,552,W-60,22,7);ctx.fill();
+    ctx.fillStyle='#e65100';ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.fillText('划水等级: '+grade+'   P '+perfectPct+'%  G '+Math.round(G.goodCount/total*100)+'%  M '+Math.round(G.missCount/total*100)+'%   最佳 '+G.bestTime.toFixed(2)+'s',W/2,568);
+    if(G.achievements.length>0){
+        ctx.fillStyle='rgba(255,215,0,0.08)';
+        roundRect(ctx,30,578,W-60,22,6);ctx.fill();
+        ctx.fillStyle='#ff9800';ctx.font='11px "Microsoft YaHei"';
+        ctx.fillText('累计成就 '+G.achievements.length+'/8  ·  总划次 '+G.totalStrokes+'  ·  金牌 '+G.goldRaces+' 次',W/2,594);
+    }
+    drawBtn(ctx,W/2-95,608,190,58,'再游一次','restart','#e53935');
+    drawBtn(ctx,W/2-80,676,160,48,'返回菜单','menu','#455a64');
+    ctx.textAlign='left';
+}
+
+function draw(){
+    ctx.clearRect(0,0,W,H);
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_PAUSE: drawPause(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+    }
+}
+
+function gameLoop(){
+    requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+
+gameLoop();
+
+})();
+</script>
+
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { initAudio(); } catch(e){}
+            try { b.style.display = 'none'; } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

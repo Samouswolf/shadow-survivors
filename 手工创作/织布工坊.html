@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>织布工坊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#2c1810;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#d4a574;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=800;
+
+const COLORS=[
+    {name:'红',hex:'#e74c3c',alt:'#c0392b'},
+    {name:'黄',hex:'#f1c40f',alt:'#f39c12'},
+    {name:'蓝',hex:'#3498db',alt:'#2980b9'},
+    {name:'绿',hex:'#27ae60',alt:'#16a085'},
+    {name:'白',hex:'#ecf0f1',alt:'#bdc3c7'},
+    {name:'黑',hex:'#2c3e50',alt:'#1a252f'}
+];
+
+const LEVELS=[
+    {size:4,time:90,name:'Lv1 初学',starsReward:[150,300,500]},
+    {size:6,time:80,name:'Lv2 进阶',starsReward:[250,450,700]},
+    {size:8,time:70,name:'Lv3 大师',starsReward:[400,700,1100]}
+];
+
+const PATTERNS={};
+(function(){
+    const R=0,Y=1,B=2,G=3,W=4,K=5,_=-1;
+    PATTERNS[4]=[
+        {name:'小爱心',grid:[[_,R,R,_],[R,R,R,R],[R,R,R,R],[_,R,R,_]]},
+        {name:'小笑脸',grid:[[Y,Y,Y,Y],[Y,K,Y,K],[Y,Y,Y,Y],[K,Y,Y,K]]},
+        {name:'小彩虹',grid:[[R,R,Y,Y],[R,Y,Y,G],[Y,Y,G,G],[Y,G,G,B]]},
+        {name:'小格子',grid:[[R,W,R,W],[W,R,W,R],[R,W,R,W],[W,R,W,R]]},
+        {name:'蓝钻石',grid:[[_,_,B,_],[_,B,G,B],[_,B,G,B],[_,_,B,_]]},
+        {name:'绿草地',grid:[[G,Y,Y,G],[G,G,G,G],[W,G,G,W],[W,K,K,W]]}
+    ];
+    PATTERNS[6]=[
+        {name:'爱心',grid:[[_,R,R,_,R,R,_],[R,R,R,R,R,R,R],[R,R,R,R,R,R,R],[R,R,R,R,R,R,R],[_,R,R,R,R,R,_],[_,_,R,R,R,_,_]].map(r=>r.slice(0,6))},
+        {name:'星星',grid:[[_,_,Y,_,_,_],[_,Y,Y,Y,_,_],[Y,Y,Y,Y,Y,_],[_,Y,Y,Y,_,_],[Y,_,Y,_,Y,_],[Y,_,_,_,Y,_]]},
+        {name:'彩虹',grid:[[R,R,R,R,R,R],[R,Y,Y,Y,Y,B],[Y,Y,G,G,G,B],[Y,G,G,B,B,B],[G,B,B,B,W,W],[B,B,W,W,W,W]]},
+        {name:'大笑脸',grid:[[Y,Y,Y,Y,Y,Y],[Y,K,Y,Y,K,Y],[Y,Y,Y,Y,Y,Y],[Y,Y,Y,Y,Y,Y],[K,Y,Y,Y,Y,K],[_,K,K,K,K,_]]},
+        {name:'小房子',grid:[[_,_,R,_,_,_],[_,R,R,R,_,_],[R,R,R,R,R,_],[W,B,W,B,W,_],[W,B,W,B,W,_],[W,W,W,W,W,_]]},
+        {name:'花蝴蝶',grid:[[R,_,_,_,_,R],[R,R,_,_,R,R],[R,R,R,R,R,R],[_,R,R,R,R,_],[_,R,_,_,R,_],[_,K,_,_,K,_]]}
+    ];
+    PATTERNS[8]=[
+        {name:'大爱心',grid:[[_,R,R,_,_,R,R,_],[R,R,R,R,R,R,R,R],[R,R,R,R,R,R,R,R],[R,R,R,R,R,R,R,R],[_,R,R,R,R,R,R,_],[_,_,R,R,R,R,_,_],[_,_,_,R,R,_,_,_],[_,_,_,_,_,_,_,_]]},
+        {name:'大星星',grid:[[_,_,_,Y,_,_,_,_],[_,_,Y,Y,Y,_,_,_],[_,Y,Y,Y,Y,Y,_,_],[Y,Y,Y,Y,Y,Y,Y,_],[_,_,Y,Y,Y,_,_,_],[_,Y,Y,_,Y,Y,_,_],[Y,Y,_,_,_,Y,Y,_],[Y,_,_,_,_,_,Y,_]]},
+        {name:'大彩虹',grid:[[R,R,R,R,R,R,R,R],[R,Y,Y,Y,Y,Y,Y,B],[Y,Y,G,G,G,G,B,B],[Y,G,G,G,B,B,B,W],[G,G,G,B,B,B,W,W],[G,B,B,B,W,W,W,W],[B,B,B,W,W,W,W,K],[B,B,W,W,W,W,K,K]]},
+        {name:'国旗',grid:[[R,R,R,R,R,R,R,R],[R,R,R,R,R,R,R,R],[R,R,Y,R,R,R,R,R],[R,Y,Y,Y,R,R,R,R],[R,R,R,R,R,R,R,R],[R,R,R,R,R,R,R,R],[R,R,R,R,R,R,R,R],[R,R,R,R,R,R,R,R]]},
+        {name:'小蘑菇',grid:[[_,_,R,R,R,R,_,_],[_,R,R,R,R,R,R,_],[R,R,K,R,R,K,R,R],[R,R,R,R,R,R,R,R],[_,W,W,W,W,W,W,_],[_,W,W,W,W,W,W,_],[_,_,W,W,W,W,_,_],[_,_,W,W,W,W,_,_]]},
+        {name:'圣诞树',grid:[[_,_,_,G,_,_,_,_],[_,_,G,G,G,_,_,_],[_,G,G,G,G,G,_,_],[G,G,Y,G,G,G,G,_],[_,G,G,G,G,G,_,_],[G,G,G,R,G,G,G,_],[_,_,K,K,K,K,_,_],[_,_,K,K,K,K,_,_]]}
+    ];
+})();
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'sine';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxPick(){playTone(523,0.08,'sine',0.12)}
+function sfxWeave(){playTone(392,0.06,'triangle',0.1)}
+function sfxError(){playTone(196,0.15,'sawtooth',0.15)}
+function sfxScore(){playTone(659,0.1,'sine',0.18);setTimeout(()=>playTone(784,0.12,'sine',0.18),80);setTimeout(()=>playTone(988,0.18,'sine',0.18),180)}
+function sfxBuzzer(){playTone(150,0.4,'sawtooth',0.2)}
+function sfxBtn(){playTone(440,0.06,'sine',0.1)}
+function sfxLevelUp(){for(let i=0;i<6;i++)setTimeout(()=>playTone(523+i*88,0.12,'square',0.12),i*80)}
+function sfxCombo(){for(let i=0;i<4;i++)setTimeout(()=>playTone(800+i*100,0.07,'triangle',0.1),i*45)}
+function sfxStar(){for(let i=0;i<3;i++)setTimeout(()=>playTone(1200+i*200,0.15,'sine',0.15),i*120)}
+
+let particles=[];
+const ACHIEVEMENTS=[
+    {id:'first_weave',name:'初次上手',desc:'完成第一格编织',unlocked:false,icon:'🧵'},
+    {id:'combo_10',name:'十指连心',desc:'达成10连击',unlocked:false,icon:'🔥'},
+    {id:'combo_20',name:'织神下凡',desc:'达成20连击',unlocked:false,icon:'⚡'},
+    {id:'no_error',name:'一丝不苟',desc:'单关零失误通关',unlocked:false,icon:'💎'},
+    {id:'all_stars',name:'三星大师',desc:'三关全三星通关',unlocked:false,icon:'👑'},
+    {id:'speedster',name:'飞梭走线',desc:'剩余40秒以上完成一关',unlocked:false,icon:'⏱️'},
+    {id:'hint_hater',name:'自力更生',desc:'一关不使用提示',unlocked:false,icon:'💪'},
+    {id:'perfectionist',name:'完美主义',desc:'单关正确率100%',unlocked:false,icon:'🏆'}
+];
+let usedHintThisLevel=false;
+let weavesThisLevel=0;
+let achievementPopups=[];
+function unlockAchievement(id){
+    const a=ACHIEVEMENTS.find(x=>x.id===id);
+    if(!a||a.unlocked)return;
+    a.unlocked=true;
+    achievementPopups.push({a:a,life:150,y:-50});
+    for(let i=0;i<20;i++)setTimeout(()=>playTone(700+i*60,0.06,'sine',0.12),i*40);
+    spawnParticles(W/2,200,'#ffd700',30);
+}
+function updateAchievementPopups(){
+    for(let i=achievementPopups.length-1;i>=0;i--){
+        const p=achievementPopups[i];
+        p.life--;
+        if(p.y<40)p.y+=1.2;
+        if(p.life<30)p.y-=1.5;
+        if(p.life<=0)achievementPopups.splice(i,1);
+    }
+}
+function drawAchievementPopups(ctx){
+    for(const p of achievementPopups){
+        ctx.save();
+        ctx.translate(W/2,p.y);
+        ctx.globalAlpha=Math.min(1,p.life/60);
+        ctx.fillStyle='rgba(0,0,0,0.82)';
+        roundRect(ctx,-140,-22,280,48,12);ctx.fill();
+        ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
+        roundRect(ctx,-140,-22,280,48,12);ctx.stroke();
+        ctx.font='26px Arial';ctx.textAlign='left';
+        ctx.fillText(p.a.icon,-128,8);
+        ctx.fillStyle='#ffd700';
+        ctx.font='bold 15px "Microsoft YaHei"';
+        ctx.fillText('🏅 成就解锁: '+p.a.name,-92,-2);
+        ctx.fillStyle='#ddd';
+        ctx.font='12px "Microsoft YaHei"';
+        ctx.fillText(p.a.desc,-92,14);
+        ctx.restore();
+    }
+    ctx.globalAlpha=1;
+}
+let threadLines=[];
+function spawnThreadLine(fromX,fromY,toX,toY,color){
+    threadLines.push({fx:fromX,fy:fromY,tx:toX,ty:toY,t:0,color:color,life:18});
+}
+function updateThreadLines(){
+    for(let i=threadLines.length-1;i>=0;i--){
+        const l=threadLines[i];
+        l.t+=0.12;l.life--;
+        if(l.t>=1||l.life<=0)threadLines.splice(i,1);
+    }
+}
+function drawThreadLines(ctx){
+    for(const l of threadLines){
+        const t=l.t;
+        const cx=l.fx+(l.tx-l.fx)*0.5;
+        const cy=l.fy+(l.ty-l.fy)*0.5-30*(1-Math.abs(t-0.5)*2);
+        ctx.globalAlpha=l.life/18;
+        ctx.strokeStyle=l.color;ctx.lineWidth=3;
+        ctx.beginPath();ctx.moveTo(l.fx,l.fy);
+        ctx.quadraticCurveTo(cx,cy,l.tx,l.ty);ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+}
+let milestoneTracker={milestones:[100,300,600,1000,1500,2200,3000],lastHit:-1};
+function checkMilestones(curScore){
+    for(let i=milestoneTracker.lastHit+1;i<milestoneTracker.milestones.length;i++){
+        if(curScore>=milestoneTracker.milestones[i]){
+            milestoneTracker.lastHit=i;
+            addFloating(W/2,150,'🎯 里程碑 '+milestoneTracker.milestones[i]+'分!','#ffd700',true);
+            spawnParticles(W/2,150,'#ffd700',25);
+            break;
+        }
+    }
+}
+function spawnParticles(x,y,color,count){
+    if(!count)count=12;
+    for(let i=0;i<count;i++){
+        particles.push({
+            x:x,y:y,
+            vx:(Math.random()-0.5)*7,
+            vy:(Math.random()-0.5)*7-2,
+            life:30+Math.floor(Math.random()*25),
+            maxLife:55,
+            size:2+Math.random()*3,
+            color:color
+        });
+    }
+}
+function updateParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i];
+        p.x+=p.vx;p.y+=p.vy;
+        p.vy+=0.22;
+        p.vx*=0.99;
+        p.life--;
+        if(p.life<=0)particles.splice(i,1);
+    }
+}
+function drawParticles(ctx){
+    for(const p of particles){
+        ctx.globalAlpha=Math.max(0,p.life/p.maxLife);
+        ctx.fillStyle=p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+}
+let floatings=[];
+function addFloating(x,y,text,color,big){
+    floatings.push({x:x,y:y,text:text,color:color||'#ffd700',life:60,maxLife:60,big:big||false});
+}
+function updateFloatings(){
+    for(let i=floatings.length-1;i>=0;i--){
+        const f=floatings[i];
+        f.y-=1.1;f.life--;
+        if(f.life<=0)floatings.splice(i,1);
+    }
+}
+function drawFloatings(ctx){
+    for(const f of floatings){
+        ctx.globalAlpha=Math.min(1,f.life/30);
+        ctx.fillStyle=f.color;
+        ctx.font='bold '+(f.big?32:18)+'px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(f.text,f.x,f.y);
+        ctx.textAlign='left';
+    }
+    ctx.globalAlpha=1;
+}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const G={
+    state:STATE_MENU,
+    score:0,
+    highScore:0,
+    level:0,
+    timeLeft:0,
+    gridSize:0,
+    pattern:null,
+    playerGrid:null,
+    selectedColor:0,
+    errors:0,
+    correct:0,
+    cursorX:0,
+    cursorY:0,
+    isPainting:false,
+    btnRects:{},
+    keys:{},
+    paused:false,
+    levelScore:0,
+    totalScore:0,
+    combo:0,
+    maxCombo:0,
+    totalWeaves:0,
+    totalCorrect:0,
+    transition:0,
+    transitionText:'',
+    levelStars:[0,0,0],
+    lastCell:null,
+    weaveFlash:[],
+    hintFlash:0
+};
+
+G.highScore=parseInt(Storage.load('weaver_high','0'));
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color,active,big){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    ctx.fillStyle=color||'#d4a574';
+    if(active){
+        ctx.shadowBlur=15;ctx.shadowColor='#ffd700';
+    }
+    ctx.strokeStyle=active?'#ffd700':'#fff';
+    ctx.lineWidth=active?3:2;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+(big?20:17)+'px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+function getGridArea(){
+    const s=G.gridSize;
+    const cellSize=Math.min(300/s,40);
+    const gw=cellSize*s;
+    const gh=cellSize*s;
+    const gx=(W-gw)/2+20;
+    const gy=210;
+    return{x:gx,y:gy,w:gw,h:gh,cell:cellSize};
+}
+function getColorSpoolArea(){return{x:15,y:210,w:55,h:390,itemH:65}}
+function getPreviewArea(){
+    const s=G.gridSize;
+    const cell=Math.min(18,120/s);
+    const pw=cell*s,ph=cell*s;
+    return{x:W-pw-15,y:210,w:pw,h:ph,cell:cell};
+}
+
+window.addEventListener('keydown',function(e){
+    G.keys[e.key.toLowerCase()]=true;
+    if(e.key===' '||e.key==='Enter'){
+        e.preventDefault();
+        if(G.state===STATE_MENU||G.state===STATE_OVER){startGame();return}
+        if(G.state===STATE_PLAYING&&!G.paused&&G.transition<=0){paintCell(G.cursorX,G.cursorY)}
+    }
+    if(e.key==='Escape'){
+        e.preventDefault();
+        if(G.state===STATE_PLAYING||G.paused)togglePause();
+    }
+    if(G.state===STATE_PLAYING&&!G.paused&&G.transition<=0){
+        for(let i=1;i<=6;i++){
+            if(e.key===String(i)){G.selectedColor=i-1;sfxPick();G.hintFlash=30;return}
+        }
+        if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A'){G.cursorX=Math.max(0,G.cursorX-1)}
+        if(e.key==='ArrowRight'||e.key==='d'||e.key==='D'){G.cursorX=Math.min(G.gridSize-1,G.cursorX+1)}
+        if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){G.cursorY=Math.max(0,G.cursorY-1)}
+        if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){G.cursorY=Math.min(G.gridSize-1,G.cursorY+1)}
+        if(e.key==='h'||e.key==='H'){hintNextCell()}
+    }
+    initAudio();
+});
+window.addEventListener('keyup',function(e){
+    G.keys[e.key.toLowerCase()]=false;
+});
+
+function hintNextCell(){
+    if(G.hintFlash>0)return;
+    usedHintThisLevel=true;
+    for(let y=0;y<G.gridSize;y++){
+        for(let x=0;x<G.gridSize;x++){
+            const t=G.pattern.grid[y][x];
+            if(t>=0&&G.playerGrid[y][x]!==t){
+                G.hintFlash=90;
+                G.cursorX=x;G.cursorY=y;
+                addFloating(W/2,560,'💡 提示已标记','#29b6f6');
+                sfxBtn();
+                return;
+            }
+        }
+    }
+}
+
+function getGridAt(p){
+    const a=getGridArea();
+    if(p.x<a.x||p.x>a.x+a.w||p.y<a.y||p.y>a.y+a.h)return null;
+    const cx=Math.floor((p.x-a.x)/a.cell);
+    const cy=Math.floor((p.y-a.y)/a.cell);
+    if(cx<0||cx>=G.gridSize||cy<0||cy>=G.gridSize)return null;
+    return{x:cx,y:cy};
+}
+function getColorAt(p){
+    const a=getColorSpoolArea();
+    if(p.x<a.x||p.x>a.x+a.w||p.y<a.y||p.y>a.y+a.h)return -1;
+    const idx=Math.floor((p.y-a.y)/a.itemH);
+    if(idx<0||idx>=6)return -1;
+    return idx;
+}
+
+function paintCell(x,y){
+    if(G.playerGrid[y][x]===G.selectedColor)return;
+    const target=G.pattern.grid[y][x];
+    const prev=G.playerGrid[y][x];
+    const wasCorrect=prev===target;
+    if(wasCorrect)G.correct--;
+    G.playerGrid[y][x]=G.selectedColor;
+    G.totalWeaves++;
+    weavesThisLevel++;
+    const a=getGridArea();
+    const px=a.x+x*a.cell+a.cell/2;
+    const py=a.y+y*a.cell+a.cell/2;
+    const sp=getColorSpoolArea();
+    const sx=sp.x+sp.w/2,sy=sp.y+G.selectedColor*sp.itemH+sp.itemH/2-8;
+    const c=COLORS[G.selectedColor].hex;
+    spawnThreadLine(sx,sy,px,py,c);
+    if(weavesThisLevel===1)unlockAchievement('first_weave');
+    if(G.selectedColor===target){
+        G.correct++;
+        G.totalCorrect++;
+        G.combo++;
+        G.maxCombo=Math.max(G.maxCombo,G.combo);
+        if(G.combo===10)unlockAchievement('combo_10');
+        if(G.combo===20)unlockAchievement('combo_20');
+        const gain=5;
+        G.score+=gain;
+        G.levelScore+=gain;
+        G.weaveFlash.push({x:x,y:y,life:25,color:c});
+        spawnParticles(px,py,c,4);
+        if(G.combo>0&&G.combo%5===0){
+            addFloating(px,py-10,G.combo+'连击!','#ff9800',true);
+            sfxCombo();
+        }else{
+            addFloating(px,py-4,'+'+gain,'#4caf50');
+        }
+        sfxWeave();
+    }else{
+        G.combo=0;
+        G.errors++;
+        G.score=Math.max(0,G.score-10);
+        G.weaveFlash.push({x:x,y:y,life:35,color:'#ff5252'});
+        spawnParticles(px,py,'#ff5252',6);
+        addFloating(px,py-4,'-10','#f44336');
+        sfxError();
+    }
+}
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){startGame();return}
+    }else if(G.state===STATE_PAUSE){
+        if(hitBtn(p,'resume')){togglePause();return}
+        if(hitBtn(p,'quit')){G.state=STATE_MENU;G.paused=false;sfxBtn();return}
+    }else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;sfxBtn();return}
+    }else if(G.state===STATE_PLAYING&&!G.paused&&G.transition<=0){
+        const c=getColorAt(p);
+        if(c>=0){G.selectedColor=c;sfxPick();G.hintFlash=25;return}
+        const g=getGridAt(p);
+        if(g){G.cursorX=g.x;G.cursorY=g.y;G.isPainting=true;paintCell(g.x,g.y)}
+    }
+}
+function handlePointerMove(e){
+    if(G.state!==STATE_PLAYING||G.paused||!G.isPainting||G.transition>0)return;
+    const p=getPos(e);
+    const g=getGridAt(p);
+    if(g&&(G.lastCell===null||G.lastCell.x!==g.x||G.lastCell.y!==g.y)){
+        G.cursorX=g.x;G.cursorY=g.y;
+        paintCell(g.x,g.y);
+        G.lastCell={x:g.x,y:g.y};
+    }
+}
+function handlePointerUp(e){
+    G.isPainting=false;G.lastCell=null;
+}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('mouseleave',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e)},{passive:false});
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.level=0;
+    G.totalScore=0;
+    G.score=0;
+    G.errors=0;
+    G.paused=false;
+    G.combo=0;G.maxCombo=0;
+    G.totalWeaves=0;G.totalCorrect=0;
+    particles=[];floatings=[];threadLines=[];achievementPopups=[];
+    G.levelStars=[0,0,0];
+    G.weaveFlash=[];
+    milestoneTracker.lastHit=-1;
+    for(let i=0;i<ACHIEVEMENTS.length;i++)ACHIEVEMENTS[i].unlocked=false;
+    startLevel();
+    sfxBtn();
+}
+
+function startLevel(){
+    const lv=LEVELS[G.level];
+    G.gridSize=lv.size;
+    G.timeLeft=lv.time*60;
+    const pats=PATTERNS[lv.size];
+    G.pattern=pats[Math.floor(Math.random()*pats.length)];
+    G.playerGrid=[];
+    for(let y=0;y<lv.size;y++){
+        G.playerGrid[y]=[];
+        for(let x=0;x<lv.size;x++)G.playerGrid[y][x]=-1;
+    }
+    G.correct=0;
+    G.errors=0;
+    G.levelScore=0;
+    G.selectedColor=0;
+    G.cursorX=Math.floor(lv.size/2);
+    G.cursorY=Math.floor(lv.size/2);
+    G.isPainting=false;
+    G.combo=0;G.weaveFlash=[];
+    G.transition=90;
+    G.transitionText=lv.name+' · '+G.pattern.name;
+    weavesThisLevel=0;
+    usedHintThisLevel=false;
+    threadLines=[];
+    sfxLevelUp();
+}
+
+function checkLevelComplete(){
+    let total=0;
+    for(let y=0;y<G.gridSize;y++){
+        for(let x=0;x<G.gridSize;x++){
+            if(G.pattern.grid[y][x]>=0)total++;
+            if(G.pattern.grid[y][x]>=0&&G.playerGrid[y][x]!==G.pattern.grid[y][x])return false;
+        }
+    }
+    return G.correct>=total;
+}
+
+function finishLevel(){
+    const timeBonus=Math.ceil(G.timeLeft/60)*10;
+    const errPenalty=G.errors*10;
+    const comboBonus=G.maxCombo*2;
+    const lvlScore=timeBonus+G.levelScore-errPenalty+comboBonus;
+    const rewards=LEVELS[G.level].starsReward;
+    let stars=0;
+    if(lvlScore>=rewards[0])stars=1;
+    if(lvlScore>=rewards[1])stars=2;
+    if(lvlScore>=rewards[2])stars=3;
+    G.levelStars[G.level]=stars;
+    G.totalScore+=Math.max(0,lvlScore);
+    G.score=G.totalScore;
+    if(G.errors===0)unlockAchievement('no_error');
+    if(!usedHintThisLevel)unlockAchievement('hint_hater');
+    if(G.timeLeft/60>=40)unlockAchievement('speedster');
+    if(weavesThisLevel>0&&G.totalWeaves>0&&G.totalCorrect===G.totalWeaves)unlockAchievement('perfectionist');
+    addFloating(W/2,400,'时间奖励 +'+timeBonus,'#4caf50',true);
+    setTimeout(()=>addFloating(W/2,440,stars>0?'⭐'.repeat(stars)+' 星!':'','#ffd700',true),250);
+    if(stars>=3)sfxStar();
+    sfxScore();
+    spawnParticles(W/2,300,'#ffd700',40);
+    G.level++;
+    if(G.level>=LEVELS.length){
+        setTimeout(function(){
+            let totalStars=0;for(let i=0;i<3;i++)totalStars+=G.levelStars[i];
+            if(totalStars===9)unlockAchievement('all_stars');
+            endGame();
+        },1200);
+    }else{
+        setTimeout(startLevel,1300);
+    }
+}
+
+function endGame(){
+    G.state=STATE_OVER;
+    G.score=G.totalScore;
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        Storage.save('weaver_high',G.highScore);
+    }
+    sfxBuzzer();
+}
+
+function togglePause(){
+    G.paused=!G.paused;
+    if(G.paused)G.state=STATE_PAUSE;
+    else G.state=STATE_PLAYING;
+    sfxBtn();
+}
+
+function update(){
+    if(G.hintFlash>0)G.hintFlash--;
+    for(let i=G.weaveFlash.length-1;i>=0;i--){G.weaveFlash[i].life--;if(G.weaveFlash[i].life<=0)G.weaveFlash.splice(i,1)}
+    updateParticles();updateFloatings();updateThreadLines();updateAchievementPopups();
+    if(G.transition>0){G.transition--;return}
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    G.timeLeft--;
+    checkMilestones(G.score);
+    if(G.timeLeft<=0){
+        if(G.level>=LEVELS.length-1){endGame();return}
+        G.level++;startLevel();return;
+    }
+    if(checkLevelComplete())finishLevel();
+}
+
+function drawBg(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#3e2723');g.addColorStop(1,'#1b0f0a');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(212,165,116,0.05)';
+    for(let i=0;i<W;i+=20)ctx.fillRect(i,0,2,H);
+    for(let i=0;i<H;i+=20){
+        ctx.fillStyle=i%40===0?'rgba(121,85,72,0.05)':'rgba(121,85,72,0.02)';
+        ctx.fillRect(0,i,W,2);
+    }
+    ctx.strokeStyle='rgba(255,215,0,0.03)';
+    ctx.lineWidth=1;
+    for(let i=-H;i<W+H;i+=60){
+        ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i+H,H);ctx.stroke();
+    }
+}
+
+function drawColorSpools(ctx){
+    const a=getColorSpoolArea();
+    ctx.fillStyle='rgba(255,255,255,0.04)';
+    roundRect(ctx,a.x-6,a.y-6,a.w+12,a.h+12,10);ctx.fill();
+    ctx.strokeStyle='rgba(212,165,116,0.25)';ctx.lineWidth=1;
+    roundRect(ctx,a.x-6,a.y-6,a.w+12,a.h+12,10);ctx.stroke();
+    for(let i=0;i<6;i++){
+        const y=a.y+i*a.itemH;
+        const sel=G.selectedColor===i;
+        ctx.fillStyle=sel?'rgba(255,215,0,0.22)':'rgba(255,255,255,0.02)';
+        roundRect(ctx,a.x,y,a.w,a.itemH-8,8);ctx.fill();
+        if(sel){
+            ctx.shadowBlur=12;ctx.shadowColor='#ffd700';
+            ctx.strokeStyle='#ffd700';ctx.lineWidth=3;
+            roundRect(ctx,a.x,y,a.w,a.itemH-8,8);ctx.stroke();
+            ctx.shadowBlur=0;
+        }
+        const col=COLORS[i];
+        const cx=a.x+a.w/2,cy=y+a.itemH/2-8;
+        ctx.fillStyle=col.alt;
+        ctx.beginPath();ctx.arc(cx+2,cy+3,17,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=col.hex;
+        ctx.beginPath();ctx.arc(cx,cy,17,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#000';ctx.lineWidth=1.2;ctx.stroke();
+        ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=1;
+        ctx.beginPath();ctx.arc(cx-5,cy-5,5,0,Math.PI*1.7);ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.font='bold 14px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(col.name,cx,y+a.itemH-15);
+        ctx.font='bold 11px Arial';
+        ctx.fillStyle=sel?'#ffd700':'#aaa';
+        ctx.fillText('['+(i+1)+']',cx,y+13);
+    }
+    ctx.textAlign='left';
+}
+
+function drawLoom(ctx){
+    const a=getGridArea();
+    ctx.fillStyle='#4e342e';
+    roundRect(ctx,a.x-22,a.y-35,a.w+44,a.h+70,14);ctx.fill();
+    ctx.strokeStyle='#2c1810';ctx.lineWidth=3;
+    roundRect(ctx,a.x-22,a.y-35,a.w+44,a.h+70,14);ctx.stroke();
+    ctx.fillStyle='#6d4c41';
+    roundRect(ctx,a.x-16,a.y-28,a.w+32,14,5);ctx.fill();
+    roundRect(ctx,a.x-16,a.y+a.h+14,a.w+32,14,5);ctx.fill();
+    ctx.strokeStyle='#3e2723';ctx.lineWidth=1.5;
+    roundRect(ctx,a.x-16,a.y-28,a.w+32,14,5);ctx.stroke();
+    roundRect(ctx,a.x-16,a.y+a.h+14,a.w+32,14,5);ctx.stroke();
+    for(let i=0;i<=G.gridSize;i++){
+        const grad=ctx.createLinearGradient(a.x+i*a.cell,a.y-28,a.x+i*a.cell,a.y+a.h+20);
+        grad.addColorStop(0,'#efebe9');grad.addColorStop(0.5,'#d7ccc8');grad.addColorStop(1,'#a1887f');
+        ctx.strokeStyle=grad;ctx.lineWidth=1.8;
+        ctx.beginPath();
+        ctx.moveTo(a.x+i*a.cell,a.y-28);
+        ctx.lineTo(a.x+i*a.cell,a.y+a.h+20);
+        ctx.stroke();
+    }
+    for(let y=0;y<G.gridSize;y++){
+        for(let x=0;x<G.gridSize;x++){
+            const px=a.x+x*a.cell,py=a.y+y*a.cell;
+            const c=G.playerGrid[y][x];
+            if(c>=0){
+                const cc=COLORS[c];
+                ctx.fillStyle=cc.hex;
+                ctx.fillRect(px+1,py+1,a.cell-2,a.cell-2);
+                ctx.fillStyle='rgba(255,255,255,0.18)';
+                ctx.fillRect(px+2,py+2,a.cell-4,Math.max(2,(a.cell-4)*0.3));
+                ctx.fillStyle='rgba(0,0,0,0.12)';
+                ctx.fillRect(px+2,py+a.cell-Math.max(3,(a.cell-4)*0.3),a.cell-4,Math.max(2,(a.cell-4)*0.25));
+            }else{
+                ctx.fillStyle='rgba(255,255,255,0.04)';
+                ctx.fillRect(px+1,py+1,a.cell-2,a.cell-2);
+            }
+            ctx.strokeStyle='rgba(0,0,0,0.22)';ctx.lineWidth=1;
+            ctx.strokeRect(px+0.5,py+0.5,a.cell-1,a.cell-1);
+        }
+    }
+    for(const f of G.weaveFlash){
+        const px=a.x+f.x*a.cell,py=a.y+f.y*a.cell;
+        ctx.globalAlpha=f.life/35;
+        ctx.strokeStyle=f.color;ctx.lineWidth=3;
+        ctx.strokeRect(px+1,py+1,a.cell-2,a.cell-2);
+        ctx.globalAlpha=1;
+    }
+    if(G.state===STATE_PLAYING&&!G.paused&&G.transition<=0){
+        const cx=a.x+G.cursorX*a.cell,cy=a.y+G.cursorY*a.cell;
+        const pulse=1+Math.sin(Date.now()/80)*0.08;
+        ctx.save();
+        ctx.translate(cx+a.cell/2,cy+a.cell/2);ctx.scale(pulse,pulse);
+        ctx.strokeStyle='#ffd700';ctx.lineWidth=3;
+        ctx.shadowBlur=8;ctx.shadowColor='#ffd700';
+        ctx.strokeRect(-a.cell/2+1,-a.cell/2+1,a.cell-2,a.cell-2);
+        ctx.shadowBlur=0;ctx.restore();
+        if(G.hintFlash>0){
+            ctx.strokeStyle='#29b6f6';ctx.lineWidth=4;
+            ctx.globalAlpha=G.hintFlash/90;
+            ctx.strokeRect(cx+1,cy+1,a.cell-2,a.cell-2);
+            ctx.globalAlpha=1;
+        }
+    }
+    ctx.fillStyle='#8d6e63';
+    ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('🧵 织布机 · 按 [H] 提示',a.x+a.w/2,a.y-12);
+    ctx.textAlign='left';
+}
+
+function drawPreview(ctx){
+    const a=getPreviewArea();
+    ctx.fillStyle='rgba(0,0,0,0.42)';
+    roundRect(ctx,a.x-10,a.y-42,a.w+20,a.h+58,10);ctx.fill();
+    ctx.strokeStyle='rgba(255,215,0,0.3)';ctx.lineWidth=1;
+    roundRect(ctx,a.x-10,a.y-42,a.w+20,a.h+58,10);ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('📋 目标 · '+G.pattern.name,a.x+a.w/2,a.y-25);
+    for(let y=0;y<G.gridSize;y++){
+        for(let x=0;x<G.gridSize;x++){
+            const c=G.pattern.grid[y][x];
+            const px=a.x+x*a.cell,py=a.y+y*a.cell;
+            if(c>=0){ctx.fillStyle=COLORS[c].hex;ctx.fillRect(px,py,a.cell-1,a.cell-1)}
+            else{ctx.fillStyle='rgba(255,255,255,0.08)';ctx.fillRect(px,py,a.cell-1,a.cell-1)}
+            ctx.strokeStyle='rgba(255,255,255,0.12)';ctx.lineWidth=0.5;
+            ctx.strokeRect(px+0.5,py+0.5,a.cell-1,a.cell-1);
+        }
+    }
+    ctx.textAlign='left';
+}
+
+function drawHUD(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.62)';
+    roundRect(ctx,10,10,W-20,95,12);ctx.fill();
+    ctx.strokeStyle='rgba(255,215,0,0.12)';ctx.lineWidth=1;
+    roundRect(ctx,10,10,W-20,95,12);ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('得分',25,33);
+    ctx.font='bold 25px "Microsoft YaHei"';
+    ctx.fillStyle='#ffd700';
+    ctx.fillText(G.score,25,60);
+    ctx.font='11px "Microsoft YaHei"';ctx.fillStyle='#a1887f';
+    ctx.fillText('累计 '+G.totalScore,25,80);
+    const secs=Math.ceil(G.timeLeft/60);
+    ctx.textAlign='center';
+    ctx.fillStyle=secs<=10?'#ff5252':'#fff';
+    const sPulse=secs<=10?(1+Math.sin(Date.now()/60)*0.08):1;
+    ctx.save();ctx.translate(W/2,50);ctx.scale(sPulse,sPulse);
+    ctx.font='bold 32px Arial';
+    ctx.fillText(secs+'s',0,0);
+    ctx.restore();
+    ctx.font='12px "Microsoft YaHei"';ctx.fillStyle='#a1887f';
+    ctx.fillText(LEVELS[G.level].name+' · '+G.pattern.name,W/2,80);
+    ctx.textAlign='right';
+    ctx.fillStyle='#d4a574';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText('最高分',W-25,33);
+    ctx.font='bold 19px "Microsoft YaHei"';
+    ctx.fillStyle='#ffd700';
+    ctx.fillText(G.highScore,W-25,57);
+    ctx.font='11px "Microsoft YaHei"';ctx.fillStyle='#a1887f';
+    let st='';
+    for(let i=0;i<LEVELS.length;i++)st+=(i<=G.level-1?(G.levelStars[i]>0?'⭐'.repeat(G.levelStars[i]):'⚫'):'⬜')+' ';
+    ctx.fillText(st,W-25,80);
+    ctx.textAlign='left';
+    let totalTarget=0,correctNow=0;
+    for(let y=0;y<G.gridSize;y++)for(let x=0;x<G.gridSize;x++){
+        if(G.pattern.grid[y][x]>=0){totalTarget++;if(G.playerGrid[y][x]===G.pattern.grid[y][x])correctNow++}
+    }
+    const pct=totalTarget>0?Math.floor(correctNow/totalTarget*100):0;
+    const barX=85,barY=68,barW=W-220,barH=16;
+    ctx.fillStyle='rgba(255,255,255,0.08)';
+    roundRect(ctx,barX,barY,barW,barH,6);ctx.fill();
+    const col=pct>=90?'#4caf50':pct>=60?'#ffeb3b':'#ff9800';
+    const grad=ctx.createLinearGradient(barX,barY,barX+barW,barY);
+    grad.addColorStop(0,col);grad.addColorStop(1,shadeHex(col,-0.15));
+    ctx.fillStyle=grad;
+    roundRect(ctx,barX,barY,barW*pct/100,barH,6);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1;
+    roundRect(ctx,barX,barY,barW,barH,6);ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 11px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('进度 '+pct+'% ('+correctNow+'/'+totalTarget+')',barX+barW/2,barY+11);
+    ctx.textAlign='left';
+    ctx.fillStyle='#ff6b6b';
+    ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.fillText('❌'+G.errors,barX+barW+10,barY+8);
+    ctx.fillStyle='#ff9800';
+    if(G.combo>=2)ctx.fillText('🔥'+G.combo,barX+barW+58,barY+8);
+    ctx.textAlign='left';
+    drawControlHints(ctx);
+}
+function drawControlHints(ctx){
+    const hy=H-58,hx=10,hw=W-20,hh=48;
+    ctx.fillStyle='rgba(0,0,0,0.55)';
+    roundRect(ctx,hx,hy,hw,hh,8);ctx.fill();
+    ctx.strokeStyle='rgba(212,165,116,0.3)';ctx.lineWidth=1;
+    roundRect(ctx,hx,hy,hw,hh,8);ctx.stroke();
+    const cols=4;
+    const cw=hw/cols;
+    const hints=[
+        {k:'1-6',t:'选线色',c:'#ffab91'},
+        {k:'H',t:'提示',c:'#81d4fa'},
+        {k:'↑↓←→',t:'移动',c:'#a5d6a7'},
+        {k:'Enter',t:'织/确认',c:'#fff59d'}
+    ];
+    for(let i=0;i<cols;i++){
+        const cx=hx+i*cw+cw/2;
+        ctx.fillStyle=hints[i].c;
+        ctx.font='bold 11px Arial';ctx.textAlign='center';
+        ctx.fillText('['+hints[i].k+']',cx,hy+18);
+        ctx.fillStyle='#d7ccc8';
+        ctx.font='11px "Microsoft YaHei"';
+        ctx.fillText(hints[i].t,cx,hy+36);
+    }
+    ctx.textAlign='left';
+}
+
+function shadeHex(hex,pct){
+    const n=parseInt(hex.slice(1),16);
+    let r=(n>>16)&0xff,g=(n>>8)&0xff,b=n&0xff;
+    r=Math.max(0,Math.min(255,Math.floor(r*(1+pct))));
+    g=Math.max(0,Math.min(255,Math.floor(g*(1+pct))));
+    b=Math.max(0,Math.min(255,Math.floor(b*(1+pct))));
+    return'#'+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0');
+}
+
+function drawTransition(ctx){
+    if(G.transition<=0)return;
+    const r=G.transition/90;
+    ctx.fillStyle='rgba(0,0,0,'+(0.7*Math.min(1,r*2))+')';
+    ctx.fillRect(0,0,W,H);
+    ctx.save();
+    ctx.translate(W/2,H/2);
+    const s=0.8+(1-r)*0.5;
+    ctx.scale(s,s);
+    ctx.globalAlpha=Math.min(1,r*2);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 40px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('✨ '+G.transitionText+' ✨',0,0);
+    ctx.fillStyle='#d4a574';
+    ctx.font='18px "Microsoft YaHei"';
+    ctx.fillText('限时 '+LEVELS[G.level].time+' 秒 · 尺寸 '+G.gridSize+'×'+G.gridSize,0,40);
+    ctx.restore();
+    ctx.globalAlpha=1;
+    ctx.textAlign='left';
+}
+
+function drawMenu(ctx){
+    drawBg(ctx);
+    ctx.fillStyle='rgba(0,0,0,0.35)';
+    ctx.fillRect(0,0,W,H);
+    const t=Date.now()/1000;
+    for(let i=0;i<12;i++){
+        const x=((i*83+t*15)%(W+100))-50;
+        const y=100+(i*53)%500;
+        ctx.globalAlpha=0.35;
+        ctx.fillStyle=COLORS[i%6].hex;
+        const sz=10+(i%3)*4;
+        ctx.beginPath();ctx.arc(x,y,sz,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#d4a574';
+    ctx.font='bold 54px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    const tp=1+Math.sin(t*2)*0.03;
+    ctx.save();ctx.translate(W/2,140);ctx.scale(tp,tp);
+    ctx.fillText('🧵 织布工坊',0,0);
+    ctx.restore();
+    ctx.fillStyle='#a1887f';
+    ctx.font='bold 22px Arial';
+    ctx.fillText('WEAVER WORKSHOP',W/2,178);
+    const demoY=255,cs=28;
+    const demoColors=['#e74c3c','#f1c40f','#3498db','#27ae60','#ecf0f1','#2c3e50'];
+    for(let i=0;i<6;i++){
+        for(let k=0;k<4;k++){
+            ctx.fillStyle=demoColors[(i+k)%6];
+            ctx.fillRect(W/2-3*cs+i*cs,demoY+k*cs,cs-1,cs-1);
+        }
+    }
+    ctx.strokeStyle='rgba(212,165,116,0.4)';ctx.lineWidth=2;
+    ctx.strokeRect(W/2-3*cs-3,demoY-3,6*cs+5,4*cs+5);
+    const unlockedCount=ACHIEVEMENTS.filter(a=>a.unlocked).length;
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('🏅 已解锁成就: '+unlockedCount+'/'+ACHIEVEMENTS.length,W/2,405);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.fillText('🏆 最高分: '+G.highScore,W/2,445);
+    drawBtn(ctx,W/2-110,475,220,64,'开始织造','start','#d4a574',false,true);
+    const ax=20,ay=555,aw=W-40,ah=24;
+    ctx.fillStyle='rgba(0,0,0,0.35)';
+    roundRect(ctx,ax,ay-4,aw,ah*ACHIEVEMENTS.length+12,8);ctx.fill();
+    for(let i=0;i<ACHIEVEMENTS.length;i++){
+        const a=ACHIEVEMENTS[i];
+        const ry=ay+i*ah;
+        ctx.fillStyle=a.unlocked?'rgba(255,215,0,0.2)':'rgba(255,255,255,0.04)';
+        roundRect(ctx,ax+3,ry,aw-6,ah-4,6);ctx.fill();
+        ctx.font='16px Arial';ctx.textAlign='left';
+        ctx.fillStyle=a.unlocked?'#ffd700':'#555';
+        ctx.fillText(a.icon,ax+10,ry+16);
+        ctx.font='bold 11px "Microsoft YaHei"';
+        ctx.fillStyle=a.unlocked?'#fff':'#888';
+        ctx.fillText(a.name,ax+32,ry+13);
+        ctx.font='10px "Microsoft YaHei"';
+        ctx.fillStyle=a.unlocked?'#d4a574':'#555';
+        ctx.fillText(a.desc,ax+110,ry+13);
+    }
+    ctx.fillStyle='#d7ccc8';
+    ctx.font='15px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('🎯 3关挑战 · 完成订单图案获取三星评价',W/2,755);
+    ctx.fillStyle='#a1887f';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('🖱️ 点击左侧线轴选色 → 点击织布格上色 拖动可连涂',W/2,778);
+    ctx.textAlign='left';
+}
+
+function drawGame(ctx){
+    drawBg(ctx);
+    drawHUD(ctx);
+    drawColorSpools(ctx);
+    drawLoom(ctx);
+    drawPreview(ctx);
+    drawThreadLines(ctx);
+    drawParticles(ctx);
+    drawFloatings(ctx);
+    drawAchievementPopups(ctx);
+    drawTransition(ctx);
+    if(G.state===STATE_PAUSE){
+        ctx.fillStyle='rgba(0,0,0,0.78)';
+        ctx.fillRect(0,0,W,H);
+        ctx.fillStyle='#fff';
+        ctx.font='bold 46px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText('⏸ 暂停中',W/2,H/2-120);
+        ctx.fillStyle='#a1887f';
+        ctx.font='16px "Microsoft YaHei"';
+        ctx.fillText('按 ESC 或点击按钮继续',W/2,H/2-85);
+        ctx.fillStyle='#d7ccc8';
+        ctx.font='13px "Microsoft YaHei"';
+        ctx.fillText('📊 当前状态',W/2,H/2-50);
+        ctx.fillStyle='#fff';
+        ctx.font='14px "Microsoft YaHei"';
+        ctx.fillText('关卡: '+LEVELS[G.level].name+'  分数: '+G.score+'  剩余: '+Math.ceil(G.timeLeft/60)+'s',W/2,H/2-25);
+        ctx.fillText('连击: '+G.combo+'  错误: '+G.errors+'  正确: '+G.correct,W/2,H/2-5);
+        drawBtn(ctx,W/2-90,H/2+20,180,58,'▶ 继续织造','resume','#d4a574');
+        drawBtn(ctx,W/2-75,H/2+100,150,48,'🏠 返回菜单','quit','#795548');
+        ctx.fillStyle='#8d6e63';
+        ctx.font='11px "Microsoft YaHei"';
+        ctx.fillText('快捷键: 1-6选色 · H提示 · ↑↓←→移动 · Enter织 · Esc暂停',W/2,H/2+180);
+        ctx.textAlign='left';
+    }
+}
+
+function drawGameOver(ctx){
+    drawBg(ctx);
+    ctx.fillStyle='rgba(62,39,35,0.92)';
+    ctx.fillRect(0,0,W,H);
+    const isNew=G.score>=G.highScore&&G.score>0;
+    ctx.fillStyle=isNew?'#ffd700':'#d4a574';
+    ctx.font='bold 50px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    const p=1+Math.sin(Date.now()/200)*0.04;
+    ctx.save();ctx.translate(W/2,130);ctx.scale(p,p);
+    ctx.fillText(isNew?'🏆 新纪录!':'织造结束',0,0);
+    ctx.restore();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('总得分',W/2,195);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 78px Arial';
+    ctx.fillText(G.score,W/2,275);
+    let stars=0;for(let i=0;i<3;i++)stars+=G.levelStars[i];
+    if(stars>0){
+        ctx.fillStyle='#ffeb3b';
+        ctx.font='bold 30px Arial';
+        ctx.fillText('⭐'.repeat(stars)+' 总星数 '+stars+'/9',W/2,320);
+    }
+    const unlockedNow=ACHIEVEMENTS.filter(a=>a.unlocked).length;
+    if(unlockedNow>0){
+        ctx.fillStyle='#ff9800';
+        ctx.font='bold 15px "Microsoft YaHei"';
+        ctx.fillText('🏅 本局解锁成就: '+unlockedNow+'/'+ACHIEVEMENTS.length,W/2,352);
+    }
+    ctx.fillStyle='#d7ccc8';
+    ctx.font='15px "Microsoft YaHei"';
+    ctx.fillText('到达关卡: '+Math.min(G.level+1,LEVELS.length)+'/'+LEVELS.length
+        +'   操作: '+G.totalWeaves+' 次   正确: '+G.totalCorrect,W/2,388);
+    ctx.fillText('最多连击: '+G.maxCombo+'   总失误: '+G.errors
+        +'   正确率: '+(G.totalWeaves>0?Math.floor(G.totalCorrect/G.totalWeaves*100):0)+'%',W/2,412);
+    const accRate=G.totalWeaves>0?G.totalCorrect/G.totalWeaves:0;
+    let grade='C',gradeColor='#9e9e9e';
+    if(accRate>=0.95&&stars>=7){grade='S';gradeColor='#ffd700'}
+    else if(accRate>=0.85&&stars>=5){grade='A';gradeColor='#4caf50'}
+    else if(accRate>=0.7){grade='B';gradeColor='#2196f3'}
+    ctx.font='bold 40px Arial';
+    ctx.fillStyle=gradeColor;
+    ctx.fillText('评级: '+grade,W/2,452);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.fillText('🏆 历史最高: '+G.highScore,W/2,492);
+    const ua=ACHIEVEMENTS.filter(x=>x.unlocked);
+    if(ua.length>0){
+        ctx.fillStyle='rgba(0,0,0,0.4)';
+        roundRect(ctx,20,670,W-40,58,8);ctx.fill();
+        ctx.fillStyle='#ffd700';
+        ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.textAlign='left';
+        ctx.fillText('🏅 本局解锁成就:',30,690);
+        for(let i=0;i<Math.min(4,ua.length);i++){
+            ctx.font='15px Arial';
+            ctx.fillStyle='#ffd700';
+            ctx.fillText(ua[i].icon,30+i*112,712);
+            ctx.font='bold 10px "Microsoft YaHei"';
+            ctx.fillStyle='#fff';
+            ctx.fillText(ua[i].name,52+i*112,712);
+        }
+    }
+    drawBtn(ctx,W/2-95,532,190,60,'再玩一次','restart','#d4a574',false,true);
+    drawBtn(ctx,W/2-75,607,150,48,'返回菜单','menu','#795548');
+    ctx.textAlign='left';
+}
+
+function draw(){
+    ctx.clearRect(0,0,W,H);
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_PAUSE: drawGame(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+    }
+}
+
+let loopId;
+function gameLoop(){
+    loopId=requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+gameLoop();
+
+})();
+</script>
+
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try { initAudio(); } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>卡牌自走棋</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#001e36;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#1976d2;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+<canvas id="c"></canvas>
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+const W=480,H=800;
+let audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playTone(freq,dur,type,vol){if(!audioCtx)return;try{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type||'square';o.frequency.value=freq;g.gain.value=vol||0.15;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);}catch(e){}}
+function sfxBuy(){playTone(660,0.08,'triangle',0.18);setTimeout(()=>playTone(880,0.1,'triangle',0.18),80);}
+function sfxSell(){playTone(440,0.06,'triangle',0.14);setTimeout(()=>playTone(330,0.08,'triangle',0.14),50);}
+function sfxRoll(){playTone(500,0.05,'sine',0.15);setTimeout(()=>playTone(550,0.05,'sine',0.15),50);setTimeout(()=>playTone(600,0.05,'sine',0.15),100);}
+function sfxFight(){playTone(100,0.2,'sawtooth',0.2);}
+function sfxHit(){playTone(180,0.12,'sawtooth',0.18);}
+function sfxUp(){for(let i=0;i<4;i++)setTimeout(()=>playTone(500+i*130,0.1,'sine',0.16),i*70);}
+function sfxWin(){for(let i=0;i<5;i++)setTimeout(()=>playTone(500+i*100,0.15,'sine',0.18),i*90);}
+function sfxLose(){for(let i=0;i<5;i++)setTimeout(()=>playTone(380-i*55,0.22,'sawtooth',0.18),i*130);}
+function sfxBtn(){playTone(700,0.05,'sine',0.1);}
+function sfxTriple(){playTone(800,0.08,'sine',0.2);setTimeout(()=>playTone(1000,0.08,'sine',0.2),80);setTimeout(()=>playTone(1200,0.15,'sine',0.2),160);}
+const canvas=document.getElementById('c');const ctx=canvas.getContext('2d');let scale=1;
+function resize(){const r=W/H;let cw=window.innerWidth,ch=window.innerHeight;if(cw/ch>r){ch=cw/r;}else{cw=ch*r;}canvas.width=cw;canvas.height=ch;scale=cw/W;ctx.setTransform(scale,0,0,scale,0,0);}
+window.addEventListener('resize',resize);resize();
+const SYNERGIES=['战士','法师','刺客','猎人','骑士','术士','恶魔','野兽','机械','元素','龙','海盗'];
+const UNITS=[
+{n:'小步兵',c:'#78909c',t:1,tribe:'战士',atk:2,hp:3,emoji:'🗡️',price:1,sk:'嘲讽',st:'t'},
+{n:'新兵',c:'#546e7a',t:1,tribe:'战士',atk:3,hp:2,emoji:'🛡️',price:1,sk:'',st:'n'},
+{n:'法师学徒',c:'#3f51b5',t:1,tribe:'法师',atk:2,hp:2,emoji:'🔮',price:1,sk:'魔法+1',st:'m'},
+{n:'小猎手',c:'#4caf50',t:1,tribe:'猎人',atk:3,hp:1,emoji:'🏹',price:1,sk:'射击',st:'h'},
+{n:'刺客新人',c:'#7b1fa2',t:1,tribe:'刺客',atk:4,hp:1,emoji:'🗡️',price:1,sk:'暴击',st:'a'},
+{n:'骑士侍从',c:'#ffc107',t:1,tribe:'骑士',atk:2,hp:4,emoji:'⚔️',price:1,sk:'圣盾',st:'d'},
+{n:'小术士',c:'#9c27b0',t:1,tribe:'术士',atk:2,hp:3,emoji:'🧙',price:1,sk:'召唤',st:'s'},
+{n:'小鬼',c:'#d32f2f',t:1,tribe:'恶魔',atk:3,hp:2,emoji:'👹',price:1,sk:'',st:'n'},
+{n:'小野狼',c:'#8d6e63',t:1,tribe:'野兽',atk:3,hp:2,emoji:'🐺',price:1,sk:'冲锋',st:'c'},
+{n:'巡逻兵',c:'#607d8b',t:2,tribe:'战士',atk:3,hp:5,emoji:'💂',price:2,sk:'嘲讽',st:'t'},
+{n:'元素学徒',c:'#00bcd4',t:2,tribe:'元素',atk:4,hp:2,emoji:'🔥',price:2,sk:'火花',st:'e'},
+{n:'小海盗',c:'#455a64',t:2,tribe:'海盗',atk:3,hp:3,emoji:'🏴‍☠️',price:2,sk:'',st:'n'},
+{n:'机器人',c:'#2196f3',t:2,tribe:'机械',atk:2,hp:5,emoji:'🤖',price:2,sk:'护盾',st:'h2'},
+{n:'野兽战士',c:'#795548',t:2,tribe:'野兽',atk:4,hp:4,emoji:'🐻',price:2,sk:'嘲讽',st:'t'},
+{n:'精英刺客',c:'#9c27b0',t:3,tribe:'刺客',atk:6,hp:3,emoji:'⚔️',price:3,sk:'背刺',st:'a2'},
+{n:'大法师',c:'#303f9f',t:3,tribe:'法师',atk:3,hp:5,emoji:'🧙‍♂️',price:3,sk:'魔伤+2',st:'m2'},
+{n:'战狼',c:'#6d4c41',t:3,tribe:'野兽',atk:5,hp:5,emoji:'🐺',price:3,sk:'狼群',st:'b'},
+{n:'圣殿骑士',c:'#ffd54f',t:3,tribe:'骑士',atk:4,hp:7,emoji:'⚔️',price:3,sk:'圣盾嘲讽',st:'dt'},
+{n:'大恶魔',c:'#b71c1c',t:3,tribe:'恶魔',atk:7,hp:4,emoji:'😈',price:3,sk:'吸血',st:'v'},
+{n:'火箭兵',c:'#03a9f4',t:3,tribe:'机械',atk:5,hp:4,emoji:'🚀',price:3,sk:'溅射',st:'r'},
+{n:'狂战士',c:'#c62828',t:4,tribe:'战士',atk:8,hp:6,emoji:'🗡️',price:4,sk:'越伤越狂',st:'w'},
+{n:'雷龙',c:'#1565c0',t:4,tribe:'龙',atk:7,hp:6,emoji:'🐲',price:4,sk:'雷电',st:'d2'},
+{n:'机械兽王',c:'#283593',t:4,tribe:'机械',atk:5,hp:8,emoji:'🦾',price:4,sk:'护盾+3',st:'m3'},
+{n:'九头蛇',c:'#2e7d32',t:4,tribe:'野兽',atk:6,hp:7,emoji:'🐍',price:4,sk:'分裂',st:'p'},
+{n:'海军上将',c:'#01579b',t:4,tribe:'海盗',atk:6,hp:7,emoji:'⚓',price:4,sk:'海盗激励',st:'ad2'},
+{n:'龙骑将',c:'#4a148c',t:5,tribe:'骑士',atk:7,hp:9,emoji:'🛡️',price:5,sk:'龙骑士',st:'k'},
+{n:'暗影刺客',c:'#311b92',t:5,tribe:'刺客',atk:11,hp:5,emoji:'🗡️',price:5,sk:'一刀',st:'a3'},
+{n:'炎魔法师',c:'#e65100',t:5,tribe:'法师',atk:6,hp:8,emoji:'🔥',price:5,sk:'大火球',st:'f'},
+{n:'机械巨神',c:'#006064',t:5,tribe:'机械',atk:9,hp:9,emoji:'🤖',price:5,sk:'全屏激光',st:'l'},
+{n:'远古巨龙',c:'#bf360c',t:6,tribe:'龙',atk:12,hp:12,emoji:'🐉',price:6,sk:'龙吼',st:'dr'},
+{n:'毁灭者',c:'#3e2723',t:6,tribe:'恶魔',atk:14,hp:10,emoji:'💀',price:6,sk:'末日',st:'ap'},
+{n:'黄金圣斗士',c:'#ffb300',t:6,tribe:'骑士',atk:10,hp:14,emoji:'⚜️',price:6,sk:'神圣护盾',st:'g'},
+];
+const G={
+state:STATE_MENU,
+hp:100,
+gold:5,
+level:1,maxLevel:10,
+shop:[],freeze:false,
+bench:[],board:[],maxBench:8,maxBoard:7,
+triples:{},
+round:0,maxRound:25,
+phase:'shop',
+battleIdx:0,
+battleTimer:0,
+battleSeq:null,
+lastResult:null,
+opponent:null,
+enemyLife:100,
+score:0,highScore:0,
+hover:null,
+selectedHand:-1,
+particles:[],floats:[],
+shake:0,flash:0,flashColor:'',
+anim:null,
+btnRects:{},
+};
+G.highScore=parseInt(Storage.load('auto_high','0'));
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+function rollShop(tier){
+    const pool=UNITS.filter(u=>u.t<=tier);
+    const weighted=[];
+    pool.forEach(u=>{const w=Math.max(1,7-u.t);for(let i=0;i<w;i++)weighted.push(u);});
+    const n=4+Math.min(2,G.level);
+    const res=[];for(let i=0;i<n;i++)res.push(makeCard(weighted[Math.floor(Math.random()*weighted.length)]));
+    return res;
+}
+function makeCard(t){
+    const stars=1;
+    return{...t,uid:'u'+Math.random().toString(36).slice(2,9),stars,
+    curAtk:t.atk,curHp:t.hp,maxHp:t.hp,baseAtk:t.atk,
+    bonusAtk:0,bonusHp:0,
+    shield:0,divine:t.st==='d'||t.st==='dt'||t.st==='g',
+    taunt:t.st==='t'||t.st==='dt',
+    poison:false,charge:t.st==='c',
+    canAttack:false,attacksThisTurn:0,
+    onBench:true,dead:false,level:stars,tier:t.t,
+    gold:t.price,starCount:stars,tripletReady:false,
+    merged:false};
+}
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.hp=100;G.gold=10;G.level=1;
+    G.shop=[];G.bench=[];G.board=[];G.triples={};
+    G.round=0;G.maxRound=25;G.phase='shop';G.freeze=false;
+    G.score=0;G.particles=[];G.floats=[];G.anim=null;
+    newRound();sfxBtn();
+}
+function newRound(){
+    G.round++;
+    if(G.round>G.maxRound){endGame(true);return;}
+    const base=10+Math.min(5,Math.floor(G.round/3));
+    G.gold=base;
+    G.shop=rollShop(G.level);
+    G.phase='shop';G.freeze=false;
+    addFloat(W/2,80,'第 '+G.round+' 回合  💰'+G.gold,'#ffd700');
+    recomputeBuffs();
+}
+function getTierForLevel(lv){return Math.min(6,Math.ceil(lv/2)+(lv>=6?1:0));}
+function getUpgradeCost(){return[0,4,6,7,8,9,10,12,14,16,20][G.level]||999;}
+function buyFromShop(idx){
+    const c=G.shop[idx];if(!c||c.sold)return;
+    if(G.gold<c.gold){addFloat(W/2,H/2,'金币不足!','#ff6b6b');return;}
+    if(G.bench.length>=G.maxBench&&G.board.length>=G.maxBoard){addFloat(W/2,H/2,'已满!','#ff6b6b');return;}
+    G.gold-=c.gold;
+    const nc=makeCard(c);nc.onBench=true;
+    const newKey=nc.n+'_'+nc.tier;
+    G.triples[newKey]=(G.triples[newKey]||0)+1;
+    if(G.triples[newKey]>=3){
+        nc.stars=3;nc.curAtk=nc.atk*3;nc.curHp=nc.hp*3;nc.maxHp=nc.hp*3;nc.baseAtk=nc.atk*3;nc.gold=0;nc.tripletReady=true;
+        G.triples[newKey]=0;
+        const bs=[...G.bench];
+        for(let i=bs.length-1;i>=0;i--){if(bs[i].n===nc.n&&bs[i].tier===nc.tier&&bs[i].stars<3){G.bench.splice(i,1);}}
+        sfxTriple();addFloat(W/2,H/2,'⭐⭐⭐ 三星 '+nc.n+'!','#ffd700');
+        spawnParticles(W/2,H/2,'#ffd700',40);
+    }
+    G.bench.push(nc);
+    c.sold=true;
+    sfxBuy();
+    spawnParticles(W/2,240,c.c,15);
+}
+function sellBench(idx){
+    const c=G.bench[idx];if(!c)return;
+    const refund=c.stars>=3?c.gold*3+3:c.gold;
+    G.gold+=Math.max(1,refund);
+    const k=c.n+'_'+c.tier;
+    G.triples[k]=Math.max(0,(G.triples[k]||0)-1);
+    G.bench.splice(idx,1);
+    sfxSell();
+    addFloat(W/2,H-220,'卖出+'+Math.max(1,refund)+'💰','#ffd700');
+    recomputeBuffs();
+}
+function sellBoard(idx){
+    const c=G.board[idx];if(!c)return;
+    const refund=c.stars>=3?c.gold*3+3:c.gold;
+    G.gold+=Math.max(1,refund);
+    const k=c.n+'_'+c.tier;
+    G.triples[k]=Math.max(0,(G.triples[k]||0)-1);
+    G.board.splice(idx,1);
+    sfxSell();recomputeBuffs();
+}
+function benchToBoard(bidx,pos){
+    const c=G.bench[bidx];if(!c)return;
+    if(G.board.length>=G.maxBoard){addFloat(W/2,H/2,'战场已满!','#ff6b6b');return;}
+    G.bench.splice(bidx,1);
+    c.onBench=false;c.canAttack=!!c.charge;
+    const ins=pos!==undefined?pos:G.board.length;
+    G.board.splice(ins,0,c);
+    sfxBuy();spawnParticles(W/2,H-230,c.c,15);
+    recomputeBuffs();
+}
+function boardToBench(bidx,pos){
+    const c=G.board[bidx];if(!c)return;
+    if(G.bench.length>=G.maxBench){addFloat(W/2,H/2,'板凳已满!','#ff6b6b');return;}
+    G.board.splice(bidx,1);
+    c.onBench=true;c.canAttack=false;
+    G.bench.push(c);
+    sfxSell();recomputeBuffs();
+}
+function upgradeLevel(){
+    if(G.level>=G.maxLevel){addFloat(W/2,H/2,'已满级!','#ff6b6b');return;}
+    const c=getUpgradeCost();
+    if(G.gold<c){addFloat(W/2,H/2,'金币不足: '+c+'💰','#ff6b6b');return;}
+    G.gold-=c;G.level++;
+    sfxUp();
+    addFloat(W/2,H/2,'⭐ 升到 Lv.'+G.level+'!','#ffd700');
+    spawnParticles(W/2,H/2,'#ffd700',30);
+}
+function reroll(){
+    const c=1;
+    if(G.gold<c){addFloat(W/2,H/2,'金币不足!','#ff6b6b');return;}
+    G.gold-=c;
+    if(!G.freeze){G.shop=rollShop(getTierForLevel(G.level));}
+    sfxRoll();spawnParticles(W/2,240,'#90caf9',12);
+}
+function toggleFreeze(){
+    G.freeze=!G.freeze;sfxBtn();
+    addFloat(W/2,H/2,G.freeze?'❄️ 已锁定刷新':'已解锁','#4fc3f7');
+}
+function startBattle(){
+    if(G.board.length===0){G.hp-=5;addFloat(W/2,H/2,'空场: -5❤️!','#ff6b6b');}
+    G.phase='battle';
+    const diff=5+Math.floor(G.round*1.5);
+    G.opponent={
+        name:'AI 对手 Lv.'+Math.min(10,1+Math.floor(G.round/2)),
+        hp:80+G.round*5,life:80+G.round*5,
+        level:Math.min(10,G.level+Math.floor(Math.random()*2)),
+        board:[]
+    };
+    const n=Math.min(7,3+Math.floor(G.round/3));
+    for(let i=0;i<n;i++){
+        const pool=UNITS.filter(u=>u.t<=getTierForLevel(G.opponent.level));
+        const tpl=pool[Math.floor(Math.random()*pool.length)];
+        const c=makeCard(tpl);
+        c.curAtk+=Math.floor(G.round/4);c.curHp+=Math.floor(G.round/3);
+        c.maxHp=c.curHp;c.baseAtk=c.curAtk;c.onBench=false;
+        if(Math.random()<0.15&&tpl.t>=2){
+            c.stars=3;c.curAtk=c.baseAtk*2;c.curHp=c.maxHp*2;c.maxHp*=2;c.baseAtk*=2;
+        }
+        G.opponent.board.push(c);
+    }
+    recomputeBuffsOpp();
+    G.battleIdx=0;G.battleTimer=0;G.battleSeq=[];G.lastResult=null;
+    sfxFight();G.shake=10;
+    runBattle();
+}
+function runBattle(){
+    let pTurn=G.board.length>=G.opponent.board.length;
+    const maxStep=80;let step=0;
+    const mine=G.board.map(c=>({...c,cHp:c.curHp}));
+    const opps=G.opponent.board.map(c=>({...c,cHp:c.curHp}));
+    const myHpRef={v:G.hp};
+    const opHpRef={v:G.opponent.life};
+    function doStep(){
+        if(++step>maxStep||mine.filter(c=>c.cHp>0).length===0||opps.filter(c=>c.cHp>0).length===0){
+            const surp=mine.filter(c=>c.cHp>0);const suro=opps.filter(c=>c.cHp>0);
+            let result=0;
+            if(surp.length>0&&suro.length===0)result=1;
+            else if(surp.length===0&&suro.length>0)result=-1;
+            else result=(myHpRef.v-opHpRef.v>=0?1:-1);
+            finishBattle(result,surp,suro);return;
+        }
+        const atkList=pTurn?mine:opps;
+        const defList=pTurn?opps:mine;
+        const alive=atkList.filter(c=>c.cHp>0);
+        if(alive.length===0){pTurn=!pTurn;setTimeout(doStep,250);return;}
+        let attacker=null;let idx=-1;
+        for(let k=0;k<atkList.length;k++){
+            const cc=atkList[k];if(cc.cHp>0){
+                const maxA=cc.wind?2:1;
+                if(cc.attackCount===undefined)cc.attackCount=0;
+                if(cc.attackCount<maxA){attacker=cc;idx=k;break;}
+            }
+        }
+        if(!attacker){atkList.forEach(c=>c.attackCount=0);pTurn=!pTurn;setTimeout(doStep,250);return;}
+        const taunts=defList.filter(c=>c.cHp>0&&(c.st==='t'||c.st==='dt'));
+        let target;
+        if(taunts.length>0)target=taunts[Math.floor(Math.random()*taunts.length)];
+        else{
+            const alives=defList.filter(c=>c.cHp>0);
+            if(alives.length>0)target=alives[Math.floor(Math.random()*alives.length)];
+        }
+        if(target){
+            const aDmg=attacker.curAtk,dDmg=target.curAtk;
+            if(attacker.divine){if(dDmg>0)attacker.divine=false;}
+            else{attacker.cHp-=Math.max(0,dDmg);}
+            if(target.divine){if(aDmg>0)target.divine=false;}
+            else{target.cHp-=Math.max(0,aDmg);}
+            sfxHit();G.shake=4;
+            spawnParticles(W/2,H/2,'#ff4444',10);
+            if(attacker.st==='v'&&aDmg>0){attacker.cHp=Math.min(attacker.maxHp,attacker.cHp+aDmg);}
+            attacker.attackCount=(attacker.attackCount||0)+1;
+            if(!attacker.wind||attacker.attackCount>=2){
+                atkList.splice(idx,1);atkList.push(attacker);
+            }
+        }else{
+            const dmg=Math.max(1,attacker.curAtk);
+            if(pTurn){opHpRef.v-=dmg;}else{myHpRef.v-=dmg;}
+            G.shake=8;G.flash=10;G.flashColor='#ff3333';sfxHit();
+            atkList.forEach(c=>c.attackCount=0);
+        }
+        G.hp=Math.max(0,myHpRef.v);
+        G.opponent.life=Math.max(0,opHpRef.v);
+        G.battleView={mine:mine.map(c=>({...c})),opps:opps.map(c=>({...c}))};
+        if(G.hp<=0||G.opponent.life<=0){
+            finishBattle(G.hp>0?1:-1,mine.filter(c=>c.cHp>0),opps.filter(c=>c.cHp>0));
+            return;
+        }
+        pTurn=!pTurn;
+        setTimeout(doStep,320);
+    }
+    G.battleView={mine:mine.map(c=>({...c})),opps:opps.map(c=>({...c}))};
+    setTimeout(doStep,400);
+}
+function finishBattle(result,surp,suro){
+    G.phase='result';
+    G.lastResult=result;
+    if(result>=0){
+        G.score+=50+G.round*10;
+        addFloat(W/2,H/2,'🎉 胜利! +'+(50+G.round*10)+'分','#4caf50');
+        G.gold+=Math.min(5,1+surp.length);
+        sfxWin();
+    }else{
+        const dmg=Math.max(3,Math.min(20,5+G.round+suro.length*2));
+        G.hp=Math.max(0,G.hp-dmg);
+        addFloat(W/2,H/2,'💀 失败! -'+dmg+'❤️','#ff5252');
+        sfxLose();
+    }
+    G.board=G.board.filter(c=>!c.dead);
+    recomputeBuffs();
+    setTimeout(()=>{
+        if(G.hp<=0){endGame(false);return;}
+        G.battleView=null;newRound();
+    },1400);
+}
+function recomputeBuffs(){
+    if(!G.board)return;
+    const counts={};
+    G.board.forEach(c=>{
+        counts[c.tribe]=(counts[c.tribe]||0)+(c.stars||1);
+    });
+    G.board.forEach(c=>{
+        let atkBuff=0,hpBuff=0;
+        if(counts[c.tribe]>=2){atkBuff+=2;hpBuff+=2;}
+        if(counts[c.tribe]>=4){atkBuff+=4;hpBuff+=4;}
+        if(counts[c.tribe]>=6){atkBuff+=6;hpBuff+=8;}
+        if(c.tribe==='战士'&&counts['战士']>=3)hpBuff+=6;
+        if(c.tribe==='法师'&&counts['法师']>=3)atkBuff+=6;
+        if(c.tribe==='刺客'&&counts['刺客']>=3)atkBuff+=10;
+        if(c.tribe==='骑士'&&counts['骑士']>=2)hpBuff+=5;
+        if(c.tribe==='野兽'&&counts['野兽']>=2)atkBuff+=3;
+        if(c.tribe==='龙'&&counts['龙']>=2){atkBuff+=5;hpBuff+=5;}
+        if(c.tribe==='机械'&&counts['机械']>=3)c.shield=3;
+        c.curAtk=c.baseAtk+atkBuff;
+        c.curHp=c.maxHp+hpBuff;
+    });
+}
+function recomputeBuffsOpp(){
+    if(!G.opponent||!G.opponent.board)return;
+    const counts={};
+    G.opponent.board.forEach(c=>{counts[c.tribe]=(counts[c.tribe]||0)+(c.stars||1);});
+    G.opponent.board.forEach(c=>{
+        let atkBuff=0,hpBuff=0;
+        if(counts[c.tribe]>=2){atkBuff+=2;hpBuff+=2;}
+        if(counts[c.tribe]>=4){atkBuff+=4;hpBuff+=4;}
+        if(counts[c.tribe]>=6){atkBuff+=6;hpBuff+=8;}
+        if(c.tribe==='战士'&&counts['战士']>=3)hpBuff+=6;
+        if(c.tribe==='法师'&&counts['法师']>=3)atkBuff+=6;
+        if(c.tribe==='刺客'&&counts['刺客']>=3)atkBuff+=10;
+        c.curAtk=c.baseAtk+atkBuff;
+        c.curHp=c.maxHp+hpBuff;
+    });
+}
+function endGame(won){
+    G.state=STATE_OVER;
+    G.score+=G.round*100+G.level*30+G.hp*5;
+    if(G.score>G.highScore){G.highScore=G.score;Storage.save('auto_high',G.highScore);}
+    if(won)sfxWin();else sfxLose();
+}
+function roundRect(ctx,x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+function spawnParticles(x,y,color,count){for(let i=0;i<(count||15);i++)G.particles.push({x,y,vx:(Math.random()-0.5)*8,vy:(Math.random()-0.5)*8-3,life:35+Math.random()*20,maxLife:55,size:2+Math.random()*4,color,gravity:0.2});}
+function updateParticles(){for(let i=G.particles.length-1;i>=0;i--){const p=G.particles[i];p.x+=p.vx;p.y+=p.vy;if(p.gravity)p.vy+=p.gravity;p.vx*=0.98;p.life--;if(p.life<=0)G.particles.splice(i,1);}}
+function drawParticles(ctx){for(const p of G.particles){ctx.globalAlpha=Math.max(0,p.life/p.maxLife);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
+function addFloat(x,y,t,c){G.floats.push({x,y,text:t,color:c||'#fff',life:60,maxLife:60,vy:-1.6});}
+function updateFloats(){for(let i=G.floats.length-1;i>=0;i--){const f=G.floats[i];f.y+=f.vy;f.vy*=0.96;f.life--;if(f.life<=0)G.floats.splice(i,1);}}
+function drawFloats(ctx){for(const f of G.floats){ctx.globalAlpha=f.life/f.maxLife;ctx.fillStyle=f.color;ctx.strokeStyle='#000';ctx.lineWidth=3;ctx.font='bold 20px "Microsoft YaHei"';ctx.textAlign='center';ctx.strokeText(f.text,f.x,f.y);ctx.fillText(f.text,f.x,f.y);ctx.textAlign='left';}ctx.globalAlpha=1;}
+function tierColor(t){return['#9e9e9e','#9e9e9e','#4caf50','#2196f3','#9c27b0','#ff9800','#e53935','#e53935'][t]||'#9e9e9e';}
+function drawUnit(ctx,m,x,y,w,h,mode,selected){
+    mode=mode||'shop';
+    h=h||(mode==='board'?76:88);w=w||(mode==='board'?56:66);
+    const tc=tierColor(m.tier);
+    const g=ctx.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0,m.c||tc);g.addColorStop(0.5,'#0b2035');g.addColorStop(1,'#04101c');
+    ctx.fillStyle=g;roundRect(ctx,x,y,w,h,7);ctx.fill();
+    const isSel=selected||G.hover===m.uid;
+    if(isSel){ctx.strokeStyle='#ffd700';ctx.lineWidth=3;ctx.shadowColor='#ffd700';ctx.shadowBlur=12;}
+    else{ctx.strokeStyle=tc;ctx.lineWidth=2;}
+    roundRect(ctx,x,y,w,h,7);ctx.stroke();ctx.shadowBlur=0;
+    const stars=m.stars||1;
+    if(stars>1){
+        ctx.fillStyle='#ffd700';ctx.font='bold 9px Arial';ctx.textAlign='center';
+        const starStr='⭐'.repeat(Math.min(3,stars));
+        ctx.fillText(starStr,x+w/2,y+9);ctx.textAlign='left';
+    }
+    if(m.divine){ctx.strokeStyle='#fdd835';ctx.lineWidth=2;ctx.setLineDash([3,3]);roundRect(ctx,x-1,y-1,w+2,h+2,8);ctx.stroke();ctx.setLineDash([]);}
+    if(m.taunt){ctx.strokeStyle='#ffc107';ctx.lineWidth=2.5;roundRect(ctx,x-2,y-2,w+4,h+4,8);ctx.stroke();}
+    const es=Math.min(22,w*0.4);
+    ctx.font=es+'px Arial';ctx.textAlign='center';ctx.fillText(m.emoji,x+w/2,y+h*0.38);
+    ctx.fillStyle='#fff';ctx.font='bold '+Math.min(9,w*0.14)+'px "Microsoft YaHei"';
+    const nm=m.n.length>5?m.n.slice(0,5):m.n;
+    ctx.fillText(nm,x+w/2,y+h*0.6);
+    if(m.sk){ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='7px "Microsoft YaHei"';
+    ctx.fillText((m.sk||'').length>7?(m.sk+'').slice(0,7):m.sk,x+w/2,y+h*0.72);}
+    ctx.fillStyle=tc;ctx.font='bold 8px Arial';ctx.fillText(m.tribe.length>4?m.tribe.slice(0,4):m.tribe,x+w/2,y+h*0.82);
+    ctx.textAlign='left';
+    if(m.curAtk!==undefined){
+        const by=y+h-8;
+        ctx.fillStyle='#f44336';ctx.beginPath();ctx.arc(x+8,by,6.5,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+        ctx.fillStyle='#fff';ctx.font='bold 10px Arial';ctx.textAlign='center';
+        const atkTxt=m.curAtk>m.baseAtk?m.curAtk:m.curAtk;
+        ctx.fillText(atkTxt,x+8,by+3.5);
+        const hpCol=m.curHp<m.maxHp?'#ffeb3b':'#4caf50';
+        ctx.fillStyle=hpCol;ctx.beginPath();ctx.arc(x+w-8,by,6.5,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#fff';ctx.stroke();
+        ctx.fillStyle='#fff';ctx.fillText(m.curHp,x+w-8,by+3.5);
+        ctx.textAlign='left';
+    }
+    if(mode==='shop'){
+        ctx.fillStyle='#ffd700';ctx.font='bold 10px Arial';ctx.textAlign='center';
+        ctx.fillText('💰'+m.gold,x+w/2,y+h+13);ctx.textAlign='left';
+    }
+    if(m.shield>0){ctx.fillStyle='#4fc3f7';ctx.font='bold 9px Arial';ctx.fillText('🛡'+m.shield,x+3,y+12);}
+    if(m.sold){ctx.fillStyle='rgba(0,0,0,0.6)';roundRect(ctx,x,y,w,h,7);ctx.fill();}
+}
+function drawBtn(ctx,x,y,w,h,text,name,color,disabled){
+    G.btnRects[name]={x,y,w,h,disabled};
+    const c=color||'#1976d2';
+    if(disabled){ctx.fillStyle='#333';}
+    else{const grad=ctx.createLinearGradient(x,y,x,y+h);grad.addColorStop(0,c);grad.addColorStop(1,'#000');ctx.fillStyle=grad;}
+    ctx.strokeStyle=disabled?'#444':'#90caf9';ctx.lineWidth=2;roundRect(ctx,x,y,w,h,8);ctx.fill();ctx.stroke();
+    ctx.fillStyle=disabled?'#777':'#fff';ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';ctx.textAlign='left';
+}
+function hitBtn(p,name){const r=G.btnRects[name];return r&&!r.disabled&&p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+function getPos(e){const rect=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};}
+function rectHit(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+function shopRects(){
+    const n=G.shop.length;if(n===0)return[];
+    const w=66,h=88,gap=8;
+    const w2=Math.min(w,(W-40-(n-1)*gap)/n);const aw=w2<w?w2:w;
+    const total=n*aw+(n-1)*gap;let sx=(W-total)/2;
+    const y=130;const rs=[];
+    for(let i=0;i<n;i++)rs.push({x:sx+i*(aw+gap),y,w:aw,h,idx:i,card:G.shop[i]});
+    return rs;
+}
+function benchRects(){
+    const n=G.bench.length;if(n===0)return[];
+    const w=56,h=76,gap=5;
+    const w2=Math.min(w,(W-40-(n-1)*gap)/n);const aw=w2<w?w2:w;
+    const total=n*aw+(n-1)*gap;let sx=(W-total)/2;
+    const y=H-310;const rs=[];
+    for(let i=0;i<n;i++)rs.push({x:sx+i*(aw+gap),y,w:aw,h,idx:i,card:G.bench[i]});
+    return rs;
+}
+function boardRects(mine){
+    const arr=mine?(G.battleView&&G.phase==='battle'?G.battleView.mine:G.board):
+    (G.battleView?G.battleView.opps:(G.opponent?G.opponent.board:[]));
+    const n=arr.length;if(n===0)return[];
+    const w=56,h=76,gap=5;
+    const w2=Math.min(w,(W-50-(n-1)*gap)/n);const aw=w2<w?w2:w;
+    const total=n*aw+(n-1)*gap;let sx=(W-total)/2;
+    const y=mine?H-210:115;const rs=[];
+    for(let i=0;i<n;i++)rs.push({x:sx+i*(aw+gap),y,w:aw,h,idx:i,card:arr[i],arr:arr});
+    return rs;
+}
+function drawHUD(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.55)';roundRect(ctx,10,10,W-20,80,10);ctx.fill();
+    ctx.strokeStyle='rgba(144,202,249,0.6)';ctx.lineWidth=1;roundRect(ctx,10,10,W-20,80,10);ctx.stroke();
+    ctx.fillStyle='#f44336';ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText('❤️ 血量: '+G.hp,22,34);
+    const hpW=W*0.28,hpH=10;
+    ctx.fillStyle='#333';roundRect(ctx,18,39,hpW,hpH,5);ctx.fill();
+    ctx.fillStyle='#f44336';roundRect(ctx,18,39,hpW*(G.hp/100),hpH,5);ctx.fill();
+    ctx.fillStyle='#ff9800';ctx.fillText('💰 金币: '+G.gold,22,66);
+    const cx=W/2;
+    ctx.fillStyle='#4fc3f7';ctx.textAlign='center';ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText(G.phase==='battle'?'⚔️ 战斗中':(G.phase==='result'?'结算中':'🛒 招募阶段'),cx,34);
+    ctx.fillStyle='#fff';ctx.fillText('第 '+G.round+'/'+G.maxRound+' 回合',cx,56);
+    ctx.textAlign='right';
+    ctx.fillStyle='#9c27b0';ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText('⭐ Lv.'+G.level+'/'+G.maxLevel,W-22,34);
+    ctx.fillStyle='#e0e0e0';ctx.font='11px Arial';
+    ctx.fillText('等级可开 '+getTierForLevel(G.level)+'⭐卡',W-22,56);
+    ctx.fillStyle='#ffd700';ctx.fillText('🏆 '+G.score,W-22,78);
+    ctx.textAlign='left';
+}
+function drawShop(ctx){
+    ctx.fillStyle='rgba(15,35,60,0.7)';roundRect(ctx,12,100,W-24,160,10);ctx.fill();
+    ctx.strokeStyle=G.freeze?'#4fc3f7':'#64b5f6';ctx.lineWidth=2;roundRect(ctx,12,100,W-24,160,10);ctx.stroke();
+    ctx.fillStyle='#90caf9';ctx.font='bold 13px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🛒 商店 (Lv.'+getTierForLevel(G.level)+'池)'+(G.freeze?' ❄️已锁':''),W/2,118);ctx.textAlign='left';
+    const rs=shopRects();
+    for(let i=0;i<rs.length;i++){const r=rs[i];drawUnit(ctx,r.card,r.x,r.y,r.w,r.h,'shop',G.selectedHand==='s'+i);}
+    drawBtn(ctx,15,270,80,32,'🔄 刷新(1)','reroll','#0277bd',G.gold<1);
+    drawBtn(ctx,105,270,86,32,G.freeze?'❄️ 已锁':'❄️ 锁定','freeze',G.freeze?'#00838f':'#00acc1');
+    drawBtn(ctx,W-170,270,80,32,'⬆️ 升级','upgrade','#6a1b9a',G.level>=G.maxLevel||G.gold<getUpgradeCost());
+    ctx.fillStyle='#ab47bc';ctx.font='bold 10px "Microsoft YaHei"';
+    ctx.fillText(G.level>=G.maxLevel?'MAX':getUpgradeCost()+'💰',W-138,295);
+}
+function drawBattleView(ctx){
+    if(G.phase!=='battle'&&G.phase!=='result')return;
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#1a237e');g.addColorStop(0.5,'#4a148c');g.addColorStop(1,'#263238');
+    ctx.fillStyle=g;ctx.fillRect(15,100,W-30,H-560);
+    ctx.strokeStyle='#ef5350';ctx.lineWidth=2;roundRect(ctx,15,100,W-30,H-560,10);ctx.stroke();
+    if(G.opponent){
+        ctx.fillStyle='#ef9a9a';ctx.font='bold 12px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText(G.opponent.name+'  HP:'+Math.max(0,G.opponent.life),W/2,108);ctx.textAlign='left';
+    }
+    const ors=boardRects(false);
+    for(let i=0;i<ors.length;i++){const r=ors[i];drawUnit(ctx,r.card,r.x,r.y,r.w,r.h,'board',false);}
+    if(G.board.length>0||(G.battleView&&G.battleView.mine)){
+        ctx.fillStyle='#a5d6a7';ctx.font='bold 12px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText('我方军团  HP:'+G.hp,W/2,H-302);ctx.textAlign='left';
+    }
+}
+function drawBoard(ctx){
+    ctx.fillStyle='rgba(20,50,80,0.55)';roundRect(ctx,15,H-240,W-30,110,10);ctx.fill();
+    ctx.strokeStyle='#4caf50';ctx.lineWidth=2;roundRect(ctx,15,H-240,W-30,110,10);ctx.stroke();
+    ctx.fillStyle='#a5d6a7';ctx.font='bold 12px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('⚔️ 战场 ('+G.board.length+'/'+G.maxBoard+')  · 点卡牌上场  · 场上卡牌卖出',W/2,H-248);ctx.textAlign='left';
+    const brs=boardRects(true);
+    for(let i=0;i<brs.length;i++){
+        const r=brs[i];
+        if(r.arr&&r.arr===G.board)drawUnit(ctx,r.card,r.x,r.y,r.w,r.h,'board',G.selectedHand==='b'+i);
+    }
+    if(G.board.length===0){ctx.fillStyle='rgba(255,255,255,0.35)';ctx.font='12px "Microsoft YaHei"';ctx.textAlign='center';ctx.fillText('(点击板凳上的卡牌上场)',W/2,H-180);ctx.textAlign='left';}
+}
+function drawBench(ctx){
+    ctx.fillStyle='rgba(40,25,15,0.55)';roundRect(ctx,15,H-340,W-30,80,10);ctx.fill();
+    ctx.strokeStyle='#ffc107';ctx.lineWidth=2;roundRect(ctx,15,H-340,W-30,80,10);ctx.stroke();
+    ctx.fillStyle='#ffcc80';ctx.font='bold 11px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🪑 板凳 ('+G.bench.length+'/'+G.maxBench+')  · 点选卡牌上场/卖出',W/2,H-348);ctx.textAlign='left';
+    const brs=benchRects();
+    for(let i=0;i<brs.length;i++){const r=brs[i];drawUnit(ctx,r.card,r.x,r.y,r.w,r.h,'bench',G.selectedHand==='c'+i);}
+}
+function drawMenu(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#00121f');g.addColorStop(0.4,'#1565c0');g.addColorStop(0.7,'#4a148c');g.addColorStop(1,'#00121f');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    for(let i=0;i<70;i++){
+        ctx.fillStyle=`rgba(${180+(i%50)},${200+(i%55)},255,${0.035+((i*11)%12)/70})`;
+        ctx.beginPath();ctx.arc((i*113)%W,(i*71)%(H*0.45),1+((i*7)%4)*0.4,0,Math.PI*2);ctx.fill();
+    }
+    const cx=W/2,cy=170;ctx.save();ctx.translate(cx,cy);
+    const t=Date.now()/1000;ctx.rotate(Math.sin(t*0.6)*0.05);
+    const rg=ctx.createRadialGradient(0,0,10,0,0,170);
+    rg.addColorStop(0,'rgba(100,181,246,0.45)');rg.addColorStop(1,'rgba(100,181,246,0)');
+    ctx.fillStyle=rg;ctx.fillRect(-180,-110,360,220);
+    ctx.fillStyle='rgba(5,30,60,0.85)';roundRect(ctx,-130,-80,260,160,18);ctx.fill();
+    ctx.strokeStyle='#64b5f6';ctx.lineWidth=4;roundRect(ctx,-130,-80,260,160,18);ctx.stroke();
+    ctx.font='38px Arial';ctx.textAlign='center';
+    ctx.fillText('⚔️',-80,15);ctx.fillText('🛡️',0,20);ctx.fillText('🏹',80,15);
+    ctx.fillStyle='#64b5f6';ctx.font='bold 32px "Microsoft YaHei"';ctx.fillText('卡牌自走棋',0,-28);
+    ctx.fillStyle='#90caf9';ctx.font='bold 28px "Microsoft YaHei"';ctx.fillText('AUTO CHESS',0,68);
+    ctx.restore();ctx.textAlign='left';
+    const icons=['🛡️ 战士','🔮 法师','🗡️ 刺客','🏹 猎人','⚔️ 骑士','🐉 龙'];
+    for(let i=0;i<6;i++){
+        const x=20+i*74,y=336;const yy=y+Math.sin(Date.now()/700+i)*5;
+        ctx.fillStyle='rgba(0,0,0,0.5)';roundRect(ctx,x,yy,66,98,10);ctx.fill();
+        ctx.strokeStyle=['#78909c','#3f51b5','#7b1fa2','#4caf50','#ffc107','#ff9800'][i];
+        ctx.lineWidth=2;roundRect(ctx,x,yy,66,98,10);ctx.stroke();
+        ctx.font='26px Arial';ctx.textAlign='center';ctx.fillText(icons[i].split(' ')[0],x+33,yy+40);
+        ctx.fillStyle='#fff';ctx.font='bold 11px "Microsoft YaHei"';ctx.fillText(icons[i].split(' ')[1],x+33,yy+66);
+        ctx.fillStyle='#64b5f6';ctx.font='10px "Microsoft YaHei"';ctx.fillText('2/4/6 羁绊',x+33,yy+88);
+        ctx.textAlign='left';
+    }
+    ctx.fillStyle='#ffd700';ctx.font='bold 17px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('🏆 历史最高分: '+G.highScore,W/2,475);ctx.textAlign='left';
+    drawBtn(ctx,W/2-110,510,220,60,'⚔️ 开始对战','start','#1976d2');
+    ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='12.5px "Microsoft YaHei"';ctx.textAlign='center';
+    const tips=['🛒 商店买卡上板凳，凑3个同名升三星⭐⭐⭐','⭐ 升级等级解锁更高等级卡牌池','⚔️ 凑同种族/职业激活强力羁绊','🏁 25回合血量耗尽决胜负!'];
+    for(let i=0;i<tips.length;i++)ctx.fillText(tips[i],W/2,590+i*22);ctx.textAlign='left';
+}
+function drawGame(ctx){
+    if(G.phase==='battle'||G.phase==='result'){
+        const g=ctx.createLinearGradient(0,0,0,H);
+        g.addColorStop(0,'#0a0e2a');g.addColorStop(1,'#1a0a2a');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+        drawHUD(ctx);
+        drawBattleView(ctx);
+        const ors=boardRects(false);
+        for(let i=0;i<ors.length;i++){const r=ors[i];drawUnit(ctx,r.card,r.x,r.y,r.w,r.h,'board');}
+        const mrs=boardRects(true);
+        for(let i=0;i<mrs.length;i++){const r=mrs[i];drawUnit(ctx,r.card,r.x,r.y,r.w,r.h,'board');}
+        drawParticles(ctx);drawFloats(ctx);
+        if(G.lastResult!==undefined){
+            ctx.fillStyle=G.lastResult>=0?'rgba(76,175,80,0.35)':'rgba(244,67,54,0.35)';roundRect(ctx,30,H/2-30,W-60,60,12);ctx.fill();
+            ctx.strokeStyle=G.lastResult>=0?'#4caf50':'#f44336';ctx.lineWidth=3;roundRect(ctx,30,H/2-30,W-60,60,12);ctx.stroke();
+            ctx.fillStyle=G.lastResult>=0?'#ffd700':'#ff5252';ctx.font='bold 32px "Microsoft YaHei"';ctx.textAlign='center';
+            ctx.fillText(G.lastResult>=0?'🎉 胜 利':'💀 失 败',W/2,H/2+10);ctx.textAlign='left';
+        }
+        return;
+    }
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#041322');g.addColorStop(0.5,'#0d3250');g.addColorStop(1,'#041322');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    drawHUD(ctx);
+    drawShop(ctx);
+    drawBoard(ctx);
+    drawBench(ctx);
+    drawBtn(ctx,W/2-100,H-55,200,44,'⚔️ 开始战斗','battle','#c62828');
+    drawParticles(ctx);drawFloats(ctx);
+    if(G.selectedHand){
+        let c=null,label='';
+        if(G.selectedHand[0]==='s'&&G.shop[+G.selectedHand.slice(1)]){c=G.shop[+G.selectedHand.slice(1)];label='点购买 (💰'+c.gold+')';}
+        else if(G.selectedHand[0]==='c'&&G.bench[+G.selectedHand.slice(1)]){c=G.bench[+G.selectedHand.slice(1)];label='点上场 / 长按(再点一次空)卖出';}
+        else if(G.selectedHand[0]==='b'&&G.board[+G.selectedHand.slice(1)]){c=G.board[+G.selectedHand.slice(1)];label='点卖出回板凳 / 卖出';}
+        if(c){
+            ctx.fillStyle='rgba(0,0,0,0.7)';roundRect(ctx,50,H-115,W-100,34,7);ctx.fill();
+            ctx.strokeStyle='#90caf9';ctx.lineWidth=1;roundRect(ctx,50,H-115,W-100,34,7);ctx.stroke();
+            ctx.fillStyle='#90caf9';ctx.font='bold 11px "Microsoft YaHei"';ctx.textAlign='center';
+            ctx.fillText(c.n+' ['+c.tribe+'] '+c.sk+'  -  '+label,W/2,H-94);ctx.textAlign='left';
+        }
+    }
+}
+function drawGameOver(ctx){
+    const win=G.hp>0;
+    const g=ctx.createLinearGradient(0,0,0,H);
+    if(win){g.addColorStop(0,'#1b5e20');g.addColorStop(1,'#00251a');}
+    else{g.addColorStop(0,'#4a0000');g.addColorStop(1,'#000000');}
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=win?'#ffd700':'#ff5252';ctx.font='bold 56px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText(win?'🏆 棋王!':'💀 失败',W/2,170);ctx.textAlign='left';
+    ctx.fillStyle='#fff';ctx.font='bold 20px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('存活回合: '+Math.min(G.round,G.maxRound)+'/'+G.maxRound,W/2,250);
+    ctx.fillText('最终等级: Lv.'+G.level+'  剩余血量: '+Math.max(0,G.hp),W/2,282);
+    ctx.fillStyle='#ffd700';ctx.fillText('最终得分: '+G.score,W/2,330);
+    if(G.score>=G.highScore){ctx.fillStyle='#ffd700';ctx.font='bold 18px "Microsoft YaHei"';ctx.fillText('🎉 新纪录! 🎉',W/2,375);}
+    else{ctx.fillStyle='#ccc';ctx.fillText('历史最高: '+G.highScore,W/2,375);}
+    ctx.textAlign='left';
+    drawBtn(ctx,W/2-100,420,200,60,'⚔️ 再来一局','restart','#1976d2');
+    drawBtn(ctx,W/2-70,495,140,42,'返回大厅','menu','#555');
+    ctx.fillStyle='rgba(255,255,255,0.55)';ctx.font='12px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('真正的棋手，懂得羁绊与节奏',W/2,575);ctx.textAlign='left';
+}
+function update(){
+    updateParticles();updateFloats();
+    if(G.shake>0)G.shake-=0.5;
+    if(G.flash>0)G.flash--;
+}
+function draw(){
+    ctx.save();
+    if(G.shake>0)ctx.translate((Math.random()-0.5)*G.shake,(Math.random()-0.5)*G.shake);
+    switch(G.state){
+        case STATE_MENU:drawMenu(ctx);break;
+        case STATE_PLAYING:drawGame(ctx);break;
+        case STATE_OVER:drawGameOver(ctx);break;
+        case STATE_PAUSE:drawGame(ctx);break;
+    }
+    if(G.flash>0){ctx.globalAlpha=G.flash/20;ctx.fillStyle=G.flashColor||'#ff2222';ctx.fillRect(0,0,W,H);ctx.globalAlpha=1;}
+    ctx.restore();
+}
+function handlePointerDown(e){
+    initAudio();const p=getPos(e);
+    if(G.state===STATE_MENU){if(hitBtn(p,'start')){startGame();return;}}
+    else if(G.state===STATE_OVER){if(hitBtn(p,'restart')){G.state=STATE_MENU;return;}if(hitBtn(p,'menu')){G.state=STATE_MENU;return;}}
+    else if(G.state===STATE_PLAYING){
+        if(G.phase!=='shop')return;
+        if(hitBtn(p,'reroll')){reroll();return;}
+        if(hitBtn(p,'freeze')){toggleFreeze();return;}
+        if(hitBtn(p,'upgrade')){upgradeLevel();return;}
+        if(hitBtn(p,'battle')){startBattle();return;}
+        const srs=shopRects();
+        for(let i=0;i<srs.length;i++){
+            if(rectHit(p,srs[i])&&!srs[i].card.sold){
+                if(G.selectedHand==='s'+i){buyFromShop(i);G.selectedHand=-1;return;}
+                else{G.selectedHand='s'+i;sfxBtn();return;}
+            }
+        }
+        const crs=benchRects();
+        for(let i=0;i<crs.length;i++){
+            if(rectHit(p,crs[i])){
+                if(G.selectedHand==='c'+i){benchToBoard(i);G.selectedHand=-1;return;}
+                else{G.selectedHand='c'+i;sfxBtn();return;}
+            }
+        }
+        const brs=boardRects(true);
+        for(let i=0;i<brs.length;i++){
+            if(brs[i].arr===G.board&&rectHit(p,brs[i])){
+                if(G.selectedHand==='b'+i){sellBoard(i);G.selectedHand=-1;return;}
+                else{G.selectedHand='b'+i;sfxBtn();return;}
+            }
+        }
+        G.selectedHand=-1;
+    }
+}
+function handlePointerMove(e){
+    const p=getPos(e);G.hover=null;
+    if(G.state!==STATE_PLAYING)return;
+    const srs=shopRects();for(const r of srs)if(rectHit(p,r)){G.hover=r.card.uid;return;}
+    const crs=benchRects();for(const r of crs)if(rectHit(p,r)){G.hover=r.card.uid;return;}
+    const brs=boardRects(true);for(const r of brs)if(rectHit(p,r)){G.hover=r.card.uid;return;}
+}
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('touchstart',e=>{e.preventDefault();handlePointerDown(e);},{passive:false});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();handlePointerMove(e);},{passive:false});
+canvas.addEventListener('touchend',e=>{e.preventDefault();},{passive:false});
+const ACHIEVEMENTS=[
+    {id:'win1',name:'棋逢对手',desc:'首胜！开始征程',cond:g=>G.wins>=1,reward:'★ 棋手开启'},
+    {id:'win5',name:'运筹帷幄',desc:'累计5胜',cond:g=>G.wins>=5,reward:'★★ 棋手进阶'},
+    {id:'win10',name:'一代宗师',desc:'累计10胜',cond:g=>G.wins>=10,reward:'★★★ 棋圣传说'},
+    {id:'synergy6',name:'羁绊大师',desc:'一局内激活6项羁绊',cond:g=>G.maxSyn>=6,reward:'🔗 羁绊激活器'},
+    {id:'gold800',name:'富可敌国',desc:'累计累计消费800金币',cond:g=>G.goldSpent>=800,reward:'💰 经济大亨'},
+    {id:'dmg300',name:'核弹输出',desc:'累计造成300伤害',cond:g=>G.totalDmg>=300,reward:'💥 +核爆威望'},
+    {id:'kill40',name:'战场收割',desc:'累计击杀40敌方',cond:g=>G.totalKills>=40,reward:'⚔ 杀伐果断'},
+    {id:'full9',name:'完美阵容',desc:'场上9个单位同存',cond:g=>G.maxBoard>=9,reward:'🛡 完美9格'},
+    {id:'threeStar',name:'三星闪耀',desc:'将一名单位升为3星',cond:g=>G.star3Count>=1,reward:'⭐⭐⭐ 升星大师'},
+    {id:'level8',name:'人口暴涨',desc:'达到8人口',cond:g=>G.maxLevel>=8,reward:'👥 人海战术'},
+    {id:'comboSyn',name:'种族联携',desc:'同种族6单位上阵',cond:g=>G.maxSameTribe>=6,reward:'🏰 +种族大师'},
+    {id:'bossRex',name:'巨龙之巢',desc:'击败最终Boss',cond:g=>G.bossKills>=1,reward:'👑 传说棋圣！'}
+];
+function loadAchievements()
+{
+    try
+    {
+        const s=localStorage.getItem('auto_ach');
+        if(s) G.achUnlocked=JSON.parse(s);
+    }
+    catch(e)
+    {
+    }
+}
+function saveAchievements()
+{
+    try
+    {
+        localStorage.setItem('auto_ach',JSON.stringify(G.achUnlocked));
+    }
+    catch(e)
+    {
+    }
+}
+function checkAchievements()
+{
+    for(const a of ACHIEVEMENTS)
+    {
+        if(G.achUnlocked.indexOf(a.id)<0&&a.cond(G))
+        {
+            G.achUnlocked.push(a.id);
+            G.achQueue.push(a);
+            saveAchievements();
+            G.floats.push({text:'🏆 '+a.name,x:W/2,y:H/2-50,vx:0,vy:-0.8,life:180,color:'#ffd700',size:22});
+            playTone(660,0.12,'sine',0.2);
+            setTimeout(()=>playTone(880,0.14,'sine',0.2),110);
+        }
+    }
+}
+const TUTORIAL_STEPS=[
+    {title:'♟️ 欢迎来到卡牌自走棋',text:'自动战斗策略手游！凑羁绊、升星级、打造最强战队！',pos:{x:W/2,y:H/2-40}},
+    {title:'💰 金币与经验',text:'每回合获得金币，可购买商店卡或升级人口。利息+连胜连败奖励！',pos:{x:W/2,y:260}},
+    {title:'🎴 商店与合成',text:'3个相同1星=2星。3个2星=超强3星！拖到场上上阵。',pos:{x:W/2,y:H-150}},
+    {title:'⚔️ 羁绊与种族',text:'同职业/种族数量达到激活强力效果。战士盾厚，法师高攻，6羁绊超强！',pos:{x:W/2,y:420}},
+    {title:'🏆 登顶之战',text:'击败10关对手。坚持到最后，成为传说棋圣！',pos:{x:W/2,y:160}}
+];
+function wrapText(text,x,y,maxW,lineH,align)
+{
+    const lines=[];let cur='';
+    if(text.indexOf('\n')>=0)
+    {
+        const ps=text.split('\n');
+        for(const p of ps)
+        {
+            const chars=p.split('');cur='';
+            for(const ch of chars)
+            {
+                const t2=cur+ch;
+                if(ctx.measureText(t2).width>maxW){lines.push(cur);cur=ch;}else cur=t2;
+            }
+            lines.push(cur);
+        }
+    }
+    else
+    {
+        const chars=text.split('');
+        for(const ch of chars)
+        {
+            const t2=cur+ch;
+            if(ctx.measureText(t2).width>maxW){lines.push(cur);cur=ch;}else cur=t2;
+        }
+        lines.push(cur);
+    }
+    ctx.textAlign=align||'left';
+    for(let i=0;i<lines.length;i++){ctx.fillText(lines[i],x,y+i*lineH);}
+}
+function addLog(msg,type)
+{
+    G.log=G.log||[];
+    G.log.push({m:msg,t:type||'info',tme:Date.now()});
+    if(G.log.length>200) G.log.shift();
+}
+const THEME_COLOR='#5d4037',THEME_LIGHT='#a1887f',THEME_GOLD='#ffd700';
+function drawPauseMenu()
+{
+    ctx.fillStyle='rgba(40,30,20,0.94)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#5d4037';roundRect(80,120,W-160,H-260,20,true,false);
+    ctx.strokeStyle='#d7ccc8';ctx.lineWidth=3;roundRect(80,120,W-160,H-260,20,false,true);
+    ctx.fillStyle='#fff';ctx.font='bold 30px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('⏸ 棋局暂停',W/2,175);
+    const btns=[
+        {y:240,t:'▶ 继续对决',c:'#4caf50',id:'resume'},
+        {y:310,t:'📖 棋谱入门',c:'#2196f3',id:'tutorial'},
+        {y:380,t:'🏆 大师称号',c:'#ff9800',id:'ach'},
+        {y:450,t:'🔊 音效: '+(G.mute?'关':'开'),c:'#673ab7',id:'mute'},
+        {y:520,t:'🔄 重开对弈',c:'#f44336',id:'restart'},
+        {y:590,t:'🏠 退出棋局',c:'#607d8b',id:'menu'}
+    ];
+    G.pauseBtns=[];
+    for(const b of btns)
+    {
+        ctx.fillStyle=b.c;roundRect(110,b.y,W-220,55,15,true,false);
+        ctx.fillStyle='#fff';ctx.font='bold 20px Microsoft YaHei';ctx.fillText(b.t,W/2,b.y+36);
+        G.pauseBtns.push({x:110,y:b.y,w:W-220,h:55,id:b.id});
+    }
+}
+function drawTutorial()
+{
+    ctx.fillStyle='rgba(0,0,0,0.9)';ctx.fillRect(0,0,W,H);
+    const s=TUTORIAL_STEPS[G.tutStep];
+    ctx.fillStyle='rgba(93,64,55,0.97)';roundRect(50,200,W-100,360,24,true,false);
+    ctx.strokeStyle='#d7ccc8';ctx.lineWidth=3;roundRect(50,200,W-100,360,24,false,true);
+    ctx.fillStyle='#ffd700';ctx.font='bold 26px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText(s.title,W/2,260);
+    ctx.fillStyle='#fff';ctx.font='17px Microsoft YaHei';
+    wrapText(s.text,W/2,310,W-160,30,'center');
+    ctx.fillStyle='rgba(255,255,255,0.25)';ctx.font='14px Microsoft YaHei';
+    ctx.fillText('('+(G.tutStep+1)+'/'+TUTORIAL_STEPS.length+')',W/2,485);
+    ctx.fillStyle='#a1887f';roundRect(80,510,140,45,12,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 16px Microsoft YaHei';
+    ctx.fillText(G.tutStep>0?'◀ 上一步':'跳过',150,540);
+    ctx.fillStyle='#4caf50';roundRect(W-220,510,140,45,12,true,false);
+    ctx.fillText(G.tutStep<TUTORIAL_STEPS.length-1?'下一步 ▶':'开启棋局!',W-150,540);
+    G.tutBtns=[{x:80,y:510,w:140,h:45,id:'prev'},{x:W-220,y:510,w:140,h:45,id:'next'}];
+}
+function drawAchievements()
+{
+    ctx.fillStyle='rgba(40,30,20,0.96)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#4e342e';roundRect(30,60,W-60,H-130,18,true,false);
+    ctx.strokeStyle='#a1887f';ctx.lineWidth=2;roundRect(30,60,W-60,H-130,18,false,true);
+    ctx.fillStyle=THEME_GOLD;ctx.font='bold 26px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('🏆 大师图鉴 ('+G.achUnlocked.length+'/'+ACHIEVEMENTS.length+')',W/2,100);
+    const un=ACHIEVEMENTS.length>0?Math.floor(G.achUnlocked.length*100/ACHIEVEMENTS.length):0;
+    ctx.fillStyle='rgba(255,255,255,0.1)';roundRect(60,120,W-120,14,7,true,false);
+    ctx.fillStyle='#4caf50';roundRect(60,120,(W-120)*un/100,14,7,true,false);
+    ctx.fillStyle='#fff';ctx.font='12px Microsoft YaHei';ctx.fillText(un+'%',W/2,131);
+    const perPage=6;const page=G.achPage||0;const start=page*perPage;
+    for(let i=0;i<perPage;i++)
+    {
+        const idx=start+i;if(idx>=ACHIEVEMENTS.length)break;
+        const a=ACHIEVEMENTS[idx];const unlocked=G.achUnlocked.indexOf(a.id)>=0;
+        const y=160+i*76;const w=W-80;
+        ctx.fillStyle=unlocked?'rgba(255,215,0,0.12)':'rgba(255,255,255,0.04)';
+        roundRect(40,y,w,68,10,true,false);
+        ctx.strokeStyle=unlocked?'#ffd700':'rgba(255,255,255,0.1)';ctx.lineWidth=1;
+        roundRect(40,y,w,68,10,false,true);
+        ctx.font='32px Arial';ctx.textAlign='left';
+        ctx.fillText(unlocked?'🏅':'🔒',58,y+44);
+        ctx.fillStyle=unlocked?'#fff':'#888';ctx.font='bold 16px Microsoft YaHei';
+        ctx.fillText(a.name,100,y+26);
+        ctx.font='12px Microsoft YaHei';ctx.fillStyle=unlocked?'#d7ccc8':'#666';
+        ctx.fillText(a.desc,100,y+46);
+        ctx.fillStyle=unlocked?'#ffd700':'#555';ctx.textAlign='right';ctx.font='11px Microsoft YaHei';
+        ctx.fillText(a.reward,W-52,y+44);
+    }
+    const totalPages=Math.ceil(ACHIEVEMENTS.length/perPage);
+    ctx.fillStyle='#fff';ctx.font='13px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('第 '+(page+1)+' / '+totalPages+' 页',W/2,H-105);
+    ctx.fillStyle=page>0?'#8d6e63':'#555';roundRect(60,H-85,110,38,10,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 15px Microsoft YaHei';
+    ctx.fillText(page>0?'◀ 上一页':'--',115,H-60);
+    ctx.fillStyle=page<totalPages-1?'#8d6e63':'#555';roundRect(W-170,H-85,110,38,10,true,false);
+    ctx.fillText(page<totalPages-1?'下一页 ▶':'--',W-115,H-60);
+    ctx.fillStyle='#d84315';roundRect(W/2-60,H-85,120,38,10,true,false);
+    ctx.fillText('✕ 关闭',W/2,H-60);
+    G.achBtns=[{x:60,y:H-85,w:110,h:38,id:'prev'},{x:W-170,y:H-85,w:110,h:38,id:'next'},{x:W/2-60,y:H-85,w:120,h:38,id:'close'}];
+}
+function drawBattleLog()
+{
+    if(!G.showLog)return;
+    ctx.fillStyle='rgba(0,0,0,0.9)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(70,50,30,0.98)';roundRect(30,70,W-60,H-140,12,true,false);
+    ctx.strokeStyle='#6d4c41';ctx.lineWidth=2;roundRect(30,70,W-60,H-140,12,false,true);
+    ctx.fillStyle='#ffd700';ctx.font='bold 22px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('📜 战况记录',W/2,105);
+    ctx.fillStyle='#eee';ctx.font='13px Microsoft YaHei';ctx.textAlign='left';
+    G.log=G.log||[];const logs=G.log.slice(-26);let y=135;
+    for(let i=logs.length-1;i>=0;i--){y+=20;if(y>H-110)break;const l=logs[i];
+        ctx.fillStyle=l.t==='player'?'#ffccbc':(l.t==='enemy'?'#ef9a9a':'#b2dfdb');
+        ctx.fillText('• '+l.m,50,y);
+    }
+    ctx.fillStyle='#d84315';roundRect(W/2-60,H-70,120,40,12,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 16px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('✕ 关闭',W/2,H-44);
+    G.logBtn={x:W/2-60,y:H-70,w:120,h:40,id:'close'};
+}
+function drawCardDetail()
+{
+    if(!G.detCard)return;
+    const c=G.detCard;const pw=300;const ph=440;const px=W/2-pw/2;const py=H/2-ph/2;
+    ctx.fillStyle='rgba(0,0,0,0.88)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(80,50,30,0.98)';roundRect(px,py,pw,ph,20,true,false);
+    const cmap1={warrior:'#d32f2f',mage:'#7b1fa2',rogue:'#455a64',priest:'#fbc02d',hunter:'#388e3c',knight:'#1976d2'};
+    const cmap2={human:'#795548',orc:'#388e3c',elf:'#00897b',undead:'#303f9f',dragon:'#e65100',beast:'#33691e'};
+    const cc=(c.job?cmap1[c.job]:null)||(c.tribe?cmap2[c.tribe]:null)||'#888';
+    const cn=(c.job?'职业: '+c.job:'')+(c.tribe?'  种族: '+c.tribe:'');
+    ctx.strokeStyle=cc;ctx.lineWidth=4;roundRect(px,py,pw,ph,20,false,true);
+    ctx.fillStyle=cc;roundRect(px+16,py+16,36,36,18,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 18px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText(c.cost,px+34,py+40);
+    ctx.font='46px Arial';ctx.save();ctx.translate(W/2,py+100);
+    if(c.star&&c.star>=2){ctx.shadowColor='#ffd700';ctx.shadowBlur=10;}
+    ctx.fillText(c.emoji||'♟',0,0);ctx.restore();
+    ctx.fillStyle='#fff';ctx.font='bold 22px Microsoft YaHei';
+    ctx.fillText(c.name,W/2,py+145);
+    for(let i=0;i<(c.star||1);i++)ctx.fillText('⭐',W/2-30+i*28,py+172);
+    ctx.fillStyle='#a1887f';ctx.font='13px Microsoft YaHei';
+    ctx.fillText(cn||'单位',W/2,py+195);
+    ctx.fillStyle='#e53935';roundRect(px+20,py+210,52,36,10,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 18px Microsoft YaHei';ctx.textAlign='left';
+    ctx.fillText('⚔'+c.atk,px+28,py+235);
+    ctx.fillStyle='#43a047';roundRect(px+pw-72,py+210,52,36,10,true,false);
+    ctx.fillStyle='#fff';ctx.textAlign='right';
+    ctx.fillText('❤'+c.hp,px+pw-28,py+235);
+    ctx.fillStyle='rgba(255,255,255,0.08)';roundRect(px+20,py+265,pw-40,110,10,true,false);
+    ctx.fillStyle='#fff';ctx.font='14px Microsoft YaHei';ctx.textAlign='left';
+    wrapText('技能: '+(c.skill||c.desc||'普通攻击'),px+36,py+290,pw-72,24,'left');
+    ctx.fillStyle='#d7ccc8';ctx.font='12px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('人口等级: '+(G.level||1)+'/9  单位总数:32',W/2,py+400);
+    ctx.fillStyle='#5d4037';roundRect(W/2-55,py+412,110,24,12,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 13px Microsoft YaHei';
+    ctx.fillText('✕ 关闭',W/2,py+429);
+    G.detBtn={x:W/2-55,y:py+412,w:110,h:24,id:'close'};
+}
+function drawMenuExtras()
+{
+    ctx.fillStyle='rgba(255,255,255,0.06)';roundRect(20,H-200,W-40,110,14,true,false);
+    ctx.fillStyle='#ffd700';ctx.font='bold 14px Microsoft YaHei';ctx.textAlign='left';
+    ctx.fillText('📊 棋手战绩',38,H-178);
+    ctx.fillStyle='#ccc';ctx.font='12px Microsoft YaHei';
+    ctx.fillText('胜场: '+G.wins+'     击杀: '+G.totalKills,38,H-152);
+    ctx.fillText('伤害累计: '+G.totalDmg+'     花金币: '+(G.goldSpent||0),38,H-132);
+    ctx.fillText('最高人口: '+(G.maxLevel||1)+'     最佳关卡: Lv.'+G.bestLevel,38,H-112);
+    ctx.fillStyle='rgba(255,255,255,0.05)';roundRect(W-175,H-198,145,106,12,true,false);
+    ctx.fillStyle='#fff';ctx.font='13px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('🏆 '+G.achUnlocked.length+'/'+ACHIEVEMENTS.length,W-102,H-175);
+    ctx.font='11px Microsoft YaHei';ctx.fillStyle='#d7ccc8';
+    ctx.fillText('称号完成度',W-102,H-158);
+    const un=ACHIEVEMENTS.length>0?Math.floor(G.achUnlocked.length*100/ACHIEVEMENTS.length):0;
+    ctx.fillStyle='rgba(255,255,255,0.1)';roundRect(W-165,H-145,125,12,6,true,false);
+    ctx.fillStyle='#4caf50';roundRect(W-165,H-145,125*un/100,12,6,true,false);
+    ctx.fillStyle='#fff';ctx.font='10px Microsoft YaHei';ctx.fillText(un+'%',W-102,H-135);
+    ctx.fillStyle='#5d4037';roundRect(W-160,H-122,115,26,10,true,false);
+    ctx.fillStyle='#fff';ctx.font='bold 12px Microsoft YaHei';
+    ctx.fillText('📖 称号图鉴',W-102,H-104);
+    G.menuBtns=G.menuBtns||[];G.menuBtns.push({x:W-160,y:H-122,w:115,h:26,id:'ach_menu'});
+}
+function handleExtraPointer(p)
+{
+    if(G.state===STATE_PAUSE)
+    {
+        if(G.pauseBtns)for(const b of G.pauseBtns)if(rectHit(p,b)){
+            sfxBtn();
+            if(b.id==='resume')G.state=STATE_PLAYING;
+            else if(b.id==='tutorial'){G.tutStep=0;G.showTutorial=true;}
+            else if(b.id==='ach'){G.achPage=0;G.showAch=true;G.state=STATE_MENU;}
+            else if(b.id==='mute'){G.mute=!G.mute;if(G.mute&&audioCtx)audioCtx.suspend();else if(!G.mute&&audioCtx)audioCtx.resume();}
+            else if(b.id==='restart')newGame();
+            else if(b.id==='menu')G.state=STATE_MENU;
+            return true;
+        }
+        return true;
+    }
+    if(G.showTutorial)
+    {
+        if(G.tutBtns)for(const b of G.tutBtns)if(rectHit(p,b)){
+            sfxBtn();
+            if(b.id==='prev'){if(G.tutStep>0)G.tutStep--;else{G.showTutorial=false;G.showAch=false;}}
+            else{if(G.tutStep<TUTORIAL_STEPS.length-1)G.tutStep++;else{G.showTutorial=false;if(!G.level||G.level===1)newGame();}}
+            return true;
+        }
+        return true;
+    }
+    if(G.showAch)
+    {
+        if(G.achBtns)for(const b of G.achBtns)if(rectHit(p,b)){
+            sfxBtn();
+            if(b.id==='prev'&&G.achPage>0)G.achPage--;
+            else if(b.id==='next'){const tp=Math.ceil(ACHIEVEMENTS.length/6);if(G.achPage<tp-1)G.achPage++;}
+            else if(b.id==='close')G.showAch=false;
+            return true;
+        }
+        return true;
+    }
+    if(G.showLog){if(G.logBtn&&rectHit(p,G.logBtn)){G.showLog=false;sfxBtn();return true;}return true;}
+    if(G.detCard){if(G.detBtn&&rectHit(p,G.detBtn)){G.detCard=null;sfxBtn();return true;}return true;}
+    if(G.state===STATE_MENU&&G.menuBtns)for(const b of G.menuBtns)if(rectHit(p,b)){sfxBtn();if(b.id==='ach_menu'){G.achPage=0;G.showAch=true;}return true;}
+    return false;
+}
+let _origDraw=draw;draw=function()
+{
+    _origDraw();
+    if(G.state===STATE_PAUSE)drawPauseMenu();
+    else if(G.showTutorial)drawTutorial();
+    else if(G.showAch)drawAchievements();
+    if(G.showLog)drawBattleLog();
+    if(G.detCard)drawCardDetail();
+    if(G.state===STATE_MENU)drawMenuExtras();
+    if(G.achQueue&&G.achQueue.length>0)
+    {
+        const a=G.achQueue[0];if(a._t===undefined)a._t=0;a._t++;
+        ctx.save();ctx.globalAlpha=Math.max(0,1-Math.abs(a._t-150)/150);
+        ctx.fillStyle='rgba(93,64,55,0.95)';roundRect(W/2-135,H/2-50,270,70,14,true,false);
+        ctx.strokeStyle='#d7ccc8';ctx.lineWidth=2;roundRect(W/2-135,H/2-50,270,70,14,false,true);
+        ctx.fillStyle='#ffd700';ctx.font='30px Arial';ctx.textAlign='center';
+        ctx.fillText('🏆',W/2,H/2-15);
+        ctx.fillStyle='#fff';ctx.font='bold 16px Microsoft YaHei';
+        ctx.fillText('称号解锁! '+a.name,W/2,H/2+8);
+        ctx.fillStyle='#ccc';ctx.font='12px Microsoft YaHei';
+        ctx.fillText(a.reward,W/2,H/2+26);
+        ctx.restore();if(a._t>300)G.achQueue.shift();
+    }
+};
+let _origUpdate=update;update=function(){_origUpdate();if(G.state===STATE_PLAYING)checkAchievements();};
+let _origHPD=handlePointerDown;handlePointerDown=function(e)
+{
+    initAudio();const p=getPos(e);
+    if(handleExtraPointer(p))return;
+    if(G.state===STATE_PLAYING)
+    {
+        if(p.x>W-58&&p.y>14&&p.x<W-14&&p.y<50){G.state=STATE_PAUSE;sfxBtn();return;}
+        if(p.x>14&&p.y>14&&p.x<62&&p.y<46){G.showLog=true;sfxBtn();return;}
+    }
+    _origHPD(e);
+    if(G.state===STATE_PLAYING&&G.hover)
+    {
+        G.detCard=null;const hv=G.hover;
+        const allCards=[];
+        for(const c of (G.shop||[]))allCards.push(c);
+        for(const c of (G.bench||[]))allCards.push(c);
+        for(const c of (G.board||[]))allCards.push(c);
+        for(const c of allCards)if(c.uid===hv){G.detCard=c;break;}
+    }
+};
+function gameLoop()
+{
+    requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+loadAchievements();if(G.achUnlocked===undefined)G.achUnlocked=[];
+G.achQueue=G.achQueue||[];G.log=G.log||[];
+gameLoop();
+})();
+</script>
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try { if (typeof startGame === 'function') startGame(); } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

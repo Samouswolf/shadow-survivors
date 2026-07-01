@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>物理过山车</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a1628;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#00d9ff;color:#0a1628;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始设计</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=800;
+const GRAVITY=0.35;
+const FRICTION=0.992;
+const BALL_R=10;
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'square';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxStart(){playTone(523,0.1,'sine',0.2);setTimeout(()=>playTone(659,0.1,'sine',0.2),100);setTimeout(()=>playTone(784,0.15,'sine',0.2),200)}
+function sfxScore(){playTone(880,0.08,'sine',0.18);setTimeout(()=>playTone(1047,0.1,'sine',0.18),80);setTimeout(()=>playTone(1319,0.15,'sine',0.18),160)}
+function sfxFail(){playTone(220,0.15,'sawtooth',0.18);setTimeout(()=>playTone(165,0.25,'sawtooth',0.18),120)}
+function sfxClick(){playTone(660,0.05,'triangle',0.12)}
+function sfxRelease(){playTone(440,0.1,'sine',0.15);setTimeout(()=>playTone(880,0.15,'sine',0.15),80)}
+function sfxLoop(){for(let i=0;i<3;i++){setTimeout(()=>playTone(600+i*100,0.08,'sine',0.1),i*50)}}
+function sfxCrash(){playTone(100,0.3,'sawtooth',0.2);setTimeout(()=>playTone(80,0.2,'square',0.15),150)}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const LEVELS=[
+    {
+        id:'basic',
+        name:'初级坡道',
+        emoji:'🎢',
+        desc:'学习基本的重力和动能',
+        nodes:6,
+        startH:100,
+        endH:500,
+        targetX:W-60,
+        minH:80,
+        maxH:550,
+        loop:false,
+        targetScore:70,
+        principle:'机械能守恒：势能 PE = mgh，动能 KE = ½mv²。忽略摩擦时 PE+KE=常数。小球从高处释放，重力势能转化为动能。',
+        formula:'PE + KE = 常数 (无摩擦时)'
+    },
+    {
+        id:'double',
+        name:'双坡挑战',
+        emoji:'⛰️',
+        desc:'上坡下坡的能量转换',
+        nodes:8,
+        startH:80,
+        endH:520,
+        targetX:W-60,
+        minH:60,
+        maxH:560,
+        loop:false,
+        targetScore:75,
+        principle:'小球上坡时动能→势能(减速)，下坡时势能→动能(加速)。若最高点高度>起点，则小球无法通过(能量不足)。',
+        formula:'v² = 2g(h₀-h) 无摩擦末速度'
+    },
+    {
+        id:'loop',
+        name:'回环过山车',
+        emoji:'🎡',
+        desc:'向心力完成圆环回环',
+        nodes:10,
+        startH:60,
+        endH:520,
+        targetX:W-60,
+        minH:50,
+        maxH:580,
+        loop:true,
+        loopCenter:{x:W*0.55,y:350},
+        loopRadius:70,
+        targetScore:80,
+        principle:'圆周运动需要向心力 F=mv²/r。回环最高点最小速度 v=√(gr)。所以起点必须远高于环顶(至少2.5倍环半径)才能安全通过。',
+        formula:'v_min = √(g·r) 回环顶不脱轨速度'
+    },
+    {
+        id:'spiral',
+        name:'螺旋下降',
+        emoji:'🌀',
+        desc:'螺旋轨道消耗能量',
+        nodes:12,
+        startH:50,
+        endH:540,
+        targetX:W-60,
+        minH:40,
+        maxH:560,
+        loop:false,
+        targetScore:78,
+        principle:'摩擦力做功 W=f·s 转化为热能耗散。螺旋轨道更长→摩擦力做功更多→末速度更慢。总能量 E=PE+KE+热能(散失)。',
+        formula:'W_friction = f × distance (路程)'
+    },
+    {
+        id:'jump',
+        name:'跳跃平台',
+        emoji:'🏔️',
+        desc:'抛物线飞跃间隙',
+        nodes:9,
+        startH:70,
+        endH:510,
+        targetX:W-60,
+        minH:50,
+        maxH:570,
+        loop:false,
+        hasJump:true,
+        gapStart:W*0.55,
+        gapEnd:W*0.70,
+        targetScore:82,
+        principle:'平抛运动：脱离轨道后水平匀速(x=v₀t)，竖直自由下落(y=½gt²)。水平速度越大，飞跃距离越远。需在起跳前获得足够速度。',
+        formula:'d = v₀·√(2h/g) 平抛水平距离'
+    }
+];
+
+const G={
+    state:STATE_MENU,
+    score:0,
+    highScore:0,
+    currentLevel:0,
+    btnRects:{},
+    keys:{},
+    paused:false,
+    nodes:[],
+    selectedNode:-1,
+    dragging:false,
+    ball:null,
+    running:false,
+    runTime:0,
+    trail:[],
+    simulationResults:null,
+    principleOpen:false,
+    resultMsg:'',
+    animationFrame:0,
+    levelStars:[],
+    totalStars:0
+};
+
+G.highScore=parseInt(Storage.load('coaster_highscore','0'));
+const savedStars=Storage.load('coaster_stars',null);
+if(savedStars)G.levelStars=savedStars;
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color,textColor){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    ctx.fillStyle=color||'#00d9ff';
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle=textColor||'#0a1628';
+    ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+window.addEventListener('keydown',function(e){
+    G.keys[e.key.toLowerCase()]=true;
+    if(e.key===' '||e.key==='Enter'){
+        e.preventDefault();
+        initAudio();
+        if(G.state===STATE_MENU){startGame();return}
+        if(G.state===STATE_OVER){startGame();return}
+        if(G.state===STATE_PLAYING&&!G.paused&&!G.running){releaseBall();return}
+    }
+    if(e.key==='Escape'){
+        if(G.state===STATE_PLAYING)togglePause();
+    }
+    if(G.state===STATE_PLAYING&&!G.paused){
+        if(e.key==='r'||e.key==='R'){resetBall();}
+    }
+});
+window.addEventListener('keyup',function(e){
+    G.keys[e.key.toLowerCase()]=false;
+});
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){startGame();return}
+        if(hitBtn(p,'selectLeft')){changeLevel(-1);return}
+        if(hitBtn(p,'selectRight')){changeLevel(1);return}
+    } else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;return}
+    } else if(G.state===STATE_PLAYING){
+        if(G.paused){
+            if(hitBtn(p,'resume')){togglePause();return}
+            if(hitBtn(p,'quit')){G.state=STATE_MENU;G.paused=false;return}
+            return;
+        }
+        if(G.principleOpen){
+            if(hitBtn(p,'closePrinciple')){G.principleOpen=false;return}
+            return;
+        }
+        if(hitBtn(p,'pauseBtn')){togglePause();return}
+        if(hitBtn(p,'showPrinciple')){G.principleOpen=true;return}
+        if(hitBtn(p,'release')&&!G.running){releaseBall();return}
+        if(hitBtn(p,'reset')){resetBall();return}
+        if(hitBtn(p,'nextLevel')&&G.simulationResults){nextLevel();return}
+        handleNodeClick(p);
+    }
+}
+
+function handlePointerMove(e){
+    if(G.state!==STATE_PLAYING||G.paused||G.running)return;
+    if(G.dragging&&G.selectedNode>=0){
+        const p=getPos(e);
+        const lv=LEVELS[G.currentLevel];
+        const node=G.nodes[G.selectedNode];
+        if(G.selectedNode>0&&G.selectedNode<G.nodes.length-1){
+            node.y=Math.max(lv.minH,Math.min(lv.maxH,p.y));
+            node.x=Math.max(60,Math.min(W-60,p.x));
+        }
+    }
+}
+
+function handlePointerUp(e){
+    G.dragging=false;
+    G.selectedNode=-1;
+}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e)},{passive:false});
+
+function handleNodeClick(p){
+    for(let i=1;i<G.nodes.length-1;i++){
+        const n=G.nodes[i];
+        const d=Math.hypot(p.x-n.x,p.y-n.y);
+        if(d<18){
+            G.selectedNode=i;
+            G.dragging=true;
+            sfxClick();
+            return;
+        }
+    }
+}
+
+function changeLevel(dir){
+    G.currentLevel=(G.currentLevel+dir+LEVELS.length)%LEVELS.length;
+    sfxClick();
+}
+
+function initNodes(){
+    const lv=LEVELS[G.currentLevel];
+    G.nodes=[];
+    const n=lv.nodes;
+    for(let i=0;i<n;i++){
+        const t=i/(n-1);
+        const x=40+t*(W-80);
+        let y;
+        if(i===0)y=lv.startH;
+        else if(i===n-1)y=lv.endH;
+        else{
+            const midH=(lv.startH+lv.endH)/2;
+            const amp=150;
+            if(lv.id==='basic'){
+                y=midH-Math.sin(t*Math.PI)*amp;
+            }else if(lv.id==='double'){
+                y=midH-Math.sin(t*Math.PI*2)*amp*0.7;
+            }else if(lv.id==='loop'){
+                y=midH-Math.sin(t*Math.PI*3)*amp*0.6;
+            }else if(lv.id==='spiral'){
+                y=lv.startH+t*(lv.endH-lv.startH)+Math.sin(t*Math.PI*6)*40;
+            }else if(lv.id==='jump'){
+                if(t<0.55)y=midH-Math.sin(t*Math.PI*1.8)*amp*0.8;
+                else if(t>0.7)y=midH-Math.sin((t-0.3)*Math.PI*1.5)*amp*0.7;
+                else y=300;
+            }else{
+                y=midH-Math.sin(t*Math.PI)*amp*0.8;
+            }
+            y=Math.max(lv.minH,Math.min(lv.maxH,y));
+        }
+        G.nodes.push({x:x,y:y});
+    }
+}
+
+function getTrackPoint(t){
+    const n=G.nodes.length;
+    if(n<2)return{x:W/2,y:H/2};
+    const seg=(n-1)*t;
+    const i=Math.min(n-2,Math.floor(seg));
+    const f=seg-i;
+    const a=G.nodes[i],b=G.nodes[i+1];
+    return{
+        x:a.x+(b.x-a.x)*f,
+        y:a.y+(b.y-a.y)*f
+    };
+}
+
+function getTrackPoints(){
+    const pts=[];
+    for(let i=0;i<=200;i++){
+        pts.push(getTrackPoint(i/200));
+    }
+    return pts;
+}
+
+function releaseBall(){
+    if(G.running)return;
+    sfxRelease();
+    G.running=true;
+    G.runTime=0;
+    G.trail=[];
+    G.simulationResults=null;
+    const start=G.nodes[0];
+    G.ball={
+        x:start.x,
+        y:start.y+20,
+        vx:0,
+        vy:0,
+        onTrack:true,
+        t:0,
+        angle:0,
+        rotation:0,
+        passed:0,
+        escaped:false,
+        finished:false
+    };
+}
+
+function resetBall(){
+    G.running=false;
+    G.ball=null;
+    G.runTime=0;
+    G.trail=[];
+    G.simulationResults=null;
+    G.resultMsg='';
+    sfxClick();
+}
+
+function simulateBall(){
+    if(!G.ball)return;
+    G.runTime++;
+    const lv=LEVELS[G.currentLevel];
+    const b=G.ball;
+
+    if(b.onTrack&&!b.escaped){
+        const trackT=Math.min(1,b.t+0.004+b.vx*0.0003);
+        b.t=trackT;
+        const p=getTrackPoint(trackT);
+        const p2=getTrackPoint(Math.min(1,trackT+0.002));
+        const dx=p2.x-p.x,dy=p2.y-p.y;
+        const dist=Math.hypot(dx,dy)+0.001;
+        const speed=0.8+Math.max(0,(p.y-b.y))*0.02;
+        b.vx=dx/dist*speed;
+        b.vy=dy/dist*speed+GRAVITY*0.3;
+        b.x=p.x;
+        b.y=p.y+BALL_R;
+        b.angle=Math.atan2(dy,dx);
+        
+        if(lv.hasJump){
+            if(b.x>lv.gapStart&&b.x<lv.gapEnd&&b.y>200){
+                b.escaped=true;
+                b.onTrack=false;
+            }
+        }
+        
+        if(lv.loop){
+            const lc=lv.loopCenter;
+            const dToC=Math.hypot(b.x-lc.x,b.y-lc.y);
+            if(dToC<lv.loopRadius+30&&b.y<lc.y){
+                const neededV=Math.sqrt(9.8*lv.loopRadius*0.1);
+                const curV=Math.hypot(b.vx,b.vy);
+                if(curV<neededV){
+                    b.escaped=true;
+                    b.onTrack=false;
+                    sfxFail();
+                    G.resultMsg='向心力不足！脱轨了 💥';
+                }else{
+                    sfxLoop();
+                }
+            }
+        }
+        
+        if(trackT>=0.995){
+            b.finished=true;
+            evaluateRun(true);
+            return;
+        }
+    }else{
+        b.vy+=GRAVITY;
+        b.vx*=FRICTION;
+        b.x+=b.vx*2;
+        b.y+=b.vy*2;
+        b.rotation+=b.vx*0.1;
+        
+        const pts=getTrackPoints();
+        let reattach=false;
+        for(let i=0;i<pts.length;i++){
+            const d=Math.hypot(b.x-pts[i].x,b.y-pts[i].y);
+            if(d<20&&b.vy>0){
+                if(lv.hasJump&&((pts[i].x<lv.gapStart)||(pts[i].x>lv.gapEnd))){
+                    reattach=true;
+                    b.onTrack=true;
+                    b.escaped=false;
+                    b.t=i/pts.length;
+                    break;
+                }
+            }
+        }
+        
+        if(b.y>H+50||b.x<-50||b.x>W+50){
+            evaluateRun(false);
+            sfxCrash();
+            return;
+        }
+    }
+    
+    G.trail.push({x:b.x,y:b.y});
+    if(G.trail.length>80)G.trail.shift();
+    b.rotation+=b.vx*0.05;
+}
+
+function evaluateRun(success){
+    const lv=LEVELS[G.currentLevel];
+    const startH=G.nodes[0].y;
+    const endH=G.nodes[G.nodes.length-1].y;
+    const b=G.ball;
+    
+    let score=0;
+    let stars=0;
+    let details='';
+    
+    if(success){
+        score=60;
+        
+        const startPE=startH*1.0;
+        const endPE=endH*1.0;
+        const vFinal=Math.hypot(b.vx,b.vy);
+        const endKE=vFinal*vFinal*0.5;
+        const energyLoss=Math.abs((startPE)-(endPE+endKE))/startPE;
+        const energyScore=Math.max(0,25-energyLoss*200);
+        score+=energyScore;
+        details+='能量守恒: +'+energyScore.toFixed(0)+'分\n';
+        
+        if(lv.loop){
+            score+=5;
+            details+='完成回环: +5分\n';
+        }
+        if(lv.hasJump){
+            score+=5;
+            details+='飞跃间隙: +5分\n';
+        }
+        const targetSpeed=8;
+        const speedDiff=Math.abs(vFinal-targetSpeed)/targetSpeed;
+        const sScore=Math.max(0,10-speedDiff*20);
+        score+=sScore;
+        details+='速度控制: +'+sScore.toFixed(0)+'分';
+        
+        stars=score>=lv.targetScore+10?3:score>=lv.targetScore?2:1;
+        
+        G.resultMsg='🎉 成功到达! 得分: '+score.toFixed(0);
+        sfxScore();
+    }else{
+        score=Math.max(0,20-G.runTime*0.05);
+        stars=0;
+        G.resultMsg='💥 脱轨失败! 得分: '+score.toFixed(0);
+        sfxFail();
+    }
+    
+    G.score+=Math.floor(score);
+    G.simulationResults={
+        success:success,
+        score:score,
+        stars:stars,
+        details:details,
+        time:G.runTime
+    };
+    if(!G.levelStars[G.currentLevel]||G.levelStars[G.currentLevel]<stars){
+        G.levelStars[G.currentLevel]=stars;
+        Storage.save('coaster_stars',G.levelStars);
+    }
+    G.totalStars=G.levelStars.reduce((s,x)=>s+(x||0),0);
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        Storage.save('coaster_highscore',G.highScore);
+    }
+    
+    setTimeout(()=>{G.running=false;},100);
+}
+
+function nextLevel(){
+    if(G.currentLevel<LEVELS.length-1){
+        G.currentLevel++;
+        initNodes();
+        resetBall();
+        sfxClick();
+    }else{
+        endGame();
+    }
+}
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.currentLevel=0;
+    G.score=0;
+    initNodes();
+    resetBall();
+    G.paused=false;
+    G.principleOpen=false;
+    sfxStart();
+}
+
+function endGame(){
+    G.state=STATE_OVER;
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        Storage.save('coaster_highscore',G.highScore);
+    }
+    sfxScore();
+}
+
+function togglePause(){
+    G.paused=!G.paused;
+    sfxClick();
+}
+
+function drawEnergyLesson(ctx){
+    const cx=W/2,cy=400;
+    ctx.fillStyle='rgba(2,12,28,0.96)';ctx.fillRect(cx-250,cy-280,500,560);
+    ctx.strokeStyle='#fdd835';ctx.lineWidth=4;ctx.strokeRect(cx-250,cy-280,500,560);
+    ctx.fillStyle='#fdd835';ctx.font='bold 26px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('⚡ 能量守恒定理 · 过山车的灵魂',cx,cy-245);
+    const items=[
+        ['① 机械能=动能+势能','E = ½mv² + mgh','💫 全程守恒! 能量不会消失只会转换!','#ff9800'],
+        ['② 最高点: 势能最大','E势能 = mgh','h越大 → 势能越大, 速度=0动能=0','#e91e63'],
+        ['③ 最低点: 动能最大','E动能 = ½mv²','势能全转动能, 这里速度最快!','#4caf50'],
+        ['④ 为什么第二个坡更低?','克服摩擦损耗','摩擦/空气阻力→热能声能,所以越来越慢','#2196f3'],
+        ['⑤ 速度理论公式','v = √(2gΔh)','下落10米→约14m/s=50km/h!','#9c27b0'],
+        ['⑥ 离心力=向心力','N = mg + mv²/r','过弯时人被"压"在椅子上,所以不会掉!','#00bcd4'],
+    ];
+    for(let i=0;i<items.length;i++){
+        const it=items[i];
+        const y=cy-200+i*80;
+        ctx.fillStyle=i%2===0?'rgba(255,255,255,0.04)':'rgba(255,255,255,0.08)';
+        ctx.fillRect(cx-230,y-30,460,70);
+        ctx.strokeStyle=it[3];ctx.lineWidth=2;ctx.strokeRect(cx-230,y-30,460,70);
+        ctx.fillStyle=it[3];ctx.font='bold 14px Microsoft YaHei';ctx.textAlign='left';
+        ctx.fillText(it[0],cx-215,y-2);
+        ctx.fillStyle='#fff';ctx.font='bold 12px Microsoft YaHei';
+        ctx.fillText('公式: '+it[1],cx-215,y+16);
+        ctx.fillStyle='#bdbdbd';ctx.font='11px Microsoft YaHei';
+        ctx.fillText(it[2],cx-215,y+32);
+    }
+    ctx.fillStyle='#ffca28';ctx.font='bold 14px Microsoft YaHei';ctx.textAlign='center';
+    ctx.fillText('🎢 设计原则: 第一个坡永远最高! 否则车回不来!',cx,cy+265);
+    ctx.lineWidth=1;
+}
+
+function drawPhysicsTips(ctx){
+    const tips=[
+        ['重力加速度 g = 9.8 m/s² ≈ 10','地球万有引力'],
+        ['质量 m','越重车惯性越大，但势能也越大'],
+        ['摩擦系数 μ','铁轮0.003, 橡胶轮0.02, 冰面0.0005'],
+        ['圆轨道速度要求','v ≥ √(gr) 才能过圆环不落地'],
+    ];
+    const cx=W/2,cy=260;
+    ctx.fillStyle='rgba(0,0,0,0.8)';ctx.fillRect(cx-180,cy-15,360,82);
+    ctx.strokeStyle='#81d4fa';ctx.lineWidth=2;ctx.strokeRect(cx-180,cy-15,360,82);
+    for(let i=0;i<tips.length;i++){
+        const t=tips[i],x=cx-170+(i%2)*180,y=cy+8+Math.floor(i/2)*30;
+        ctx.fillStyle='#81d4fa';ctx.font='bold 10px Microsoft YaHei';ctx.textAlign='left';
+        ctx.fillText(t[0],x,y);
+        ctx.fillStyle='#ddd';ctx.font='9px Microsoft YaHei';
+        ctx.fillText(t[1],x,y+12);
+    }
+    ctx.lineWidth=1;
+}
+
+function drawSafetyGuide(ctx){
+    const cx=W/2,cy=680;
+    ctx.fillStyle='rgba(0,0,0,0.8)';ctx.fillRect(cx-220,cy-30,440,50);
+    ctx.strokeStyle='#ef5350';ctx.lineWidth=2;ctx.strokeRect(cx-220,cy-30,440,50);
+    const safes=[
+        ['🎢世界最高','阿联酋Formula Rossa,149km/h!'],
+        ['🎯首个过山车','俄罗斯18世纪冰滑梯,约50km/h'],
+        ['⚠️安全须知','心脏病高血压孕妇禁止乘坐!'],
+        ['🔒安全压杆','压不到锁死位?请立刻喊工作人员!']
+    ];
+    for(let i=0;i<safes.length;i++){
+        const s=safes[i],x=cx-210+i*110;
+        ctx.fillStyle='#ef5350';ctx.font='bold 9px Microsoft YaHei';ctx.textAlign='left';
+        ctx.fillText(s[0],x,cy-10);
+        ctx.fillStyle='#fff';ctx.font='8px Microsoft YaHei';
+        ctx.fillText(s[1],x,cy+3);
+    }
+    ctx.lineWidth=1;
+}
+
+function update(){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    G.animationFrame++;
+    if(G.running){
+        simulateBall();
+    }
+}
+
+function drawBackground(ctx){
+    const grd=ctx.createLinearGradient(0,0,0,H);
+    grd.addColorStop(0,'#0a1628');
+    grd.addColorStop(0.5,'#1a2a4a');
+    grd.addColorStop(1,'#2a3a5a');
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,0.4)';
+    for(let i=0;i<50;i++){
+        const sx=(i*97+G.animationFrame*0.05)%W;
+        const sy=(i*53)%(H*0.5);
+        const r=(i%3)+1;
+        ctx.globalAlpha=0.3+Math.sin(G.animationFrame*0.02+i)*0.2;
+        ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#1a3a2a';
+    ctx.beginPath();
+    ctx.moveTo(0,H-60);
+    for(let x=0;x<=W;x+=40){
+        ctx.lineTo(x,H-60-Math.sin(x*0.02)*20-Math.sin(x*0.05)*10);
+    }
+    ctx.lineTo(W,H);ctx.lineTo(0,H);
+    ctx.closePath();ctx.fill();
+}
+
+function drawTrack(ctx){
+    const lv=LEVELS[G.currentLevel];
+    const pts=getTrackPoints();
+    if(lv.hasJump){
+        ctx.save();
+        ctx.setLineDash([8,8]);
+        ctx.strokeStyle='rgba(255,100,100,0.5)';
+        ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.moveTo(lv.gapStart,250);ctx.lineTo(lv.gapStart,H-80);
+        ctx.moveTo(lv.gapEnd,250);ctx.lineTo(lv.gapEnd,H-80);
+        ctx.stroke();
+        ctx.restore();
+    }
+    if(lv.loop){
+        const lc=lv.loopCenter;
+        ctx.strokeStyle='rgba(255,215,0,0.2)';
+        ctx.lineWidth=1;
+        ctx.setLineDash([4,4]);
+        ctx.beginPath();ctx.arc(lc.x,lc.y,lv.loopRadius,0,Math.PI*2);ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    ctx.strokeStyle='#334';
+    ctx.lineWidth=16;
+    ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.beginPath();
+    let drawing=!lv.hasJump;
+    if(!lv.hasJump){ctx.moveTo(pts[0].x,pts[0].y);}
+    for(let i=0;i<pts.length;i++){
+        if(lv.hasJump){
+            const px=pts[i].x;
+            if(px<lv.gapStart||px>lv.gapEnd){
+                if(!drawing){
+                    ctx.moveTo(pts[i].x,pts[i].y);
+                    drawing=true;
+                }else{
+                    ctx.lineTo(pts[i].x,pts[i].y);
+                }
+            }else{
+                drawing=false;
+            }
+        }else{
+            ctx.lineTo(pts[i].x,pts[i].y);
+        }
+    }
+    ctx.stroke();
+    const trkGrad=ctx.createLinearGradient(0,100,0,600);
+    trkGrad.addColorStop(0,'#ff6b6b');
+    trkGrad.addColorStop(0.5,'#ffd93d');
+    trkGrad.addColorStop(1,'#6bcB77');
+    ctx.strokeStyle=trkGrad;
+    ctx.lineWidth=8;
+    ctx.beginPath();
+    drawing=!lv.hasJump;
+    if(!lv.hasJump){ctx.moveTo(pts[0].x,pts[0].y);}
+    for(let i=0;i<pts.length;i++){
+        if(lv.hasJump){
+            const px=pts[i].x;
+            if(px<lv.gapStart||px>lv.gapEnd){
+                if(!drawing){
+                    ctx.moveTo(pts[i].x,pts[i].y);
+                    drawing=true;
+                }else{
+                    ctx.lineTo(pts[i].x,pts[i].y);
+                }
+            }else{
+                drawing=false;
+            }
+        }else{
+            ctx.lineTo(pts[i].x,pts[i].y);
+        }
+    }
+    ctx.stroke();
+    ctx.lineCap='butt';ctx.lineJoin='miter';
+}
+
+function drawNodes(ctx){
+    for(let i=0;i<G.nodes.length;i++){
+        const n=G.nodes[i];
+        const isEnd=i===G.nodes.length-1;
+        const isStart=i===0;
+        const isSel=i===G.selectedNode;
+        const isMovable=i>0&&i<G.nodes.length-1;
+        ctx.fillStyle=isStart?'#66bb6a':isEnd?'#ef5350':isMovable?'#42a5f5':'#999';
+        ctx.beginPath();ctx.arc(n.x,n.y,isSel?15:12,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle=isSel?'#fff':'rgba(255,255,255,0.5)';
+        ctx.lineWidth=isSel?3:2;ctx.stroke();
+        ctx.fillStyle='#fff';
+        ctx.font='bold 11px Arial';
+        ctx.textAlign='center';
+        if(isStart)ctx.fillText('起',n.x,n.y+4);
+        else if(isEnd)ctx.fillText('终',n.x,n.y+4);
+    }
+    ctx.textAlign='left';
+}
+
+function drawBall(ctx){
+    if(!G.ball)return;
+    const b=G.ball;
+    if(G.trail.length>1){
+        ctx.strokeStyle='rgba(255,215,0,0.4)';
+        ctx.lineWidth=3;
+        ctx.beginPath();
+        ctx.moveTo(G.trail[0].x,G.trail[0].y);
+        for(let i=1;i<G.trail.length;i++){
+            ctx.globalAlpha=i/G.trail.length*0.6;
+            ctx.lineTo(G.trail[i].x,G.trail[i].y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha=1;
+    }
+    ctx.save();
+    ctx.translate(b.x,b.y);
+    ctx.rotate(b.rotation);
+    ctx.fillStyle='#e94560';
+    ctx.beginPath();ctx.arc(0,0,BALL_R,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+    ctx.strokeStyle='#333';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(-BALL_R,0);ctx.lineTo(BALL_R,0);
+    ctx.moveTo(0,-BALL_R);ctx.lineTo(0,BALL_R);ctx.stroke();
+    ctx.restore();
+}
+
+function drawEnergyBar(ctx){
+    if(!G.running||!G.ball)return;
+    const lv=LEVELS[G.currentLevel];
+    const startH=G.nodes[0].y;
+    const b=G.ball;
+    const curH=Math.max(0,b.y);
+    const pe=Math.max(0,(H-100-b.y)/(H-150))*100;
+    const v=Math.hypot(b.vx,b.vy);
+    const ke=Math.min(100,v*8);
+    const total=pe+ke;
+    const bx=W-90,by=150,bw=50,bh=200;
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    roundRect(ctx,bx-5,by-25,bw+10,bh+60,8);ctx.fill();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 11px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('能量',bx+bw/2,by-10);
+    ctx.fillStyle='rgba(255,255,255,0.2)';
+    ctx.fillRect(bx,by,bw/2-2,bh);
+    ctx.fillRect(bx+bw/2+2,by,bw/2-2,bh);
+    ctx.fillStyle='#e91e63';
+    ctx.fillRect(bx,by+bh*(1-pe/100),bw/2-2,bh*pe/100);
+    ctx.fillStyle='#2196f3';
+    ctx.fillRect(bx+bw/2+2,by+bh*(1-ke/100),bw/2-2,bh*ke/100);
+    ctx.fillStyle='#fff';
+    ctx.font='9px Arial';
+    ctx.fillText('PE',bx+bw/4,by+bh+15);
+    ctx.fillText('KE',bx+bw*3/4,by+bh+15);
+    ctx.textAlign='left';
+}
+
+function drawHUD(ctx){
+    const lv=LEVELS[G.currentLevel];
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    roundRect(ctx,10,10,W-20,100,10);ctx.fill();
+    ctx.fillStyle='#00d9ff';
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText(lv.emoji+' '+lv.name,25,38);
+    ctx.fillStyle='#ccc';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText(lv.desc,25,58);
+    ctx.fillStyle=G.running?'#ff9800':'#4caf50';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText(G.running?'⏱ 运行中...':'🎯 拖动蓝点调整轨道',25,82);
+    ctx.textAlign='right';
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('得分: '+G.score,W-25,38);
+    ctx.fillStyle='#fff';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText('关卡: '+(G.currentLevel+1)+'/'+LEVELS.length,W-25,58);
+    G.totalStars=G.levelStars.reduce((s,x)=>s+(x||0),0);
+    ctx.fillText('⭐'+G.totalStars+'/'+(LEVELS.length*3),W-25,80);
+    ctx.textAlign='left';
+    drawBtn(ctx,W-145,83,55,22,'原理','showPrinciple','#5c6bc0','#fff');
+    drawBtn(ctx,W-85,83,60,22,'暂停','pauseBtn','#e94560','#fff');
+    
+    if(!G.running&&!G.simulationResults){
+        drawBtn(ctx,25,115,120,35,'▶ 释放小球','release','#4caf50','#fff');
+        drawBtn(ctx,155,115,120,35,'↻ 重置设计','reset','#ff9800','#fff');
+    }
+    if(G.simulationResults){
+        const r=G.simulationResults;
+        ctx.fillStyle=r.success?'rgba(76,175,80,0.3)':'rgba(233,69,96,0.3)';
+        roundRect(ctx,25,115,W-50,90,8);ctx.fill();
+        ctx.strokeStyle=r.success?'#4caf50':'#e94560';ctx.lineWidth=2;ctx.stroke();
+        ctx.fillStyle=r.success?'#4caf50':'#e94560';
+        ctx.font='bold 16px "Microsoft YaHei"';
+        ctx.textAlign='left';
+        ctx.fillText(r.success?'🎉 成功到达终点!':'💥 运行失败',40,142);
+        ctx.fillStyle='#ffd700';
+        ctx.font='bold 20px Arial';
+        for(let i=0;i<3;i++){
+            const starX=40+i*30;
+            ctx.globalAlpha=i<r.stars?1:0.2;
+            ctx.fillText('⭐',starX,172);
+        }
+        ctx.globalAlpha=1;
+        ctx.fillStyle='#fff';
+        ctx.font='bold 16px "Microsoft YaHei"';
+        ctx.textAlign='right';
+        ctx.fillText(r.score.toFixed(0)+' 分',W-50,155);
+        ctx.font='11px "Microsoft YaHei"';
+        ctx.fillStyle='#ccc';
+        const lines=r.details.split('\n');
+        for(let i=0;i<Math.min(3,lines.length);i++){
+            ctx.fillText(lines[i],W-50,178+i*14);
+        }
+        ctx.textAlign='left';
+        drawBtn(ctx,W-110,185,85,28,'下一关 ▶','nextLevel','#00d9ff');
+    }
+    if(G.resultMsg&&!G.simulationResults){
+        ctx.fillStyle=G.resultMsg.indexOf('失败')>=0||G.resultMsg.indexOf('不足')>=0?'#f44336':'#4caf50';
+        ctx.font='bold 15px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(G.resultMsg,W/2,165);
+        ctx.textAlign='left';
+    }
+    drawEnergyBar(ctx);
+}
+
+function drawMenu(ctx){
+    drawBackground(ctx);
+    const lv=LEVELS[G.currentLevel];
+    ctx.fillStyle='#fff';
+    ctx.font='bold 44px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('🎢 物理过山车',W/2,100);
+    ctx.fillStyle='#00d9ff';
+    ctx.font='18px Arial';
+    ctx.fillText('PHYSICS ROLLER COASTER',W/2,130);
+    ctx.save();
+    ctx.translate(W/2,270);
+    const demoT=G.animationFrame*0.01;
+    for(let i=0;i<5;i++){
+        const x=-200+i*100;
+        const y=Math.sin(demoT+i)*60;
+        ctx.fillStyle=['#e94560','#ffd93d','#6bcB77','#4dabf7','#9775fa'][i];
+        ctx.globalAlpha=0.7;
+        ctx.beginPath();ctx.arc(x,y,12,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    ctx.restore();
+    ctx.strokeStyle='#00d9ff';ctx.lineWidth=3;
+    ctx.beginPath();
+    for(let i=0;i<=50;i++){
+        const t=i/50;
+        const x=80+t*(W-160);
+        const y=350-Math.sin(t*Math.PI*2)*80;
+        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    drawBtn(ctx,W/2-150,195,40,35,'◀','selectLeft','#5c6bc0','#fff');
+    drawBtn(ctx,W/2+110,195,40,35,'▶','selectRight','#5c6bc0','#fff');
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText((G.currentLevel+1)+'. '+lv.name,W/2,395);
+    ctx.fillStyle='#ddd';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText(lv.desc,W/2,420);
+    ctx.fillStyle='#aaa';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText(lv.nodes+' 节点 · 目标分 ≥ '+lv.targetScore,W/2,443);
+    drawBtn(ctx,W/2-100,475,200,55,'🎢 开始设计','start','#00d9ff');
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('🏆 最高分: '+G.highScore,W/2,555);
+    G.totalStars=G.levelStars.reduce((s,x)=>s+(x||0),0);
+    if(G.totalStars>0){
+        ctx.fillStyle='#ffd700';
+        ctx.font='14px "Microsoft YaHei"';
+        ctx.fillText('⭐ 累计星数: '+G.totalStars+' / '+(LEVELS.length*3),W/2,580);
+    }
+    ctx.fillStyle='#aaa';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('游戏玩法:',W/2,620);
+    ctx.fillText('• 拖动蓝色节点调整轨道高度/位置',W/2,643);
+    ctx.fillText('• 点击「释放小球」测试你的设计',W/2,663);
+    ctx.fillText('• 让小球安全到达终点旗',W/2,683);
+    ctx.fillText('• 能量守恒越完整、分数越高！',W/2,703);
+    ctx.fillStyle='#888';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('⌨️ 空格/回车 释放小球 | R 重置 | ESC 暂停',W/2,745);
+    ctx.fillText('🖱️ 鼠标拖拽 | 📱 触屏拖动节点',W/2,765);
+    ctx.textAlign='left';
+}
+
+function drawPrinciplePopup(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.85)';
+    ctx.fillRect(0,0,W,H);
+    const lv=LEVELS[G.currentLevel];
+    const px=30,py=160,pw=W-60,ph=H-280;
+    ctx.fillStyle='#0a1628';
+    roundRect(ctx,px,py,pw,ph,16);ctx.fill();
+    ctx.strokeStyle='#00d9ff';ctx.lineWidth=3;ctx.stroke();
+    ctx.fillStyle='#00d9ff';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(lv.emoji+' '+lv.name+' - 物理原理',W/2,py+45);
+    ctx.strokeStyle='rgba(0,217,255,0.3)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(px+30,py+65);ctx.lineTo(px+pw-30,py+65);ctx.stroke();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('📐 核心公式:',px+25,py+100);
+    ctx.fillStyle='#00d9ff';
+    ctx.font='bold 15px Consolas,monospace';
+    ctx.fillText(lv.formula,px+25,py+128);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('📚 原理说明:',px+25,py+170);
+    ctx.fillStyle='#ccc';
+    ctx.font='14px "Microsoft YaHei"';
+    const lines=wrapText(ctx,lv.principle,pw-50);
+    let ly=py+200;
+    for(const l of lines){
+        ctx.fillText(l,px+25,ly);ly+=24;
+    }
+    ly+=10;
+    ctx.fillStyle='#4caf50';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('💡 设计要点:',px+25,ly);ly+=28;
+    ctx.fillStyle='#a5d6a7';
+    ctx.font='14px "Microsoft YaHei"';
+    const tips=lv.id==='loop'
+        ?['起点必须远高于环顶(至少>2.5R)','保证回环最高点 v>√(gR)','减小回环前的摩擦损失']
+        :lv.id==='jump'
+        ?['起跳前加速下坡获得大v₀','计算平抛距离 d=v₀√(2h/g)','起跳点不要太高(下落时间够)']
+        :['起终点落差越大→末速度越大','中间峰不能超过起点高','平缓曲线→减少能量突变'];
+    for(const t of tips){ctx.fillText('• '+t,px+25,ly);ly+=24;}
+    drawBtn(ctx,W/2-60,py+ph-50,120,40,'明白了 ✓','closePrinciple','#4caf50','#fff');
+}
+
+function wrapText(ctx,text,maxWidth){
+    const lines=[];
+    let current='';
+    for(const ch of text){
+        const test=current+ch;
+        if(ctx.measureText(test).width>maxWidth&&current.length>0){
+            lines.push(current);
+            current=ch;
+        }else{
+            current=test;
+        }
+    }
+    if(current)lines.push(current);
+    return lines;
+}
+
+function drawGame(ctx){
+    drawBackground(ctx);
+    drawTrack(ctx);
+    drawNodes(ctx);
+    drawBall(ctx);
+    drawHUD(ctx);
+    if(G.paused){
+        drawPause(ctx);
+    }
+    if(G.principleOpen){
+        drawPrinciplePopup(ctx);
+    }
+}
+
+function drawPause(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.75)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 46px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('⏸ 暂停中',W/2,H/2-60);
+    drawBtn(ctx,W/2-90,H/2,180,55,'▶ 继续设计','resume','#00d9ff');
+    drawBtn(ctx,W/2-75,H/2+80,150,45,'🏠 返回菜单','quit','#78909c','#fff');
+    ctx.fillStyle='#888';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('按 ESC 键可快速继续',W/2,H/2+150);
+    ctx.textAlign='left';
+}
+
+function drawGameOver(ctx){
+    ctx.fillStyle='#050a14';
+    ctx.fillRect(0,0,W,H);
+    const grd=ctx.createRadialGradient(W/2,H*0.3,20,W/2,H*0.3,300);
+    grd.addColorStop(0,'rgba(0,217,255,0.15)');
+    grd.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+    const isNew=G.score>=G.highScore&&G.score>0;
+    ctx.fillStyle=isNew?'#ffd700':'#00d9ff';
+    ctx.font='bold 44px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(isNew?'🎉 新纪录！':'🏆 设计报告',W/2,120);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('最终得分',W/2,190);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 80px Arial';
+    ctx.fillText(G.score,W/2,280);
+    ctx.fillStyle='#aaa';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('历史最高分: '+G.highScore,W/2,315);
+    G.totalStars=G.levelStars.reduce((s,x)=>s+(x||0),0);
+    const pct=LEVELS.length>0?Math.round((G.levelStars.filter(x=>x>0).length/LEVELS.length)*100):0;
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    const medal=G.totalStars>=LEVELS.length*2.5?'🏅 顶级工程师！':G.totalStars>=LEVELS.length*1.5?'🥈 优秀设计师':'🎖️ 初级学徒';
+    ctx.fillText('⭐ '+G.totalStars+' / '+(LEVELS.length*3)+'  '+medal,W/2,360);
+    ctx.fillStyle='#4fc3f7';
+    ctx.font='16px "Microsoft YaHei"';
+    ctx.fillText('通关进度: '+pct+'% ('+G.levelStars.filter(x=>x>0).length+'/'+LEVELS.length+' 关卡)',W/2,395);
+    const avgStars=LEVELS.length>0?(G.totalStars/LEVELS.length):0;
+    ctx.fillStyle='#a5d6a7';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('平均星级: '+(avgStars>0?avgStars.toFixed(1):'0.0')+' ⭐/关',W/2,425);
+    drawBtn(ctx,W/2-95,475,190,55,'🔄 再来一次','restart','#00d9ff');
+    drawBtn(ctx,W/2-80,550,160,45,'🏠 返回菜单','menu','#5c6bc0','#fff');
+    ctx.fillStyle='#888';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('⌨️ 按空格/回车键重新挑战',W/2,640);
+    ctx.fillStyle='#666';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('掌握物理原理，设计完美过山车！🎢',W/2,700);
+    ctx.textAlign='left';
+}
+
+function draw(){
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+        case STATE_PAUSE: drawGame(ctx); break;
+    }
+}
+
+let rafId=null;
+function gameLoop(){
+    rafId=requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+initNodes();
+gameLoop();
+
+})();
+</script>
+
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

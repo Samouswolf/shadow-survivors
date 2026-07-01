@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>保龄球大师</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#2b2d42;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#06d6a0;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始游戏</button>
+<canvas id="c"></canvas>
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+const W=480,H=720;
+const BALL_R=14;
+const PIN_R=10;
+const LANE_L=W/2-120,LANE_R=W/2+120;
+const PIN_ROW_Y=140;
+const FRICTION=0.985;
+const FRICTION_SIDE=0.97;
+const PIN_SPACING_X=28,PIN_SPACING_Y=24;
+let audioCtx=null;
+function initAudio(){if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;try{
+        const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+        o.type=type||'square';o.frequency.value=freq;
+        g.gain.value=vol||0.15;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxRoll(){playTone(80,0.05,'sawtooth',0.06)}
+function sfxStrike(){
+    playTone(200,0.08,'square',0.18);setTimeout(()=>playTone(150,0.1,'sawtooth',0.2),60);
+    setTimeout(()=>playTone(523,0.15,'sine',0.2),140);setTimeout(()=>playTone(659,0.15,'sine',0.2),240);
+    setTimeout(()=>playTone(784,0.25,'sine',0.22),340);
+}
+function sfxHit(){playTone(180,0.06,'square',0.18)}
+function sfxSpare(){playTone(440,0.1,'sine',0.2);setTimeout(()=>playTone(659,0.2,'sine',0.2),100)}
+function sfxBump(){playTone(120,0.05,'sawtooth',0.12)}
+function sfxBtn(){playTone(600,0.06,'sine',0.1)}
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){const r=W/H;let cw=window.innerWidth,ch=window.innerHeight;if(cw/ch>r)ch=cw/r;else cw=ch*r;canvas.width=cw;canvas.height=ch;scale=cw/W;ctx.setTransform(scale,0,0,scale,0,0);}
+window.addEventListener('resize',resize);resize();
+function Pin(x,y,id){this.x=x;this.y=y;this.baseY=y;this.id=id;this.vx=0;this.vy=0;this.vr=0;this.r=0;this.standing=true;this.z=0;}
+Pin.prototype.update=function(){
+    if(!this.standing){
+        this.vx*=FRICTION_SIDE;this.vy*=FRICTION_SIDE;this.vr*=0.95;
+        this.x+=this.vx;this.y+=this.vy;this.r+=this.vr;
+        this.z-=0.15;if(this.z<0)this.z=0;
+        if(this.x<LANE_L+10){this.x=LANE_L+10;this.vx*=-0.4;sfxBump();}
+        if(this.x>LANE_R-10){this.x=LANE_R-10;this.vx*=-0.4;sfxBump();}
+    }
+};
+Pin.prototype.hit=function(vx,vy){
+    if(!this.standing)return;
+    const p=Math.hypot(vx,vy);
+    if(p<1.2)return;
+    this.standing=false;
+    this.vx=vx*0.7+(Math.random()-0.5)*4;
+    this.vy=vy*0.6+(Math.random()-0.5)*3;
+    this.vr=(Math.random()-0.5)*0.5;
+    this.z=0.5;
+    sfxHit();
+};
+Pin.prototype.draw=function(ctx){
+    if(!this.standing){
+        ctx.save();ctx.translate(this.x,this.y+this.z*10);ctx.rotate(this.r);
+        const col='#e9c46a';
+        ctx.fillStyle=col;ctx.fillRect(-8,-6,16,18);
+        ctx.beginPath();ctx.arc(0,-8,9,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#e76f51';ctx.fillRect(-7,0,14,3);ctx.fillRect(-7,8,14,3);
+        ctx.strokeStyle='#8b5a2b';ctx.lineWidth=1;ctx.strokeRect(-8,-6,16,18);
+        ctx.restore();
+        return;
+    }
+    ctx.fillStyle='rgba(0,0,0,0.3)';
+    ctx.beginPath();ctx.ellipse(this.x,this.y+12,PIN_R*0.9,PIN_R*0.25,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#e9c46a';
+    ctx.beginPath();ctx.moveTo(this.x-8,this.y-20);ctx.quadraticCurveTo(this.x-12,this.y-5,this.x-7,this.y+12);
+    ctx.lineTo(this.x+7,this.y+12);ctx.quadraticCurveTo(this.x+12,this.y-5,this.x+8,this.y-20);
+    ctx.quadraticCurveTo(this.x,this.y-28,this.x-8,this.y-20);ctx.fill();
+    ctx.strokeStyle='#b08968';ctx.lineWidth=1.2;ctx.stroke();
+    ctx.fillStyle='#e76f51';
+    ctx.fillRect(this.x-7,this.y-10,14,2);ctx.fillRect(this.x-7,this.y-2,14,2);ctx.fillRect(this.x-7,this.y+4,14,2);
+    ctx.fillStyle='#f8f9fa';ctx.beginPath();ctx.arc(this.x,this.y-18,6,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#b08968';ctx.lineWidth=1;ctx.stroke();
+};
+function createPins(){
+    const pins=[];const rows=[1,2,3,4];let id=0;
+    const startX=W/2,startY=PIN_ROW_Y;
+    for(let r=0;r<4;r++){
+        const cnt=rows[r];
+        const firstX=startX-(cnt-1)*PIN_SPACING_X/2;
+        for(let c=0;c<cnt;c++){
+            pins.push(new Pin(firstX+c*PIN_SPACING_X,startY-r*PIN_SPACING_Y,id++));
+        }
+    }
+    return pins;
+}
+function Ball(){this.reset()}
+Ball.prototype.reset=function(){
+    this.x=W/2;this.y=H-90;this.vx=0;this.vy=0;this.rolling=false;this.spin=0;this.rot=0;
+}
+Ball.prototype.throw=function(vx,vy,spin){
+    this.vx=vx;this.vy=-vy;this.spin=spin;this.rolling=true;
+    sfxRoll();
+}
+Ball.prototype.update=function(pins){
+    if(!this.rolling)return;
+    this.vy*=FRICTION;this.vx+=(this.spin)*0.025;
+    this.vx*=FRICTION_SIDE;
+    if(this.y<PIN_ROW_Y-80){this.vy*=0.98;}
+    this.x+=this.vx;this.y+=this.vy;
+    this.rot+=this.vy*0.06+this.vx*0.05;
+    if(Math.abs(this.vx)<0.1&&Math.abs(this.vy)<0.4){this.rolling=false;}
+    if(this.x<LANE_L+BALL_R){this.x=LANE_L+BALL_R;this.vx*=-0.45;sfxBump();}
+    if(this.x>LANE_R-BALL_R){this.x=LANE_R-BALL_R;this.vx*=-0.45;sfxBump();}
+    for(const pin of pins){
+        if(!pin.standing)continue;
+        const d=Math.hypot(this.x-pin.x,this.y-pin.y);
+        if(d<PIN_R+BALL_R){
+            const ang=Math.atan2(pin.y-this.y,pin.x-this.x);
+            const pv=Math.hypot(this.vx,this.vy)*1.1;
+            pin.hit(Math.cos(ang)*pv+this.vx*0.5,Math.sin(ang)*pv+this.vy*0.4);
+            this.vx*=0.85;this.vy*=0.85;
+        }
+    }
+    if(this.y<60){this.y=60;this.vy=-this.vy*0.2;this.rolling=false;}
+};
+Ball.prototype.draw=function(ctx){
+    const s=Math.max(0.5,1-this.y*0.0008);
+    ctx.fillStyle='rgba(0,0,0,0.3)';
+    ctx.beginPath();ctx.ellipse(this.x,this.y+BALL_R+4,BALL_R*1.1*s,BALL_R*0.35*s,0,0,Math.PI*2);ctx.fill();
+    ctx.save();ctx.translate(this.x,this.y);ctx.rotate(this.rot);
+    const grad=ctx.createRadialGradient(-4,-4,2,0,0,BALL_R+1);
+    grad.addColorStop(0,'#4a4e69');grad.addColorStop(1,'#22223b');
+    ctx.fillStyle=grad;ctx.beginPath();ctx.arc(0,0,BALL_R,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#06d6a0';ctx.beginPath();ctx.arc(-5,-6,3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#ef476f';ctx.beginPath();ctx.arc(5,-3,2.5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(2,5,2.8,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#118ab2';ctx.beginPath();ctx.arc(-4,4,2.5,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,BALL_R,0,Math.PI*2);ctx.stroke();
+    ctx.restore();
+};
+const G={
+    state:STATE_MENU,score:0,highScore:0,
+    frame:1,roll:1,frameScores:[],total:[],
+    pins:[],ball:null,
+    keys:{},ptrX:W/2,ptrAim:0,ptrDown:false,ptrTap:0,aimX:W/2,power:0,powerDir:1,
+    charging:false,spin:0,
+    btnRects:{},paused:false,
+    msg:'',msgLife:0,resultTimer:0,strikeAnim:0,spareAnim:0,splitFrame:false,savedScore:0,
+    awaitingSecond:false
+};
+G.highScore=parseInt(Storage.load('bowling_high','0'));
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+function drawBtn(ctx,x,y,w,h,text,name,color){
+    G.btnRects[name]={x,y,w,h};
+    ctx.fillStyle=color||'#06d6a0';ctx.strokeStyle='#fff';ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,8);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 18px "Microsoft YaHei"';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);ctx.textBaseline='alphabetic';
+}
+function hitBtn(p,name){const r=G.btnRects[name];return r&&p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+function getPos(e){const rect=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};}
+window.addEventListener('keydown',function(e){
+    G.keys[e.key.toLowerCase()]=true;
+    if(e.key===' '){e.preventDefault();if(G.state===STATE_PLAYING&&!G.paused&&!G.ball.rolling){
+        if(!G.charging){G.charging=true;G.power=0;G.powerDir=1;}
+        else{doThrow();}
+    }}
+    if(e.key==='ArrowLeft'||e.key==='a'){if(!G.ball.rolling)G.aimX=Math.max(LANE_L+BALL_R+5,G.aimX-4);}
+    if(e.key==='ArrowRight'||e.key==='d'){if(!G.ball.rolling)G.aimX=Math.min(LANE_R-BALL_R-5,G.aimX+4);}
+    if(e.key==='q'||e.key==='Q'){if(!G.ball.rolling)G.spin=Math.max(-3,G.spin-0.4);}
+    if(e.key==='e'||e.key==='E'){if(!G.ball.rolling)G.spin=Math.min(3,G.spin+0.4);}
+    if(e.key==='Escape'){if(G.state===STATE_PLAYING)togglePause();}
+    initAudio();
+});
+window.addEventListener('keyup',function(e){G.keys[e.key.toLowerCase()]=false;});
+function handlePointerDown(e){
+    initAudio();const p=getPos(e);G.ptrDown=true;G.ptrTap=Date.now();G.ptrAim=p.x;
+    if(G.state===STATE_MENU){if(hitBtn(p,'start')){startGame();return;}}
+    else if(G.state===STATE_OVER){if(hitBtn(p,'restart')){startGame();return;}if(hitBtn(p,'menu')){G.state=STATE_MENU;return;}}
+    else if(G.state===STATE_PLAYING&&!G.paused&&!G.ball.rolling&&G.resultTimer<=0){
+        if(p.y>H-250){G.aimX=Math.max(LANE_L+BALL_R+5,Math.min(LANE_R-BALL_R-5,p.x));G.charging=true;G.power=0;G.powerDir=1;}
+    }
+}
+function handlePointerMove(e){
+    if(G.ptrDown&&G.state===STATE_PLAYING){
+        const p=getPos(e);
+        if(!G.ball.rolling){
+            if(p.y>H-250){G.aimX=Math.max(LANE_L+BALL_R+5,Math.min(LANE_R-BALL_R-5,p.x));
+                const dy=H-150-p.y;G.power=Math.max(0,Math.min(100,dy*0.9));
+                G.spin=(p.x-G.aimX)*0.05;G.spin=Math.max(-3,Math.min(3,G.spin));
+            }
+        }
+    }
+}
+function handlePointerUp(e){
+    if(!G.ptrDown)return;G.ptrDown=false;
+    if(G.state===STATE_PLAYING&&!G.paused&&G.charging){doThrow();}
+}
+canvas.addEventListener('mousedown',handlePointerDown);canvas.addEventListener('mousemove',handlePointerMove);canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e);},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e);},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e);},{passive:false});
+function doThrow(){
+    if(G.ball.rolling)return;
+    const p=Math.max(4,Math.min(15,G.power*0.14+4));
+    G.ball.x=G.aimX;G.ball.throw(G.spin*0.4,p,G.spin);G.charging=false;
+}
+function startGame(){
+    initAudio();G.state=STATE_PLAYING;
+    G.score=0;G.frame=1;G.roll=1;G.frameScores=[];G.total=[];
+    G.pins=createPins();G.ball=new Ball();
+    G.charging=false;G.aimX=W/2;G.power=0;G.spin=0;G.paused=false;
+    G.msg='';G.msgLife=0;G.resultTimer=0;G.strikeAnim=0;G.spareAnim=0;G.savedScore=0;G.awaitingSecond=false;
+    for(let i=0;i<10;i++){G.frameScores.push([-1,-1]);G.total.push(-1);}
+    sfxBtn();
+}
+function togglePause(){G.paused=!G.paused;sfxBtn();}
+function countStanding(pins){let c=0;for(const p of pins)if(p.standing)c++;return c;}
+function settleRoll(){
+    const scored=10-countStanding(G.pins);
+    const f=G.frame-1;
+    if(G.roll===1){
+        G.frameScores[f][0]=scored;
+        if(scored===10){
+            G.msg='STRIKE! 全中!';G.msgLife=120;G.strikeAnim=60;sfxStrike();
+            G.savedScore=10;
+            if(G.frame<10){nextFrame();}else{G.awaitingSecond=true;G.roll=2;G.pins=createPins();G.ball.reset();}
+        }else{
+            G.roll=2;G.awaitingSecond=true;G.resultTimer=50;
+            if(scored===0){G.msg='Gutter! 洗沟';G.msgLife=50;}
+            G.ball.reset();G.ball.x=G.aimX;
+        }
+    }else{
+        G.frameScores[f][1]=scored;
+        const total1=(G.frameScores[f][0]<0?0:G.frameScores[f][0]);
+        const total2=(G.frameScores[f][1]<0?0:G.frameScores[f][1]);
+        if(total1+total2===10&&total1<10){G.msg='SPARE! 补中!';G.msgLife=120;G.spareAnim=60;sfxSpare();}
+        else if(scored===0&&G.frameScores[f][0]===0){G.msg='双洗沟 Open!';G.msgLife=50;}
+        if(G.frame===10){
+            if(total1===10||(total1+total2===10&&total1<10)){
+                if(G.roll===2){
+                    G.roll=3;G.pins=createPins();G.ball.reset();G.awaitingSecond=true;
+                    if(total1===10){G.msg='奖励投掷!';G.msgLife=60;}
+                }else{G.endGameFlag=true;calcTotals();}
+            }else{G.endGameFlag=true;calcTotals();}
+        }else{nextFrame();}
+    }
+}
+function nextFrame(){
+    G.frame++;G.roll=1;G.awaitingSecond=false;G.resultTimer=60;
+    G.pins=createPins();G.ball.reset();G.ball.x=G.aimX;
+    calcTotals();
+}
+function calcTotals(){
+    let t=0;
+    for(let f=0;f<10;f++){
+        const a=G.frameScores[f][0],b=G.frameScores[f][1];
+        if(a<0){G.total[f]=-1;break;}
+        let add=a+(b<0?0:b);
+        if(a===10){
+            const n1=G.frameScores[f+1]?G.frameScores[f+1][0]:-1;
+            let n2=-1;
+            if(G.frameScores[f+1]&&G.frameScores[f+1][0]===10&&G.frameScores[f+2]){n2=G.frameScores[f+2][0];}
+            else if(G.frameScores[f+1]){n2=G.frameScores[f+1][1];}
+            if(f===9){
+                if(G.frameScores[9][1]<0){G.total[f]=-1;continue;}
+                const bonus=G.frameScores[9][2]||0;
+                add=10+(G.frameScores[9][1]<0?0:G.frameScores[9][1])+bonus;
+            }else if(n1>=0&&n2>=0){add=10+n1+n2;}else{G.total[f]=-1;continue;}
+        }else if(a+(b<0?0:b)===10){
+            const n1=G.frameScores[f+1]?G.frameScores[f+1][0]:-1;
+            if(f===9){const bonus=G.frameScores[9][2]||0;add=10+bonus;}
+            else if(n1>=0){add=10+n1;}else{G.total[f]=-1;continue;}
+        }else if(b<0){G.total[f]=-1;continue;}
+        t+=add;G.total[f]=t;
+    }
+    if(G.total[9]>0)G.score=G.total[9];
+}
+function endGame(){
+    G.state=STATE_OVER;
+    calcTotals();if(G.total[9]>0)G.score=G.total[9];
+    if(G.score>G.highScore){G.highScore=G.score;Storage.save('bowling_high',G.highScore);}
+}
+function update(){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    if(G.msgLife>0)G.msgLife--;
+    if(G.strikeAnim>0)G.strikeAnim--;if(G.spareAnim>0)G.spareAnim--;
+    if(G.resultTimer>0){G.resultTimer--;
+        if(G.resultTimer<=0&&!G.ball.rolling){
+            if(G.endGameFlag){endGameFlagReset();endGame();return;}
+        }
+    }
+    if(G.charging){G.power+=G.powerDir*1.2;if(G.power>=100)G.powerDir=-1;if(G.power<=0)G.powerDir=1;}
+    if(G.ball.rolling){G.ball.update(G.pins);
+        if(Date.now()%6<2)sfxRoll();
+        let allStop=!G.ball.rolling;
+        for(const p of G.pins){p.update();if(p.standing||Math.abs(p.vx)+Math.abs(p.vy)+Math.abs(p.vr)>0.08)allStop=false;}
+        if(allStop){G.ball.rolling=false;setTimeout(function(){
+            if(G.state===STATE_PLAYING)settleRoll();
+        },400);}
+    }
+    calcTotals();
+}
+function endGameFlagReset(){G.endGameFlag=false;for(const p of G.pins){p.vx=p.vy=p.vr=0;}}
+function drawLane(){
+    ctx.fillStyle='#0a0a0a';ctx.fillRect(0,0,W,H);
+    const laneGrad=ctx.createLinearGradient(LANE_L,0,LANE_R,0);
+    laneGrad.addColorStop(0,'#7f4f24');laneGrad.addColorStop(0.15,'#c38e5e');
+    laneGrad.addColorStop(0.35,'#a9744a');laneGrad.addColorStop(0.5,'#d4a574');
+    laneGrad.addColorStop(0.65,'#a9744a');laneGrad.addColorStop(0.85,'#c38e5e');laneGrad.addColorStop(1,'#7f4f24');
+    ctx.fillStyle=laneGrad;ctx.fillRect(LANE_L,20,LANE_R-LANE_L,H-150);
+    ctx.strokeStyle='rgba(90,50,20,0.5)';ctx.lineWidth=1;
+    for(let i=0;i<8;i++){
+        const x=LANE_L+(LANE_R-LANE_L)*((i+1)/9);
+        ctx.beginPath();ctx.moveTo(x,20);ctx.lineTo(x,H-130);ctx.stroke();
+    }
+    ctx.strokeStyle='#5a2d0c';ctx.lineWidth=5;
+    ctx.strokeRect(LANE_L,20,LANE_R-LANE_L,H-150);
+    ctx.fillStyle='#8b5a2b';ctx.fillRect(LANE_L-10,20,10,H-150);
+    ctx.fillRect(LANE_R,20,10,H-150);
+    const arrY=PIN_ROW_Y-110;
+    for(let i=0;i<7;i++){
+        const ax=LANE_L+30+i*((LANE_R-LANE_L-60)/6);
+        ctx.fillStyle='#c9ada7';ctx.beginPath();
+        ctx.moveTo(ax-3,arrY);ctx.lineTo(ax+3,arrY);ctx.lineTo(ax,arrY-12);
+        ctx.closePath();ctx.fill();
+    }
+    ctx.fillStyle='#1a1a2e';
+    ctx.fillRect(LANE_L-10,20,LANE_R-LANE_L+20,PIN_ROW_Y-80);
+    const pinBg=ctx.createLinearGradient(0,20,0,PIN_ROW_Y-20);
+    pinBg.addColorStop(0,'#1a1a2e');pinBg.addColorStop(1,'#2b2d42');
+    ctx.fillStyle=pinBg;ctx.fillRect(LANE_L+5,30,LANE_R-LANE_L-10,PIN_ROW_Y-90);
+    ctx.strokeStyle='rgba(100,100,150,0.4)';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.strokeRect(LANE_L+8,33,LANE_R-LANE_L-16,PIN_ROW_Y-96);ctx.setLineDash([]);
+    ctx.fillStyle='#343a40';
+    ctx.fillRect(LANE_L,H-130,LANE_R-LANE_L,110);
+    const ballGrad=ctx.createLinearGradient(0,H-130,0,H-20);
+    ballGrad.addColorStop(0,'#495057');ballGrad.addColorStop(1,'#212529');
+    ctx.fillStyle=ballGrad;ctx.fillRect(LANE_L,H-125,LANE_R-LANE_L,105);
+    for(let i=0;i<14;i++){const y=H-120+i*8;
+        ctx.strokeStyle=`rgba(150,150,150,${0.08+i*0.005})`;ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(LANE_L,y);ctx.lineTo(LANE_R,y);ctx.stroke();}
+    if(!G.ball.rolling&&G.resultTimer<=0){
+        ctx.fillStyle='rgba(255,255,255,0.1)';
+        ctx.fillRect(LANE_L+10,H-260,LANE_R-LANE_L-20,130);
+        ctx.strokeStyle='rgba(6,214,160,0.6)';ctx.lineWidth=2;ctx.setLineDash([8,6]);
+        ctx.strokeRect(LANE_L+10,H-260,LANE_R-LANE_L-20,130);ctx.setLineDash([]);
+        ctx.fillStyle='#06d6a0';ctx.font='13px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText('🎯 对准 + 上下拖动调整力度/弧线 + 松开发球',W/2,H-268);
+        ctx.textAlign='left';
+    }
+}
+function drawScore(){
+    const startX=20,startY=H-75,cellW=44,cellH=40;
+    ctx.fillStyle='#f8f9fa';roundRect(ctx,startX-5,startY-5,W-30,cellH+25,6);ctx.fill();
+    ctx.strokeStyle='#adb5bd';ctx.lineWidth=1;
+    for(let i=0;i<10;i++){
+        const x=startX+i*cellW;
+        ctx.strokeStyle='#adb5bd';roundRect(ctx,x,startY,cellW-2,cellH,3);ctx.stroke();
+        ctx.fillStyle='#dee2e6';ctx.fillRect(x,startY,cellW-2,15);
+        ctx.fillStyle='#495057';ctx.font='bold 11px Arial';ctx.textAlign='center';
+        ctx.fillText((i+1)+'',x+(cellW-2)/2,startY+11);
+        const a=G.frameScores[i][0],b=G.frameScores[i][1];
+        ctx.font='bold 13px Arial';
+        ctx.fillStyle=a===10?'#e63946':'#212529';
+        if(i===9){
+            const c=G.frameScores[i][2];
+            const r1=x+cellW*0.2,r2=x+cellW*0.5,r3=x+cellW*0.8;
+            ctx.fillStyle=a===10?'#e63946':'#212529';
+            if(a>=0)ctx.fillText(a===10?'X':a,r1,startY+27);
+            ctx.fillStyle=(b>=0&&a<10&&a+b===10)?'#06d6a0':'#212529';
+            if(b>=0)ctx.fillText((a<10&&a+b===10)?'/':(b===10?'X':b),r2,startY+27);
+            if(c!==undefined){ctx.fillStyle='#ffd166';if(c>=0)ctx.fillText(c===10?'X':(c==='/'?'/':c),r3,startY+27);}
+        }else{
+            if(a>=0)ctx.fillText(a===10?'X':a,x+cellW*0.75,startY+27);
+            ctx.fillStyle=(b>=0&&a<10&&a+b===10)?'#06d6a0':'#212529';
+            if(b>=0)ctx.fillText((a<10&&a+b===10)?'/':(b<0?'':b),x+cellW*0.35,startY+27);
+        }
+        ctx.fillStyle=G.total[i]>=0?'#06d6a0':'#adb5bd';
+        ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.fillText(G.total[i]>=0?G.total[i]:'-',x+(cellW-2)/2,startY+cellH+13);
+    }
+    ctx.textAlign='left';
+    ctx.fillStyle='#495057';ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText('总分:',W/2-32,startY+cellH+13);
+    ctx.fillStyle='#e63946';ctx.font='bold 15px Arial';
+    ctx.fillText(G.score>=0?G.score:0,W/2+8,startY+cellH+13);
+    ctx.fillStyle='#ffd700';ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText('最高:'+G.highScore,W-120,startY+cellH+13);
+}
+function drawAim(){
+    if(G.ball.rolling||G.resultTimer>0)return;
+    if(!G.ball.rolling){G.ball.x=G.aimX;}
+    ctx.strokeStyle='rgba(6,214,160,0.5)';ctx.lineWidth=2;
+    const aimLen=120+G.power*1.2;
+    const ang=-Math.PI/2+G.spin*0.08;
+    const ex=G.aimX+Math.cos(ang)*aimLen,ey=G.ball.y+Math.sin(ang)*aimLen;
+    ctx.setLineDash([10,8]);ctx.beginPath();
+    ctx.moveTo(G.aimX,G.ball.y-BALL_R-2);
+    for(let i=1;i<=20;i++){
+        const t=i/20;
+        const px=G.aimX+Math.cos(ang)*aimLen*t+G.spin*3*t*t;
+        const py=G.ball.y+Math.sin(ang)*aimLen*t;
+        ctx.lineTo(px,py);
+    }
+    ctx.stroke();ctx.setLineDash([]);
+    const pbX=40,pbY=H-250,pbW=18,pbH=120;
+    ctx.fillStyle='rgba(0,0,0,0.5)';roundRect(ctx,pbX,pbY,pbW,pbH,4);ctx.fill();
+    const rat=G.power/100;
+    const col=rat<0.35?'#4ade80':rat<0.7?'#facc15':'#ef4444';
+    ctx.fillStyle=col;roundRect(ctx,pbX+2,pbY+pbH*(1-rat)-2,pbW-4,pbH*rat,3);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1.5;roundRect(ctx,pbX,pbY,pbW,pbH,4);ctx.stroke();
+    ctx.save();ctx.translate(pbX+pbW/2,pbY-8);ctx.rotate(-Math.PI/2);
+    ctx.fillStyle='#fff';ctx.font='bold 11px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('力度',0,4);ctx.restore();ctx.textAlign='left';
+    const sbX=W-58,sbY=H-250,sbW=18,sbH=120;
+    ctx.fillStyle='rgba(0,0,0,0.5)';roundRect(ctx,sbX,sbY,sbW,sbH,4);ctx.fill();
+    const sRat=0.5+G.spin/6;
+    const sCol=sRat<0.35?'#3b82f6':sRat>0.65?'#ec4899':'#a78bfa';
+    ctx.fillStyle=sCol;roundRect(ctx,sbX+2,sbY+sbH*(1-sRat)-2,sbW-4,Math.max(4,sbH*0.1),3);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1.5;roundRect(ctx,sbX,sbY,sbW,sbH,4);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(sbX,sbY+sbH/2);ctx.lineTo(sbX+sbW,sbY+sbH/2);ctx.strokeStyle='rgba(255,255,255,0.6)';ctx.lineWidth=1;ctx.stroke();
+    ctx.save();ctx.translate(sbX+sbW/2,sbY-8);ctx.rotate(-Math.PI/2);
+    ctx.fillStyle='#fff';ctx.font='bold 11px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('弧线(Q/E)',0,4);ctx.restore();ctx.textAlign='left';
+}
+function drawMsg(){
+    if(G.msgLife<=0)return;
+    const a=Math.min(1,G.msgLife/50);
+    ctx.globalAlpha=a;
+    if(G.strikeAnim>0){
+        const t=60-G.strikeAnim;
+        const s=1+t*0.04;
+        ctx.save();ctx.translate(W/2,PIN_ROW_Y+120);ctx.scale(s,s);
+        ctx.fillStyle='#e63946';ctx.font='bold 64px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText('STRIKE!',0,0);
+        ctx.fillStyle='#ffd700';ctx.font='bold 28px "Microsoft YaHei"';
+        ctx.fillText('全中!',0,42);
+        ctx.restore();
+    }else if(G.spareAnim>0){
+        const t=60-G.spareAnim;
+        const s=1+t*0.03;
+        ctx.save();ctx.translate(W/2,PIN_ROW_Y+120);ctx.scale(s,s);
+        ctx.fillStyle='#06d6a0';ctx.font='bold 54px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText('SPARE!',0,0);
+        ctx.fillStyle='#ffd700';ctx.font='bold 24px "Microsoft YaHei"';
+        ctx.fillText('补中!',0,36);
+        ctx.restore();
+    }else{
+        ctx.fillStyle='rgba(0,0,0,0.6)';
+        roundRect(ctx,W/2-160,H/2-40,320,70,10);ctx.fill();
+        ctx.fillStyle='#ffd700';ctx.font='bold 28px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText(G.msg,W/2,H/2+6);
+        ctx.textAlign='left';
+    }
+    ctx.globalAlpha=1;
+}
+function drawHUD(){
+    ctx.fillStyle='rgba(0,0,0,0.75)';roundRect(ctx,10,10,W-20,50,8);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 14px "Microsoft YaHei"';ctx.textAlign='left';
+    ctx.fillText('第',25,32);ctx.fillStyle='#06d6a0';ctx.font='bold 22px Arial';
+    ctx.fillText(G.frame+'',48,35);ctx.fillStyle='#fff';ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.fillText('/10 格',82,32);
+    ctx.fillStyle='#888';ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('投掷:',140,32);
+    ctx.fillStyle=G.roll===1?'#4cc9f0':'#ef476f';ctx.font='bold 20px Arial';
+    ctx.fillText(G.roll+'',185,33);
+    ctx.textAlign='right';
+    ctx.fillStyle='#888';ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('剩余瓶:',W-130,32);
+    const rem=countStanding(G.pins);
+    ctx.fillStyle=rem>5?'#4ade80':rem>0?'#facc15':'#ef4444';
+    ctx.font='bold 20px Arial';ctx.fillText(rem+'/10',W-30,33);
+    ctx.textAlign='left';
+}
+function drawMenu(){
+    const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#1a1a2e');g.addColorStop(1,'#2b2d42');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(6,214,160,0.05)';
+    for(let i=0;i<H;i+=40)if((i/40)%2===0)ctx.fillRect(0,i,W,20);
+    ctx.save();ctx.translate(W/2,240);const rot=Date.now()/800;
+    for(let i=0;i<10;i++){
+        const ang=rot+i*Math.PI/5;
+        const px=Math.cos(ang)*90,py=Math.sin(ang)*40;
+        ctx.save();ctx.translate(px,py);ctx.rotate(ang*0.5);
+        ctx.fillStyle='#e9c46a';ctx.beginPath();
+        ctx.moveTo(-7,-16);ctx.quadraticCurveTo(-10,-4,-6,10);
+        ctx.lineTo(6,10);ctx.quadraticCurveTo(10,-4,7,-16);
+        ctx.quadraticCurveTo(0,-22,-7,-16);ctx.fill();
+        ctx.strokeStyle='#8b5a2b';ctx.lineWidth=1;ctx.stroke();
+        ctx.fillStyle='#e76f51';ctx.fillRect(-6,-8,12,2);ctx.fillRect(-6,-2,12,2);ctx.fillRect(-6,3,12,2);
+        ctx.restore();
+    }
+    ctx.save();ctx.rotate(rot);
+    const grad=ctx.createRadialGradient(-4,-4,2,0,0,BALL_R+1);
+    grad.addColorStop(0,'#4a4e69');grad.addColorStop(1,'#22223b');
+    ctx.fillStyle=grad;ctx.beginPath();ctx.arc(0,0,BALL_R+4,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#06d6a0';ctx.beginPath();ctx.arc(-5,-6,4,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#ef476f';ctx.beginPath();ctx.arc(5,-3,3.5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(2,5,3.8,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#118ab2';ctx.beginPath();ctx.arc(-4,4,3.5,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#000';ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(0,0,BALL_R+4,0,Math.PI*2);ctx.stroke();
+    ctx.restore();ctx.restore();
+    ctx.fillStyle='#06d6a0';ctx.font='bold 54px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText('保龄球大师',W/2,125);
+    ctx.fillStyle='#ffd166';ctx.font='20px Arial';
+    ctx.fillText('BOWLING MASTER',W/2,158);
+    ctx.fillStyle='#ffd700';ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.fillText('最高分: '+G.highScore,W/2,375);
+    drawBtn(ctx,W/2-100,415,200,60,'开始挑战','start','#06d6a0');
+    ctx.fillStyle='#fff';ctx.font='15px "Microsoft YaHei"';
+    ctx.fillText('🎳 10格专业保龄球计分!  Strike & Spare!',W/2,510);
+    ctx.fillStyle='#ddd';ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('触屏: 对准后上下拖  松开发球',W/2,550);
+    ctx.fillText('键盘: ←→对准 空格蓄力/投掷  Q/E弧线',W/2,573);
+    ctx.fillText('连续全中可获得高分奖励!',W/2,596);
+    ctx.textAlign='left';
+}
+function drawGame(){
+    drawLane();
+    for(const p of G.pins)p.draw(ctx);
+    G.ball.draw(ctx);
+    drawAim();
+    drawHUD();
+    drawScore();
+    drawMsg();
+    if(G.paused){ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,0,W,H);
+        ctx.fillStyle='#fff';ctx.font='bold 40px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText('暂停',W/2,H/2-10);ctx.font='16px "Microsoft YaHei"';
+        ctx.fillStyle='#aaa';ctx.fillText('按 ESC 继续',W/2,H/2+30);ctx.textAlign='left';}
+}
+function drawGameOver(){
+    ctx.fillStyle='#0a0a0a';ctx.fillRect(0,0,W,H);
+    const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#1a1a2e');g.addColorStop(1,'#2b2d42');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    const win=G.score>=200;const isNew=G.score>=G.highScore&&G.score>0;
+    ctx.fillStyle=win?'#ffd700':(isNew?'#ffd700':'#ef476f');
+    ctx.font='bold 50px "Microsoft YaHei"';ctx.textAlign='center';
+    ctx.fillText(win?'完美比赛!':(isNew?'新纪录!':'比赛结束'),W/2,140);
+    if(isNew){ctx.fillStyle='#ff6b35';ctx.font='bold 20px "Microsoft YaHei"';
+        ctx.fillText('🏆 打破最高分!',W/2,178);}
+    ctx.fillStyle='#fff';ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.fillText('最终得分',W/2,235);
+    ctx.fillStyle='#06d6a0';ctx.font='bold 76px Arial';
+    ctx.fillText(G.score,W/2,318);
+    let tier='新手';let tierC='#adb5bd';
+    if(G.score>=300){tier='传说 300分满分!';tierC='#ffd700';}
+    else if(G.score>=240){tier='大师';tierC='#ef476f';}
+    else if(G.score>=200){tier='职业';tierC='#06d6a0';}
+    else if(G.score>=150){tier='高手';tierC='#118ab2';}
+    else if(G.score>=100){tier='熟练';tierC='#a78bfa';}
+    ctx.fillStyle=tierC;ctx.font='bold 24px "Microsoft YaHei"';
+    ctx.fillText('等级: '+tier,W/2,368);
+    ctx.fillStyle='#ffd700';ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.fillText('最高分: '+G.highScore,W/2,410);
+    drawBtn(ctx,W/2-90,455,180,55,'再来一局','restart','#06d6a0');
+    drawBtn(ctx,W/2-70,525,140,45,'返回菜单','menu','#073b4c');
+    ctx.textAlign='left';
+}
+function draw(){switch(G.state){case STATE_MENU:drawMenu();break;case STATE_PLAYING:drawGame();break;case STATE_OVER:drawGameOver();break;case STATE_PAUSE:drawGame();break;}}
+function gameLoop(){requestAnimationFrame(gameLoop);update();draw();}
+G.pins=createPins();G.ball=new Ball();gameLoop();
+})();
+</script>
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel"><h2>💛 支持开发者</h2><div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div><div class="qr-row"><div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div><div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div></div><button class="sponsor-close" id="sponsorClose">关闭</button></div>
+<div class="interstitial-ad" id="interstitialAd"><div class="ad-content"><p>📢 赞助商广告</p><div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div></div><button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button></div>
+<script>(function(){var b = document.getElementById('start-game-btn');if(b){b.removeAttribute('disabled');b.style.setProperty('display','block','important');b.addEventListener('click',function(){try{b.style.display='none';}catch(e){}try{if(typeof startGame==='function')startGame();}catch(e){console.error('[start-btn] err',e);}});}var sp=document.getElementById('sponsorPanel');if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}var ia=document.getElementById('interstitialAd');if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}})();</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

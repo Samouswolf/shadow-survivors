@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>化学实验室</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#e94560;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始实验</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=800;
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'square';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxStart(){playTone(523,0.1,'sine',0.2);setTimeout(()=>playTone(659,0.1,'sine',0.2),100);setTimeout(()=>playTone(784,0.15,'sine',0.2),200)}
+function sfxScore(){playTone(880,0.08,'sine',0.15);setTimeout(()=>playTone(1175,0.12,'sine',0.15),80)}
+function sfxFail(){playTone(200,0.2,'sawtooth',0.15);setTimeout(()=>playTone(150,0.3,'sawtooth',0.15),150)}
+function sfxClick(){playTone(600,0.05,'sine',0.1)}
+function sfxPour(){playTone(300,0.15,'sine',0.08)}
+function sfxBubble(){for(let i=0;i<5;i++){setTimeout(()=>playTone(400+Math.random()*200,0.05,'sine',0.06),i*60)}}
+function sfxExplosion(){playTone(100,0.3,'sawtooth',0.2);setTimeout(()=>playTone(80,0.2,'square',0.15),100)}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const EXPERIMENTS=[
+    {
+        id:'volcano',
+        name:'火山喷发',
+        emoji:'🌋',
+        desc:'小苏打+醋酸=模拟火山喷发',
+        steps:[
+            {name:'取小苏打',hint:'点击药匙取NaHCO₃',target:'nahco3',action:'add',amount:1},
+            {name:'放入锥形瓶',hint:'把小苏打倒入锥形瓶',target:'flask',action:'pour'},
+            {name:'取醋酸',hint:'点击量杯取CH₃COOH',target:'acetic',action:'add',amount:1},
+            {name:'倒入醋酸',hint:'把醋酸倒入锥形瓶观察',target:'flask',action:'pour'}
+        ],
+        principle:'酸碱中和反应：NaHCO₃ + CH₃COOH → CH₃COONa + H₂O + CO₂↑。产生的大量CO₂气体使泡沫涌出，模拟火山喷发。',
+        expected:'剧烈冒泡，产生大量泡沫'
+    },
+    {
+        id:'indicator',
+        name:'酸碱指示剂',
+        emoji:'🔬',
+        desc:'紫甘蓝汁遇酸/碱变色',
+        steps:[
+            {name:'取紫甘蓝汁',hint:'点击取紫甘蓝提取液',target:'cabbage',action:'add',amount:1},
+            {name:'倒入烧杯A',hint:'倒入第一个烧杯',target:'beakerA',action:'pour'},
+            {name:'取盐酸',hint:'点击取稀盐酸',target:'hcl',action:'add',amount:1},
+            {name:'滴入烧杯A',hint:'滴入盐酸观察颜色',target:'beakerA',action:'pour'},
+            {name:'取NaOH',hint:'点击取氢氧化钠溶液',target:'naoh',action:'add',amount:1},
+            {name:'倒入烧杯B',hint:'取紫甘蓝汁后倒入烧杯B',target:'beakerB',action:'special'}
+        ],
+        principle:'紫甘蓝含有花青素，是天然酸碱指示剂。遇酸(pH<7)变红，遇碱(pH>7)变绿/黄，中性为紫色。',
+        expected:'A杯变红(酸)，B杯变绿(碱)'
+    },
+    {
+        id:'oxygen',
+        name:'制取氧气',
+        emoji:'💨',
+        desc:'双氧水分解+排水集气法',
+        steps:[
+            {name:'取MnO₂',hint:'点击药匙取二氧化锰',target:'mno2',action:'add',amount:1},
+            {name:'放入试管',hint:'MnO₂加入试管',target:'testtube',action:'pour'},
+            {name:'取H₂O₂',hint:'点击取双氧水溶液',target:'h2o2',action:'add',amount:1},
+            {name:'注入双氧水',hint:'H₂O₂倒入试管',target:'testtube',action:'pour'},
+            {name:'塞紧胶塞',hint:'点击胶塞塞紧试管',target:'stopper',action:'click'},
+            {name:'排水集气',hint:'等待气泡收集满集气瓶',target:'bottle',action:'wait'},
+            {name:'木条复燃',hint:'点击带火星木条检验O₂',target:'splint',action:'click'}
+        ],
+        principle:'催化分解反应：2H₂O₂ -(MnO₂)→ 2H₂O + O₂↑。氧气不易溶于水，用排水法收集。氧气支持燃烧，使带火星木条复燃。',
+        expected:'大量气泡产生，木条复燃'
+    },
+    {
+        id:'precipitate',
+        name:'沉淀反应',
+        emoji:'⚗️',
+        desc:'石灰水+纯碱=白色沉淀',
+        steps:[
+            {name:'取石灰水',hint:'点击取澄清石灰水Ca(OH)₂',target:'limewater',action:'add',amount:1},
+            {name:'倒入烧杯',hint:'倒入烧杯中',target:'beaker',action:'pour'},
+            {name:'取纯碱',hint:'点击取碳酸钠Na₂CO₃',target:'soda',action:'add',amount:1},
+            {name:'加入烧杯',hint:'Na₂CO₃倒入烧杯',target:'beaker',action:'pour'}
+        ],
+        principle:'复分解反应：Ca(OH)₂ + Na₂CO₃ → CaCO₃↓(白) + 2NaOH。碳酸钙难溶于水，形成白色沉淀。',
+        expected:'产生白色沉淀(CaCO₃)'
+    },
+    {
+        id:'crystal',
+        name:'食盐结晶',
+        emoji:'💎',
+        desc:'饱和盐水蒸发结晶',
+        steps:[
+            {name:'取水',hint:'点击量杯取蒸馏水',target:'water',action:'add',amount:1},
+            {name:'倒入蒸发皿',hint:'水倒入蒸发皿',target:'dish',action:'pour'},
+            {name:'取食盐',hint:'点击药匙取NaCl',target:'salt',action:'add',amount:3},
+            {name:'加入搅拌',hint:'食盐加入后搅拌溶解',target:'dish',action:'stir'},
+            {name:'点燃酒精灯',hint:'点击酒精灯加热',target:'lamp',action:'click'},
+            {name:'等待结晶',hint:'等待水分蒸发结晶',target:'dish',action:'wait'}
+        ],
+        principle:'蒸发结晶：NaCl溶解度随温度变化不大，通过蒸发溶剂使饱和溶液中的溶质析出，形成晶体。',
+        expected:'水分蒸发，析出白色晶体'
+    },
+    {
+        id:'sodium',
+        name:'钠与水反应',
+        emoji:'💧',
+        desc:'Na+H₂O+酚酞=观察现象',
+        steps:[
+            {name:'取水',hint:'点击取蒸馏水',target:'water2',action:'add',amount:1},
+            {name:'倒入烧杯',hint:'水倒入烧杯',target:'beaker2',action:'pour'},
+            {name:'加酚酞',hint:'点击加酚酞指示剂',target:'phenol',action:'add',amount:1},
+            {name:'滴入烧杯',hint:'酚酞滴入水中',target:'beaker2',action:'pour'},
+            {name:'取Na粒',hint:'点击镊子取金属钠',target:'na',action:'add',amount:1},
+            {name:'投入水中',hint:'钠粒投入烧杯观察',target:'beaker2',action:'pour'}
+        ],
+        principle:'置换反应：2Na + 2H₂O → 2NaOH + H₂↑。钠浮在水面(密度小)、熔成小球(放热熔点低)、四处游动(产H₂推动)、发出嘶嘶声、酚酞遇NaOH变红。',
+        expected:'浮熔游响红(五字现象)'
+    },
+    {
+        id:'phpaper',
+        name:'pH试纸制作',
+        emoji:'📑',
+        desc:'自制试纸测溶液酸碱度',
+        steps:[
+            {name:'取紫甘蓝汁',hint:'点击取紫甘蓝汁',target:'cabbage2',action:'add',amount:1},
+            {name:'放入滤纸',hint:'滤纸浸入汁液',target:'filter',action:'soak'},
+            {name:'晾干滤纸',hint:'点击晾干器烘干',target:'dryer',action:'click'},
+            {name:'剪试纸条',hint:'点击剪刀剪成条',target:'scissors',action:'click'},
+            {name:'测试醋',hint:'试纸蘸取白醋',target:'vinegar',action:'test'},
+            {name:'测试肥皂水',hint:'试纸蘸肥皂水',target:'soap',action:'test'}
+        ],
+        principle:'花青素吸附在滤纸上制成pH试纸。酸性红(pH1-3)→橙(pH4-6)→紫(pH7)→蓝(pH8-10)→黄绿(pH11-14)。',
+        expected:'醋=红色(pH3)，肥皂水=蓝色(pH9)'
+    },
+    {
+        id:'rust',
+        name:'铁钉生锈条件',
+        emoji:'🔩',
+        desc:'水+氧气双因素探究',
+        steps:[
+            {name:'取试管A',hint:'点击试管A(干燥+塞紧)',target:'tubeA',action:'prepare'},
+            {name:'放入铁钉A',hint:'铁钉放入试管A',target:'tubeA',action:'put'},
+            {name:'取试管B',hint:'点击试管B(煮沸水+油封)',target:'tubeB',action:'prepare'},
+            {name:'放入铁钉B',hint:'铁钉浸没试管B',target:'tubeB',action:'put'},
+            {name:'取试管C',hint:'点击试管C(半浸水暴露空气)',target:'tubeC',action:'prepare'},
+            {name:'放入铁钉C',hint:'铁钉半浸试管C',target:'tubeC',action:'put'},
+            {name:'等待3天',hint:'快进观察3天后结果',target:'wait',action:'wait'}
+        ],
+        principle:'铁生锈是铁与氧气和水同时发生的复杂化学反应(缓慢氧化)：4Fe + 3O₂ + 2xH₂O → 2Fe₂O₃·xH₂O。缺一不可：A缺水不生锈，B缺氧不生锈，C都有生锈。',
+        expected:'只有C试管铁钉生锈'
+    },
+    {
+        id:'co2balloon',
+        name:'CO₂吹气球',
+        emoji:'🎈',
+        desc:'小苏打+柠檬酸产气',
+        steps:[
+            {name:'取柠檬酸',hint:'点击取柠檬酸固体',target:'citric',action:'add',amount:1},
+            {name:'放入气球',hint:'柠檬酸装入气球',target:'balloon',action:'fill'},
+            {name:'取小苏打',hint:'点击取NaHCO₃',target:'nahco3_2',action:'add',amount:1},
+            {name:'放入锥形瓶',hint:'NaHCO₃加瓶中加水',target:'flask2',action:'fill'},
+            {name:'套上气球',hint:'气球口套到锥形瓶',target:'balloon',action:'attach'},
+            {name:'提起气球',hint:'让柠檬酸落入瓶中',target:'balloon',action:'lift'}
+        ],
+        principle:'3NaHCO₃ + C₆H₈O₇ → C₆H₅O₇Na₃ + 3H₂O + 3CO₂↑。产生的CO₂气体充满气球。CO₂密度比空气大，气球不会飘太高。',
+        expected:'气球迅速膨胀变大'
+    },
+    {
+        id:'extinguish',
+        name:'CO₂灭火',
+        emoji:'🕯️',
+        desc:'CO₂倾倒熄灭蜡烛',
+        steps:[
+            {name:'制CO₂',hint:'点击气瓶取CO₂(已制备)',target:'co2tank',action:'get'},
+            {name:'点燃蜡烛',hint:'点击点燃高低蜡烛',target:'candles',action:'light'},
+            {name:'盖好烧杯',hint:'玻璃片盖住CO₂烧杯',target:'cover',action:'click'},
+            {name:'缓慢倾倒',hint:'沿烧杯壁向蜡烛倒CO₂',target:'candles',action:'pour'}
+        ],
+        principle:'CO₂物理性质：密度比空气大(像液体一样向下倾倒)；化学性质：不燃烧也不支持燃烧。所以下方蜡烛先熄灭，上方后熄灭。',
+        expected:'低处蜡烛先灭，高处后灭'
+    }
+];
+
+const CHEMICALS={
+    nahco3:{name:'小苏打',color:'#ffffff',emoji:'🧂',formula:'NaHCO₃'},
+    acetic:{name:'醋酸',color:'#f5deb3',emoji:'🥫',formula:'CH₃COOH'},
+    cabbage:{name:'紫甘蓝汁',color:'#8b008b',emoji:'🥬',formula:'花青素'},
+    hcl:{name:'稀盐酸',color:'#fffacd',emoji:'🧪',formula:'HCl'},
+    naoh:{name:'氢氧化钠',color:'#e0ffff',emoji:'⚗️',formula:'NaOH'},
+    mno2:{name:'二氧化锰',color:'#2f2f2f',emoji:'⬛',formula:'MnO₂'},
+    h2o2:{name:'双氧水',color:'#87ceeb',emoji:'💧',formula:'H₂O₂'},
+    splint:{name:'带火星木条',color:'#8b4513',emoji:'🔥',formula:''},
+    limewater:{name:'石灰水',color:'#fffaf0',emoji:'🥛',formula:'Ca(OH)₂'},
+    soda:{name:'纯碱',color:'#f5f5f5',emoji:'⬜',formula:'Na₂CO₃'},
+    water:{name:'蒸馏水',color:'#b0e0e6',emoji:'💧',formula:'H₂O'},
+    salt:{name:'食盐',color:'#f8f8ff',emoji:'🧂',formula:'NaCl'},
+    water2:{name:'蒸馏水',color:'#b0e0e6',emoji:'💧',formula:'H₂O'},
+    phenol:{name:'酚酞',color:'#ffe4e1',emoji:'🎨',formula:'C₂₀H₁₄O₄'},
+    na:{name:'金属钠',color:'#c0c0c0',emoji:'🔩',formula:'Na'},
+    cabbage2:{name:'紫甘蓝汁',color:'#8b008b',emoji:'🥬',formula:'花青素'},
+    vinegar:{name:'白醋',color:'#fffacd',emoji:'🍶',formula:'HAc'},
+    soap:{name:'肥皂水',color:'#e6e6fa',emoji:'🧼',formula:'碱性'},
+    citric:{name:'柠檬酸',color:'#fffacd',emoji:'🍋',formula:'C₆H₈O₇'},
+    nahco3_2:{name:'小苏打',color:'#ffffff',emoji:'🧂',formula:'NaHCO₃'},
+    co2tank:{name:'CO₂气瓶',color:'#a9a9a9',emoji:'🧴',formula:'CO₂'}
+};
+
+const G={
+    state:STATE_MENU,
+    score:0,
+    highScore:0,
+    currentLevel:0,
+    currentStep:0,
+    selectedChemical:null,
+    chemicals:[],
+    btnRects:{},
+    keys:{},
+    paused:false,
+    levelScores:[],
+    principleOpen:false,
+    resultMsg:'',
+    animationFrame:0,
+    reactionActive:false,
+    reactionType:'',
+    bubbles:[],
+    holdChemical:null,
+    experimentResults:{},
+    totalStars:0,
+    medaled:false
+};
+
+G.highScore=parseInt(Storage.load('chem_lab_highscore','0'));
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color,textColor){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    ctx.fillStyle=color||'#e94560';
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle=textColor||'#fff';
+    ctx.font='bold 15px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+window.addEventListener('keydown',function(e){
+    G.keys[e.key.toLowerCase()]=true;
+    if(e.key===' '||e.key==='Enter'){
+        e.preventDefault();
+        initAudio();
+        if(G.state===STATE_MENU){startGame();return}
+        if(G.state===STATE_OVER){startGame();return}
+    }
+    if(e.key==='Escape'){
+        if(G.state===STATE_PLAYING)togglePause();
+    }
+    if(G.state===STATE_PLAYING&&!G.paused){
+        if(e.key>='1'&&e.key<='9'){
+            const idx=parseInt(e.key)-1;
+            const shelf=getShelfChemicals();
+            if(idx<shelf.length){
+                clickChemical(shelf[idx]);
+            }
+        }
+    }
+});
+window.addEventListener('keyup',function(e){
+    G.keys[e.key.toLowerCase()]=false;
+});
+
+function getShelfChemicals(){
+    const exp=EXPERIMENTS[G.currentLevel];
+    if(!exp)return[];
+    const needed=[];
+    for(const s of exp.steps){
+        if(s.target&&CHEMICALS[s.target]&&needed.indexOf(s.target)<0)needed.push(s.target);
+    }
+    const extras=['water','salt','hcl','naoh','cabbage'];
+    for(const e of extras){if(needed.indexOf(e)<0&&CHEMICALS[e])needed.push(e)}
+    return needed;
+}
+
+function clickChemical(chemId){
+    const chem=CHEMICALS[chemId];
+    if(!chem)return;
+    sfxClick();
+    G.holdChemical={id:chemId,chem:chem,angle:0,progress:0};
+}
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){startGame();return}
+        if(hitBtn(p,'selectLeft')){changeLevel(-1);return}
+        if(hitBtn(p,'selectRight')){changeLevel(1);return}
+    } else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;return}
+    } else if(G.state===STATE_PLAYING){
+        if(G.paused){
+            if(hitBtn(p,'resume')){togglePause();return}
+            if(hitBtn(p,'quit')){G.state=STATE_MENU;G.paused=false;return}
+            return;
+        }
+        if(G.principleOpen){
+            if(hitBtn(p,'closePrinciple')){G.principleOpen=false;return}
+            return;
+        }
+        if(hitBtn(p,'pauseBtn')){togglePause();return}
+        if(hitBtn(p,'showPrinciple')){G.principleOpen=true;return}
+        if(hitBtn(p,'nextLevel')&&G.currentStep>=EXPERIMENTS[G.currentLevel].steps.length){
+            nextLevel();return
+        }
+        if(hitBtn(p,'restartLevel')){resetLevel();return}
+        handleGameClick(p);
+    }
+}
+function handlePointerMove(e){}
+function handlePointerUp(e){}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e)},{passive:false});
+
+function changeLevel(dir){
+    G.currentLevel=(G.currentLevel+dir+EXPERIMENTS.length)%EXPERIMENTS.length;
+    sfxClick();
+}
+
+function handleGameClick(p){
+    const exp=EXPERIMENTS[G.currentLevel];
+    if(!exp)return;
+    if(G.currentStep>=exp.steps.length)return;
+    const step=exp.steps[G.currentStep];
+
+    const chemAreas=getChemicalAreas();
+    for(const area of chemAreas){
+        if(p.x>=area.x&&p.x<=area.x+area.w&&p.y>=area.y&&p.y<=area.y+area.h){
+            if(step.target===area.id||step.action==='add'&&CHEMICALS[area.id]){
+                if(step.action==='add'&&!G.holdChemical){
+                    G.holdChemical={id:area.id,chem:CHEMICALS[area.id],amount:step.amount||1};
+                    sfxPour();
+                    return;
+                }
+            }
+        }
+    }
+
+    const workAreas=getWorkAreas();
+    for(const area of workAreas){
+        if(p.x>=area.x&&p.x<=area.x+area.w&&p.y>=area.y&&p.y<=area.y+area.h){
+            processStepAction(step,area);
+            return;
+        }
+    }
+}
+
+function processStepAction(step,area){
+    const exp=EXPERIMENTS[G.currentLevel];
+    const target=step.target;
+    const action=step.action;
+
+    if(action==='add'){
+        if(G.holdChemical&&G.holdChemical.id===target){
+            G.currentStep++;
+            sfxPour();
+            stepCompleted();
+        }else if(CHEMICALS[target]&&!G.holdChemical){
+            G.holdChemical={id:target,chem:CHEMICALS[target],amount:step.amount||1};
+            sfxClick();
+        }else{
+            wrongAction();
+        }
+    }else if(action==='pour'||action==='fill'||action==='put'||action==='soak'||action==='prepare'||action==='special'){
+        if((area.id===target||target==='flask'||target==='beaker'||target==='dish'||target==='testtube'||target==='beakerA'||target==='beakerB'||target==='beaker2'||target==='flask2'||target==='tubeA'||target==='tubeB'||target==='tubeC'||target==='bottle'||target==='balloon'||target==='candles')&&(G.holdChemical||step.action==='special')){
+            G.currentStep++;
+            G.holdChemical=null;
+            sfxBubble();
+            triggerReaction();
+            stepCompleted();
+        }else{
+            wrongAction();
+        }
+    }else if(action==='click'||action==='attach'||action==='lift'||action==='wait'||action==='stir'||action==='light'||action==='get'){
+        if(area.id===target||step.target==='wait'){
+            G.currentStep++;
+            if(action==='wait'){
+                sfxBubble();
+                setTimeout(()=>{
+                    stepCompleted();
+                },1500);
+                G.reactionActive=true;
+                G.reactionType='wait';
+                return;
+            }else if(action==='stir'){
+                G.reactionActive=true;G.reactionType='stir';
+                sfxBubble();
+            }else if(action==='light'){
+                G.reactionActive=true;G.reactionType='fire';
+                sfxClick();
+            }
+            sfxClick();
+            stepCompleted();
+        }else{
+            wrongAction();
+        }
+    }else if(action==='test'){
+        if(area.id===target||G.holdChemical){
+            G.currentStep++;
+            G.holdChemical=null;
+            sfxClick();
+            stepCompleted();
+        }else{
+            wrongAction();
+        }
+    }
+}
+
+function triggerReaction(){
+    const exp=EXPERIMENTS[G.currentLevel];
+    G.reactionActive=true;
+    G.reactionType=exp.id;
+    if(exp.id==='volcano'||exp.id==='oxygen'||exp.id==='sodium'){
+        spawnBubbles();
+        if(exp.id==='sodium')sfxExplosion();
+    }
+    if(exp.id==='co2balloon'){
+        spawnBubbles();
+    }
+    if(exp.id==='extinguish'){
+        G.reactionType='extinguish';
+    }
+}
+
+function spawnBubbles(){
+    G.bubbles=[];
+    for(let i=0;i<30;i++){
+        G.bubbles.push({
+            x:W/2+(Math.random()-0.5)*60,
+            y:H*0.55+Math.random()*30,
+            vx:(Math.random()-0.5)*1.5,
+            vy:-Math.random()*3-1,
+            r:3+Math.random()*8,
+            life:1
+        });
+    }
+}
+
+function wrongAction(){
+    sfxFail();
+    G.score=Math.max(0,G.score-5);
+    G.resultMsg='操作错误！请再试一次';
+    setTimeout(()=>{G.resultMsg=''},1200);
+}
+
+function stepCompleted(){
+    const exp=EXPERIMENTS[G.currentLevel];
+    G.score+=10;
+    G.resultMsg='✓ 步骤完成！+10分';
+    setTimeout(()=>{G.resultMsg=''},1000);
+    if(G.currentStep>=exp.steps.length){
+        levelCompleted();
+    }
+}
+
+function levelCompleted(){
+    const exp=EXPERIMENTS[G.currentLevel];
+    const bonus=50;
+    G.score+=bonus;
+    const starRating=calcStars();
+    G.levelScores[G.currentLevel]={score:G.score,stars:starRating};
+    G.totalStars=G.levelScores.reduce((s,l)=>s+(l?l.stars:0),0);
+    G.experimentResults[exp.id]=true;
+    G.medaled=(G.totalStars>=EXPERIMENTS.length*2.5);
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        Storage.save('chem_lab_highscore',G.highScore);
+    }
+    Storage.save('chem_lab_progress',{completed:G.experimentResults,stars:G.totalStars});
+    G.resultMsg='🎉 实验完成！+50奖金';
+    sfxScore();
+    setTimeout(()=>{
+        if(G.currentLevel>=EXPERIMENTS.length-1){
+            endGame();
+        }else{
+            G.resultMsg='';
+        }
+    },2000);
+}
+
+function calcStars(){
+    const exp=EXPERIMENTS[G.currentLevel];
+    const totalSteps=exp.steps.length;
+    const perfect=totalSteps*10+50;
+    const ratio=G.score/perfect;
+    if(ratio>=0.9)return 3;
+    if(ratio>=0.7)return 2;
+    return 1;
+}
+
+function nextLevel(){
+    if(G.currentLevel<EXPERIMENTS.length-1){
+        G.currentLevel++;
+        resetLevel();
+        sfxClick();
+    }else{
+        endGame();
+    }
+}
+
+function resetLevel(){
+    G.currentStep=0;
+    G.holdChemical=null;
+    G.bubbles=[];
+    G.reactionActive=false;
+    G.reactionType='';
+    G.resultMsg='';
+    G.score=Math.max(0,G.score-EXPERIMENTS[G.currentLevel].steps.length*10);
+    sfxClick();
+}
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.currentLevel=0;
+    G.currentStep=0;
+    G.score=0;
+    G.levelScores=[];
+    G.experimentResults={};
+    G.totalStars=0;
+    G.medaled=false;
+    G.holdChemical=null;
+    G.bubbles=[];
+    G.reactionActive=false;
+    G.reactionType='';
+    G.resultMsg='';
+    G.paused=false;
+    G.principleOpen=false;
+    sfxStart();
+}
+
+function endGame(){
+    G.state=STATE_OVER;
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        Storage.save('chem_lab_highscore',G.highScore);
+    }
+    sfxScore();
+}
+
+function togglePause(){
+    G.paused=!G.paused;
+    sfxClick();
+}
+
+function getChemicalAreas(){
+    const shelf=getShelfChemicals();
+    const cols=4,rows=Math.ceil(shelf.length/cols);
+    const areas=[];
+    const w=90,h=70;
+    const startX=(W-(cols*w+(cols-1)*10))/2;
+    const startY=H-130-rows*(h+10);
+    for(let i=0;i<shelf.length;i++){
+        const c=Math.floor(i%cols),r=Math.floor(i/cols);
+        areas.push({
+            id:shelf[i],
+            x:startX+c*(w+10),
+            y:startY+r*(h+10),
+            w:w,h:h
+        });
+    }
+    return areas;
+}
+
+function getWorkAreas(){
+    return[
+        {id:'flask',x:W/2-45,y:340,w:90,h:120},
+        {id:'beaker',x:W/2-50,y:350,w:100,h:110},
+        {id:'beakerA',x:W/2-130,y:360,w:90,h:100},
+        {id:'beakerB',x:W/2+40,y:360,w:90,h:100},
+        {id:'beaker2',x:W/2-50,y:340,w:100,h:120},
+        {id:'dish',x:W/2-60,y:360,w:120,h:100},
+        {id:'testtube',x:W/2-25,y:320,w:50,h:150},
+        {id:'tubeA',x:60,y:340,w:60,h:140},
+        {id:'tubeB',x:W/2-30,y:340,w:60,h:140},
+        {id:'tubeC',x:W-120,y:340,w:60,h:140},
+        {id:'flask2',x:W/2-50,y:350,w:100,h:110},
+        {id:'balloon',x:W/2-40,y:280,w:80,h:80},
+        {id:'candles',x:W/2-70,y:360,w:140,h:100},
+        {id:'bottle',x:W/2+70,y:360,w:50,h:110},
+        {id:'stopper',x:W/2-20,y:305,w:40,h:25},
+        {id:'lamp',x:W/2-30,y:480,w:60,h:70},
+        {id:'filter',x:W/2-60,y:360,w:120,h:80},
+        {id:'dryer',x:W/2-50,y:470,w:100,h:50},
+        {id:'scissors',x:W-100,y:480,w:70,h:50},
+        {id:'vinegar',x:80,y:490,w:80,h:60},
+        {id:'soap',x:W-160,y:490,w:80,h:60},
+        {id:'cover',x:W/2-70,y:330,w:140,h:30},
+        {id:'co2tank',x:40,y:370,w:70,h:120}
+    ];
+}
+
+function updateBubbles(){
+    for(let i=G.bubbles.length-1;i>=0;i--){
+        const b=G.bubbles[i];
+        b.x+=b.vx;b.y+=b.vy;
+        b.vy+=0.02;
+        b.life-=0.015;
+        if(b.life<=0)G.bubbles.splice(i,1);
+    }
+    if(G.reactionActive&&G.bubbles.length<50&&Math.random()<0.3){
+        G.bubbles.push({
+            x:W/2+(Math.random()-0.5)*50,
+            y:H*0.55+Math.random()*20,
+            vx:(Math.random()-0.5)*1,
+            vy:-Math.random()*2-0.5,
+            r:2+Math.random()*6,
+            life:1
+        });
+    }
+}
+
+function update(){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    G.animationFrame++;
+    updateBubbles();
+}
+
+function drawShelf(ctx){
+    const areas=getChemicalAreas();
+    for(let i=0;i<areas.length;i++){
+        const a=areas[i];
+        const chem=CHEMICALS[a.id];
+        if(!chem)continue;
+        const selected=G.holdChemical&&G.holdChemical.id===a.id;
+        ctx.fillStyle=selected?'rgba(233,69,96,0.3)':'rgba(255,255,255,0.08)';
+        ctx.strokeStyle=selected?'#e94560':'rgba(255,255,255,0.3)';
+        ctx.lineWidth=selected?3:1;
+        roundRect(ctx,a.x,a.y,a.w,a.h,8);
+        ctx.fill();ctx.stroke();
+        ctx.font='28px serif';
+        ctx.textAlign='center';
+        ctx.fillText(chem.emoji,a.x+a.w/2,a.y+30);
+        ctx.font='bold 10px "Microsoft YaHei"';
+        ctx.fillStyle='#fff';
+        ctx.fillText(chem.name,a.x+a.w/2,a.y+52);
+        if(chem.formula){
+            ctx.font='9px Arial';
+            ctx.fillStyle='#aaa';
+            ctx.fillText(chem.formula,a.x+a.w/2,a.y+64);
+        }
+    }
+    ctx.textAlign='left';
+}
+
+function drawWorkbench(ctx){
+    const exp=EXPERIMENTS[G.currentLevel];
+    if(!exp)return;
+    ctx.fillStyle='#2a2a4a';
+    roundRect(ctx,20,290,W-40,260,12);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.15)';
+    ctx.lineWidth=1;
+    ctx.stroke();
+    const wa=getWorkAreas();
+    const expId=exp.id;
+
+    if(expId==='volcano'){
+        drawFlask(ctx,wa[0],exp);
+    }else if(expId==='indicator'){
+        drawBeaker(ctx,wa[2],'A',G.currentStep>=3?'#ff6b6b':(G.currentStep>=1?'#8b008b':'#1a1a2e'));
+        drawBeaker(ctx,wa[3],'B',G.currentStep>=5?'#98fb98':(G.currentStep>=5?'#8b008b':'#1a1a2e'));
+    }else if(expId==='oxygen'){
+        drawTestTube(ctx,wa[6],G.currentStep>=3?'#87cefa':'#1a1a2e',G.currentStep>=4);
+        drawWaterTrough(ctx,{x:W/2+20,y:400,w:80,h:80});
+        drawBottle(ctx,wa[14]);
+    }else if(expId==='precipitate'){
+        drawBeaker(ctx,wa[1],'',G.currentStep>=3?'#d3d3d3':'#fffaf0');
+    }else if(expId==='crystal'){
+        drawEvaporatingDish(ctx,wa[5],G.currentStep>=5);
+        drawLamp(ctx,wa[15]);
+    }else if(expId==='sodium'){
+        drawBeaker(ctx,wa[3],'',G.currentStep>=5?'#ff69b4':'#e0ffff');
+    }else if(expId==='phpaper'){
+        drawFilter(ctx,wa[16]);
+    }else if(expId==='rust'){
+        drawRustTube(ctx,wa[7],'A',false,G.currentStep>=6);
+        drawRustTube(ctx,wa[8],'B',false,G.currentStep>=6);
+        drawRustTube(ctx,wa[9],'C',true,G.currentStep>=6);
+    }else if(expId==='co2balloon'){
+        drawFlaskWithBalloon(ctx,wa[10],wa[11],G.currentStep);
+    }else if(expId==='extinguish'){
+        drawCandles(ctx,wa[12],G.currentStep>=3);
+        drawCO2Tank(ctx,wa[21]);
+    }
+
+    if(G.reactionActive){
+        drawReactionEffect(ctx,expId);
+    }
+
+    for(const b of G.bubbles){
+        ctx.globalAlpha=b.life*0.7;
+        ctx.fillStyle='rgba(255,255,255,0.6)';
+        ctx.beginPath();
+        ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    if(G.holdChemical){
+        const gx=W/2+Math.sin(G.animationFrame*0.05)*5;
+        const gy=200+Math.sin(G.animationFrame*0.08)*5;
+        ctx.font='48px serif';
+        ctx.textAlign='center';
+        ctx.fillText(G.holdChemical.chem.emoji,gx,gy);
+        ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.fillStyle='#fff';
+        ctx.fillText('手持:'+G.holdChemical.chem.name,gx,gy+30);
+    }
+    ctx.textAlign='left';
+}
+
+function drawFlask(ctx,a,exp){
+    const cx=a.x+a.w/2,y=a.y;
+    ctx.strokeStyle='#ccc';ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(cx-12,y);ctx.lineTo(cx-12,y+30);
+    ctx.lineTo(cx-40,y+90);ctx.lineTo(cx+40,y+90);
+    ctx.lineTo(cx+12,y+30);ctx.lineTo(cx+12,y);
+    ctx.closePath();
+    ctx.fillStyle=G.currentStep>=1?'rgba(255,255,255,0.3)':'rgba(100,100,150,0.15)';
+    ctx.fill();ctx.stroke();
+    if(G.reactionActive&&exp.id==='volcano'){
+        ctx.fillStyle='#ff6b35';
+        for(let i=0;i<5;i++){
+            const h=(G.animationFrame*2+i*20)%150;
+            ctx.beginPath();
+            ctx.ellipse(cx+(Math.random()-0.5)*20,y-h,15-i*2,20-i*3,0,0,Math.PI*2);
+            ctx.fill();
+        }
+    }
+}
+
+function drawBeaker(ctx,a,label,color){
+    const x=a.x,y=a.y,w=a.w,h=a.h;
+    ctx.strokeStyle='#ccc';ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(x,y+10);
+    ctx.lineTo(x,y+h);ctx.lineTo(x+w,y+h);ctx.lineTo(x+w,y+10);
+    ctx.lineTo(x+w-8,y);ctx.lineTo(x+8,y);
+    ctx.closePath();
+    ctx.fillStyle=color?color+'cc':'rgba(100,100,150,0.15)';
+    ctx.fill();ctx.stroke();
+    if(label){
+        ctx.fillStyle='#fff';
+        ctx.font='bold 16px Arial';
+        ctx.textAlign='center';
+        ctx.fillText(label,x+w/2,y+h/2+5);
+    }
+}
+
+function drawTestTube(ctx,a,liquid,stoppered){
+    const x=a.x,y=a.y,w=a.w,h=a.h;
+    ctx.strokeStyle='#ccc';ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(x,y);
+    ctx.lineTo(x,y+h-15);
+    ctx.quadraticCurveTo(x,y+h,x+w/2,y+h);
+    ctx.quadraticCurveTo(x+w,y+h,x+w,y+h-15);
+    ctx.lineTo(x+w,y);
+    ctx.fillStyle=liquid||'rgba(100,100,150,0.15)';
+    ctx.fill();ctx.stroke();
+    if(stoppered){
+        ctx.fillStyle='#5d4037';
+        roundRect(ctx,x-5,y-20,w+10,25,5);
+        ctx.fill();
+    }
+}
+
+function drawWaterTrough(ctx,a){
+    ctx.fillStyle='#4169e1';
+    roundRect(ctx,a.x,a.y,a.w,a.h,10);
+    ctx.fill();
+    ctx.strokeStyle='#1e90ff';ctx.lineWidth=2;ctx.stroke();
+}
+
+function drawBottle(ctx,a){
+    const x=a.x,y=a.y,w=a.w,h=a.h;
+    ctx.strokeStyle='#ccc';ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.rect(x,y,w,h);
+    ctx.fillStyle='rgba(135,206,250,0.4)';
+    ctx.fill();ctx.stroke();
+    ctx.strokeStyle='rgba(255,255,255,0.5)';
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(x+w/2,y+h-20);
+    ctx.lineTo(x+w/2,y+h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+function drawEvaporatingDish(ctx,a,hot){
+    const cx=a.x+a.w/2,y=a.y+a.h/2;
+    ctx.strokeStyle='#bbb';ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.ellipse(cx,y,a.w/2,a.h/3,0,0,Math.PI*2);
+    ctx.stroke();
+    ctx.fillStyle=G.currentStep>=5?'rgba(255,255,255,0.6)':'rgba(135,206,250,0.5)';
+    ctx.fill();ctx.stroke();
+    if(G.currentStep>=5){
+        for(let i=0;i<8;i++){
+            const ang=i*Math.PI/4+G.animationFrame*0.02;
+            const r1=20,r2=30;
+            ctx.fillStyle='#fff';
+            ctx.beginPath();
+            ctx.arc(cx+Math.cos(ang)*r1,y+Math.sin(ang)*r1*0.5,3,0,Math.PI*2);
+            ctx.fill();
+        }
+    }
+    if(hot){
+        ctx.strokeStyle='#ff4500';ctx.lineWidth=2;
+        for(let i=0;i<3;i++){
+            const yy=y+a.h/2+20+i*12;
+            ctx.globalAlpha=0.5+Math.sin(G.animationFrame*0.1+i)*0.3;
+            ctx.beginPath();
+            ctx.moveTo(cx-20,yy);ctx.quadraticCurveTo(cx,yy-8,cx+20,yy);
+            ctx.stroke();
+        }
+        ctx.globalAlpha=1;
+    }
+}
+
+function drawLamp(ctx,a){
+    const cx=a.x+a.w/2,y=a.y;
+    ctx.fillStyle='#8b4513';
+    ctx.beginPath();
+    ctx.ellipse(cx,y+a.h-10,25,15,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillRect(cx-12,y+20,24,a.h-35);
+    ctx.fillStyle='#f4a460';
+    ctx.fillRect(cx-8,y+10,16,15);
+    if(G.currentStep>=4){
+        const h=30+Math.sin(G.animationFrame*0.1)*5;
+        const grd=ctx.createLinearGradient(cx,y,cx,y-h);
+        grd.addColorStop(0,'#ff4500');
+        grd.addColorStop(0.5,'#ffd700');
+        grd.addColorStop(1,'rgba(255,255,100,0)');
+        ctx.fillStyle=grd;
+        ctx.beginPath();
+        ctx.moveTo(cx-15,y+10);
+        ctx.quadraticCurveTo(cx,y-h,cx+15,y+10);
+        ctx.fill();
+    }
+}
+
+function drawRustTube(ctx,a,label,hasWater,daysPassed){
+    const x=a.x,y=a.y,w=a.w,h=a.h;
+    ctx.strokeStyle='#ccc';ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(x,y);
+    ctx.lineTo(x,y+h-15);
+    ctx.quadraticCurveTo(x,y+h,x+w/2,y+h);
+    ctx.quadraticCurveTo(x+w,y+h,x+w,y+h-15);
+    ctx.lineTo(x+w,y);
+    const fillColor=hasWater?'rgba(135,206,250,0.5)':'rgba(100,100,150,0.1)';
+    ctx.fillStyle=fillColor;ctx.fill();ctx.stroke();
+    if(label==='A'){
+        ctx.fillStyle='#5d4037';
+        roundRect(ctx,x-5,y-15,w+10,20,4);ctx.fill();
+    }else if(label==='B'){
+        ctx.fillStyle='#d4a373';
+        ctx.beginPath();ctx.arc(x+w/2,y+40,20,0,Math.PI*2);ctx.fill();
+    }
+    const rustColor=(label==='C'&&daysPassed)?'#8b4513':'#888';
+    ctx.fillStyle=rustColor;
+    ctx.fillRect(x+w/2-8,y+h-50,16,35);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 14px Arial';
+    ctx.textAlign='center';
+    ctx.fillText(label,x+w/2,y-20);
+}
+
+function drawFilter(ctx,a){
+    const cx=a.x+a.w/2,y=a.y+a.h/2;
+    ctx.fillStyle='#f5f5dc';
+    ctx.fillRect(a.x,a.y+20,a.w,a.h-40);
+    if(G.currentStep>=1){
+        const color=G.currentStep<3?'#8b008b':(G.currentStep>=4?'#ffffff':'#d8bfd8');
+        ctx.fillStyle=color;
+        ctx.fillRect(a.x+10,a.y+25,a.w-20,a.h-50);
+    }
+    ctx.strokeStyle='#8b7355';ctx.lineWidth=2;ctx.strokeRect(a.x,a.y+20,a.w,a.h-40);
+}
+
+function drawCO2Tank(ctx,a){
+    ctx.fillStyle='#696969';
+    roundRect(ctx,a.x+10,a.y,a.w-20,a.h,10);
+    ctx.fill();
+    ctx.strokeStyle='#333';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#aaa';
+    ctx.fillRect(a.x+a.w/2-8,a.y-15,16,20);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 11px Arial';
+    ctx.textAlign='center';
+    ctx.fillText('CO₂',a.x+a.w/2,a.y+a.h/2);
+}
+
+function drawCandles(ctx,a,extinguished){
+    const baseY=a.y+a.h-20;
+    for(let i=0;i<2;i++){
+        const h=60-i*25;
+        const cx=a.x+40+i*60;
+        ctx.fillStyle='#f5deb3';
+        ctx.fillRect(cx-8,baseY-h,16,h);
+        ctx.fillStyle='#8b4513';
+        ctx.fillRect(cx-1,baseY-h-8,2,10);
+        const shouldExtinguish=extinguished&&(i===0);
+        if(!shouldExtinguish){
+            const fh=20+Math.sin(G.animationFrame*0.15+i)*4;
+            ctx.fillStyle='#ff4500';
+            ctx.beginPath();
+            ctx.moveTo(cx-7,baseY-h-8);
+            ctx.quadraticCurveTo(cx,baseY-h-8-fh,cx+7,baseY-h-8);
+            ctx.fill();
+        }else{
+            ctx.globalAlpha=0.6;
+            for(let j=0;j<3;j++){
+                const yy=baseY-h-15-j*15;
+                ctx.fillStyle='rgba(200,200,200,0.6)';
+                ctx.beginPath();
+                ctx.arc(cx+Math.sin(G.animationFrame*0.05+j)*5,yy,4+j,0,Math.PI*2);
+                ctx.fill();
+            }
+            ctx.globalAlpha=1;
+        }
+    }
+}
+
+function drawFlaskWithBalloon(ctx,flask,balloon,step){
+    const fx=flask.x+flask.w/2,fy=flask.y;
+    ctx.strokeStyle='#ccc';ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(fx-12,fy);ctx.lineTo(fx-12,fy+30);
+    ctx.lineTo(fx-45,fy+95);ctx.lineTo(fx+45,fy+95);
+    ctx.lineTo(fx+12,fy+30);ctx.lineTo(fx+12,fy);
+    ctx.closePath();
+    ctx.fillStyle=G.currentStep>=3?'rgba(255,255,255,0.4)':'rgba(100,100,150,0.15)';
+    ctx.fill();ctx.stroke();
+    const bx=balloon.x+balloon.w/2;
+    const by=step>=5?(balloon.y):(balloon.y+30);
+    const br=step>=5?Math.min(55,15+G.animationFrame*0.3):20;
+    if(step>=1){
+        ctx.fillStyle=G.currentLevel<5?'#e94560':'#ffd700';
+        ctx.beginPath();
+        ctx.ellipse(bx,by-br+10,br,br*1.1,0,0,Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle='#333';ctx.lineWidth=2;ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(bx-8,by+br*0.6);
+        ctx.lineTo(bx,by+br*0.9);
+        ctx.lineTo(bx+8,by+br*0.6);
+        ctx.closePath();
+        ctx.fillStyle='#333';ctx.fill();
+    }
+}
+
+function drawReactionEffect(ctx,expId){
+    if(expId==='volcano'){
+        ctx.fillStyle='#ff6b35';
+        for(let i=0;i<3;i++){
+            const h=((G.animationFrame*3+i*40)%180);
+            ctx.globalAlpha=1-h/180;
+            ctx.beginPath();
+            ctx.ellipse(W/2+(Math.random()-0.5)*30,370-h,25-i*5,40-i*6,0,0,Math.PI*2);
+            ctx.fill();
+        }
+        ctx.globalAlpha=1;
+    }
+    if(expId==='sodium'){
+        ctx.strokeStyle='#ff4500';
+        ctx.lineWidth=2;
+        for(let i=0;i<8;i++){
+            const ang=G.animationFrame*0.1+i*Math.PI/4;
+            const r=30+Math.sin(G.animationFrame*0.1+i)*10;
+            ctx.beginPath();
+            ctx.arc(W/2,410,r,ang,ang+0.3);
+            ctx.stroke();
+        }
+    }
+}
+
+function drawHUD(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    roundRect(ctx,10,10,W-20,105,10);ctx.fill();
+    const exp=EXPERIMENTS[G.currentLevel];
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 18px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText(exp.emoji+' '+exp.name,25,38);
+    ctx.fillStyle='#fff';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText(exp.desc,25,58);
+    const totalSteps=exp.steps.length;
+    const step=exp.steps[Math.min(G.currentStep,totalSteps-1)];
+    ctx.fillStyle=G.currentStep<totalSteps?'#4fc3f7':'#4caf50';
+    ctx.font='bold 14px "Microsoft YaHei"';
+    const statusText=G.currentStep<totalSteps?`步骤 ${G.currentStep+1}/${totalSteps}: ${step.name}`:'✓ 全部步骤完成！';
+    ctx.fillText(statusText,25,82);
+    if(G.currentStep<totalSteps){
+        ctx.fillStyle='#aaa';
+        ctx.font='11px "Microsoft YaHei"';
+        ctx.fillText('提示: '+step.hint,25,100);
+    }
+    ctx.textAlign='right';
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('得分: '+G.score,W-25,38);
+    ctx.fillStyle='#fff';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText('关卡: '+(G.currentLevel+1)+'/'+EXPERIMENTS.length,W-25,58);
+    ctx.fillText('⭐'+G.totalStars+'/'+(EXPERIMENTS.length*3),W-25,78);
+    ctx.textAlign='left';
+
+    drawBtn(ctx,W-115,88,45,25,'原理','showPrinciple','#5c6bc0');
+    drawBtn(ctx,W-65,88,55,25,'暂停','pauseBtn','#e94560');
+
+    if(G.currentStep>=totalSteps){
+        drawBtn(ctx,W/2-90,118,90,28,'下一关 ▶','nextLevel','#4caf50');
+        drawBtn(ctx,W/2+5,118,85,28,'重做本关','restartLevel','#ff9800');
+    }
+
+    if(G.resultMsg){
+        ctx.globalAlpha=0.9;
+        const msgColor=G.resultMsg.indexOf('错误')>=0?'#f44336':'#4caf50';
+        ctx.fillStyle=msgColor;
+        ctx.font='bold 16px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(G.resultMsg,W/2,160);
+        ctx.textAlign='left';
+        ctx.globalAlpha=1;
+    }
+}
+
+function drawMenu(ctx){
+    const grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#1a1a2e');
+    grad.addColorStop(0.5,'#16213e');
+    grad.addColorStop(1,'#0f3460');
+    ctx.fillStyle=grad;
+    ctx.fillRect(0,0,W,H);
+    for(let i=0;i<40;i++){
+        ctx.globalAlpha=0.3+Math.sin(G.animationFrame*0.02+i)*0.2;
+        ctx.fillStyle=i%3===0?'#e94560':i%3===1?'#00d9ff':'#ffd700';
+        const x=(i*37+G.animationFrame*0.3)%W;
+        const y=(i*53)%(H-100)+50;
+        ctx.beginPath();
+        ctx.arc(x,y,3+Math.sin(G.animationFrame*0.05+i)*1.5,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#fff';
+    ctx.font='bold 44px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('🔬 化学实验室',W/2,100);
+    ctx.font='18px Arial';
+    ctx.fillStyle='#00d9ff';
+    ctx.fillText('CHEMISTRY LAB',W/2,130);
+    const exp=EXPERIMENTS[G.currentLevel];
+    ctx.save();
+    ctx.translate(W/2,260);
+    const pulse=1+Math.sin(G.animationFrame*0.05)*0.05;
+    ctx.scale(pulse,pulse);
+    ctx.font='90px serif';
+    ctx.fillText(exp.emoji,0,30);
+    ctx.restore();
+    drawBtn(ctx,W/2-150,200,40,35,'◀','selectLeft','#5c6bc0');
+    drawBtn(ctx,W/2+110,200,40,35,'▶','selectRight','#5c6bc0');
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText((G.currentLevel+1)+'. '+exp.name,W/2,360);
+    ctx.fillStyle='#ddd';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText(exp.desc,W/2,385);
+    ctx.fillStyle='#aaa';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText(exp.steps.length+' 个步骤 · 预计 '+Math.ceil(exp.steps.length*0.5)+' 分钟',W/2,408);
+    drawBtn(ctx,W/2-100,440,200,55,'🧪 开始实验','start','#e94560');
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('🏆 最高分: '+G.highScore,W/2,520);
+    const saved=Storage.load('chem_lab_progress',null);
+    if(saved&&saved.stars){
+        ctx.fillStyle='#ffd700';
+        ctx.font='14px "Microsoft YaHei"';
+        ctx.fillText('⭐ 累计星数: '+saved.stars+' / '+(EXPERIMENTS.length*3),W/2,545);
+    }
+    ctx.fillStyle='#aaa';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('游戏玩法:',W/2,585);
+    ctx.fillText('• 点击药品架上的化学试剂',W/2,608);
+    ctx.fillText('• 点击实验器材执行操作',W/2,628);
+    ctx.fillText('• 按步骤顺序完成10个经典实验',W/2,648);
+    ctx.fillText('• 每完成一关学习化学原理知识',W/2,668);
+    ctx.fillStyle='#888';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('⌨️ 空格/回车 开始 | ESC 暂停 | 数字键选择药品',W/2,710);
+    ctx.fillText('🖱️ 鼠标点击 | 📱 触屏点击',W/2,730);
+    ctx.textAlign='left';
+}
+
+function drawPrinciplePopup(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.85)';
+    ctx.fillRect(0,0,W,H);
+    const exp=EXPERIMENTS[G.currentLevel];
+    const px=40,py=180,pw=W-80,ph=H-300;
+    ctx.fillStyle='#16213e';
+    roundRect(ctx,px,py,pw,ph,16);ctx.fill();
+    ctx.strokeStyle='#5c6bc0';ctx.lineWidth=3;ctx.stroke();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(exp.emoji+' '+exp.name+' - 实验原理',W/2,py+45);
+    ctx.strokeStyle='rgba(255,215,0,0.3)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(px+30,py+65);ctx.lineTo(px+pw-30,py+65);ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('📚 反应方程式/原理:',px+25,py+100);
+    ctx.fillStyle='#ccc';
+    ctx.font='14px "Microsoft YaHei"';
+    const lines=wrapText(ctx,exp.principle,pw-50);
+    let ly=py+130;
+    for(const l of lines){
+        ctx.fillText(l,px+25,ly);ly+=24;
+    }
+    ly+=20;
+    ctx.fillStyle='#4fc3f7';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('👁️ 预期现象:',px+25,ly);ly+=28;
+    ctx.fillStyle='#a5d6a7';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('→ '+exp.expected,px+25,ly);
+    drawBtn(ctx,W/2-60,py+ph-55,120,40,'我明白了 ✓','closePrinciple','#4caf50');
+}
+
+function wrapText(ctx,text,maxWidth){
+    const lines=[];
+    let current='';
+    const chars=text.split('');
+    for(const ch of chars){
+        const test=current+ch;
+        if(ctx.measureText(test).width>maxWidth&&current.length>0){
+            lines.push(current);
+            current=ch;
+        }else{
+            current=test;
+        }
+    }
+    if(current)lines.push(current);
+    return lines;
+}
+
+function drawGame(ctx){
+    ctx.fillStyle='#16213e';
+    ctx.fillRect(0,0,W,H);
+    drawHUD(ctx);
+    drawWorkbench(ctx);
+    drawShelf(ctx);
+    if(G.paused){
+        drawPause(ctx);
+    }
+    if(G.principleOpen){
+        drawPrinciplePopup(ctx);
+    }
+}
+
+function drawPause(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.75)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 46px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('⏸ 暂停中',W/2,H/2-60);
+    drawBtn(ctx,W/2-90,H/2,180,55,'▶ 继续实验','resume','#4caf50');
+    drawBtn(ctx,W/2-75,H/2+80,150,45,'🏠 返回菜单','quit','#78909c');
+    ctx.fillStyle='#888';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('按 ESC 键可快速继续',W/2,H/2+150);
+    ctx.textAlign='left';
+}
+
+function drawGameOver(ctx){
+    ctx.fillStyle='#0f0f1a';
+    ctx.fillRect(0,0,W,H);
+    const grd=ctx.createRadialGradient(W/2,H*0.3,20,W/2,H*0.3,300);
+    grd.addColorStop(0,'rgba(233,69,96,0.2)');
+    grd.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,0,W,H);
+    const isNew=G.score>=G.highScore&&G.score>0;
+    ctx.fillStyle=isNew?'#ffd700':'#e94560';
+    ctx.font='bold 44px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(isNew?'🎉 新纪录！':'🧪 实验报告',W/2,120);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('最终得分',W/2,190);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 80px Arial';
+    ctx.fillText(G.score,W/2,280);
+    ctx.fillStyle='#aaa';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('历史最高分: '+G.highScore,W/2,315);
+    const avgStars=EXPERIMENTS.length>0?(G.totalStars/EXPERIMENTS.length):0;
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    const medalText=G.medaled?'🏅 获得优秀实验勋章！':'';
+    ctx.fillText('⭐ 星数 '+G.totalStars+' / '+(EXPERIMENTS.length*3)+'  '+medalText,W/2,360);
+    const pct=EXPERIMENTS.length>0?Math.round((Object.keys(G.experimentResults).length/EXPERIMENTS.length)*100):0;
+    ctx.fillStyle='#4fc3f7';
+    ctx.font='16px "Microsoft YaHei"';
+    ctx.fillText('完成进度: '+pct+'% ('+Object.keys(G.experimentResults).length+'/'+EXPERIMENTS.length+' 个实验)',W/2,395);
+    ctx.fillStyle='#a5d6a7';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('平均星级: '+(avgStars>0?avgStars.toFixed(1):'0.0')+' ⭐',W/2,425);
+    drawBtn(ctx,W/2-95,475,190,55,'🔄 再做一次','restart','#e94560');
+    drawBtn(ctx,W/2-80,550,160,45,'🏠 返回菜单','menu','#5c6bc0');
+    ctx.fillStyle='#888';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('⌨️ 按空格/回车键重新挑战',W/2,640);
+    ctx.fillStyle='#666';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('感谢使用化学实验室！安全实验，探索科学 🔬',W/2,700);
+    ctx.textAlign='left';
+}
+
+function draw(){
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+        case STATE_PAUSE: drawGame(ctx); break;
+    }
+}
+
+let rafId=null;
+function gameLoop(){
+    rafId=requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+gameLoop();
+
+})();
+</script>
+
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

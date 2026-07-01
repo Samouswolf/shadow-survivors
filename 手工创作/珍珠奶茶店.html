@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>珍珠奶茶店</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#fff8e1;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#795548;color:white;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始营业</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=800;
+const GAME_TIME=60;
+
+const CUPS=[
+    {id:0,name:'小杯',color:'#ffccbc',price:0,size:0.8},
+    {id:1,name:'中杯',color:'#ffe0b2',price:5,size:1.0},
+    {id:2,name:'大杯',color:'#fff9c4',price:10,size:1.2}
+];
+
+const TEAS=[
+    {id:0,name:'绿茶',color:'#c5e1a5',emoji:'🍵'},
+    {id:1,name:'红茶',color:'#8d6e63',emoji:'🫖'},
+    {id:2,name:'乌龙',color:'#a1887f',emoji:'🍃'},
+    {id:3,name:'茉莉',color:'#d7ccc8',emoji:'🌼'}
+];
+
+const SWEETS=[
+    {id:0,name:'无糖',val:0},
+    {id:1,name:'三分糖',val:30},
+    {id:2,name:'半糖',val:50},
+    {id:3,name:'全糖',val:100}
+];
+
+const ICES=[
+    {id:0,name:'热饮',val:0,hot:true},
+    {id:1,name:'温饮',val:30,hot:false},
+    {id:2,name:'少冰',val:60,hot:false},
+    {id:3,name:'正常冰',val:100,hot:false}
+];
+
+const TOPPINGS=[
+    {id:0,name:'珍珠',color:'#2c1810',emoji:'⚫'},
+    {id:1,name:'椰果',color:'#fff9c4',emoji:'🟡'},
+    {id:2,name:'红豆',color:'#c62828',emoji:'🔴'},
+    {id:3,name:'布丁',color:'#ffd54f',emoji:'🟠'},
+    {id:4,name:'芋圆',color:'#ab47bc',emoji:'🟣'}
+];
+
+const CUSTOMER_NAMES=['阿杰','阿雅','小林','老王','小美','阿强','小雪','大伟','小琪','阿东','小芳','大雄'];
+const CUSTOMER_EMOJIS=['👨','👩','🧑','👧','👦','👴','👵','🧒','👱‍♀️','👱','🧔','👸'];
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'sine';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxClick(){playTone(600,0.05,'sine',0.1)}
+function sfxShake(){for(let i=0;i<4;i++)setTimeout(()=>playTone(300+Math.random()*200,0.06,'triangle',0.08),i*50)}
+function sfxCoin(){playTone(880,0.08,'sine',0.15);setTimeout(()=>playTone(1175,0.1,'sine',0.15),70)}
+function sfxError(){playTone(180,0.18,'sawtooth',0.18)}
+function sfxBell(){playTone(784,0.1,'sine',0.14);setTimeout(()=>playTone(1047,0.12,'sine',0.14),100);setTimeout(()=>playTone(1319,0.2,'sine',0.14),220)}
+function sfxBuzzer(){playTone(150,0.5,'sawtooth',0.2)}
+function sfxVIP(){for(let i=0;i<6;i++)setTimeout(()=>playTone(523+i*88,0.1,'sine',0.14),i*70)}
+function sfxShakenDone(){playTone(1047,0.15,'sine',0.18);setTimeout(()=>playTone(1568,0.2,'sine',0.18),120)}
+
+function TeaOrder(){
+    this.cup=Math.floor(Math.random()*3);
+    this.tea=Math.floor(Math.random()*4);
+    this.sweet=Math.floor(Math.random()*4);
+    this.ice=Math.floor(Math.random()*4);
+    const nTop=Math.random()<0.4?0:Math.random()<0.7?1:2;
+    this.toppings=[];
+    const used=new Set();
+    for(let i=0;i<nTop;i++){
+        let t;
+        do{t=Math.floor(Math.random()*5)}while(used.has(t));
+        used.add(t);this.toppings.push(t);
+    }
+    this.isVIP=Math.random()<0.15;
+    this.price=60+CUPS[this.cup].price+this.toppings.length*8+(this.isVIP?40:0);
+}
+
+function Customer(){
+    this.id=Math.random();
+    this.name=CUSTOMER_NAMES[Math.floor(Math.random()*CUSTOMER_NAMES.length)];
+    this.emoji=CUSTOMER_EMOJIS[Math.floor(Math.random()*CUSTOMER_EMOJIS.length)];
+    this.order=new TeaOrder();
+    this.waitTime=0;
+    this.maxWait=900+Math.floor(Math.random()*300);
+}
+Customer.prototype.getMoodText=function(){
+    const r=this.waitTime/this.maxWait;
+    if(r<0.4)return'😊';
+    if(r<0.7)return'😐';
+    if(r<0.9)return'😠';
+    return'🤬';
+};
+
+function CurrentTea(){
+    this.reset();
+}
+CurrentTea.prototype.reset=function(){
+    this.cup=-1;this.tea=-1;this.sweet=-1;this.ice=-1;this.toppings=[];
+    this.shaking=false;this.shakeProgress=0;this.shaken=false;
+};
+CurrentTea.prototype.addTopping=function(t){
+    if(this.toppings.length>=3)return false;
+    if(this.toppings.indexOf(t)>=0)return false;
+    this.toppings.push(t);return true;
+};
+CurrentTea.prototype.canShake=function(){
+    return this.cup>=0&&this.tea>=0&&this.sweet>=0&&this.ice>=0;
+};
+CurrentTea.prototype.isDone=function(){
+    return this.shaken;
+};
+CurrentTea.prototype.compareTo=function(order){
+    if(this.cup<0||this.tea<0||this.sweet<0||this.ice<0)return-2;
+    if(!this.shaken)return-1;
+    let wrong=0;
+    if(this.cup!==order.cup)wrong++;
+    if(this.tea!==order.tea)wrong++;
+    if(this.sweet!==order.sweet)wrong++;
+    if(this.ice!==order.ice)wrong++;
+    const myT=this.toppings.slice().sort();
+    const odT=order.toppings.slice().sort();
+    if(myT.length!==odT.length)wrong++;
+    else{
+        for(let i=0;i<myT.length;i++)if(myT[i]!==odT[i])wrong++;
+    }
+    return wrong;
+};
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const G={
+    state:STATE_MENU,
+    coins:0,
+    highScore:0,
+    timeLeft:GAME_TIME*60,
+    customers:[],
+    selectedCust:0,
+    nextSpawn:0,
+    current:new CurrentTea(),
+    served:0,
+    vipServed:0,
+    perfect:0,
+    btnRects:{},
+    keys:{},
+    paused:false,
+    scorePopups:[],
+    shakeAnimT:0
+};
+
+G.highScore=parseInt(Storage.load('bubble_high','0'));
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color,active,emoji){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    ctx.fillStyle=color||'#795548';
+    ctx.strokeStyle=active?'#ffd700':'#fff';
+    ctx.lineWidth=active?3:2;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+(emoji?13:14)+'px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText((emoji?emoji+' ':'')+text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+function getCustSlot(i){
+    return{x:15,y:110+i*135,w:125,h:125};
+}
+
+window.addEventListener('keydown',function(e){
+    G.keys[e.key.toLowerCase()]=true;
+    if(e.key===' '||e.key==='Enter'){
+        e.preventDefault();
+        if(G.state===STATE_MENU||G.state===STATE_OVER){startGame();return}
+    }
+    if(e.key==='Escape'){e.preventDefault();if(G.state===STATE_PLAYING)togglePause()}
+    if(G.state===STATE_PLAYING&&!G.paused){
+        if(e.key==='1'){G.current.cup=0;sfxClick()}
+        if(e.key==='2'){G.current.cup=1;sfxClick()}
+        if(e.key==='3'){G.current.cup=2;sfxClick()}
+        if(e.key==='q'||e.key==='Q'){G.current.tea=0;sfxClick()}
+        if(e.key==='w'||e.key==='W'){G.current.tea=1;sfxClick()}
+        if(e.key==='e'||e.key==='E'){G.current.tea=2;sfxClick()}
+        if(e.key==='r'||e.key==='R'){G.current.tea=3;sfxClick()}
+        if(e.key==='a'||e.key==='A'){G.current.sweet=0;sfxClick()}
+        if(e.key==='s'||e.key==='S'){G.current.sweet=1;sfxClick()}
+        if(e.key==='d'||e.key==='D'){G.current.sweet=2;sfxClick()}
+        if(e.key==='f'||e.key==='F'){G.current.sweet=3;sfxClick()}
+        if(e.key==='z'||e.key==='Z'){G.current.ice=0;sfxClick()}
+        if(e.key==='x'||e.key==='X'){G.current.ice=1;sfxClick()}
+        if(e.key==='c'||e.key==='C'){G.current.ice=2;sfxClick()}
+        if(e.key==='v'||e.key==='V'){G.current.ice=3;sfxClick()}
+        const n=parseInt(e.key);
+        if(n>=5&&n<=9){G.current.addTopping(n-5);sfxClick()}
+        if(e.key==='Backspace'){G.current.reset();sfxClick()}
+        if(e.key==='Shift'){tryShake()}
+        if(e.key==='Enter'){tryDeliver()}
+        if(e.key==='Tab'){e.preventDefault();G.selectedCust=(G.selectedCust+1)%Math.max(1,G.customers.length)}
+    }
+    initAudio();
+});
+window.addEventListener('keyup',function(e){
+    G.keys[e.key.toLowerCase()]=false;
+});
+
+function tryShake(){
+    if(G.current.shaking||G.current.shaken)return;
+    if(!G.current.canShake()){sfxError();return}
+    if(G.coins>=20){
+        G.coins-=20;
+        G.current.shaken=true;
+        sfxShakenDone();
+        G.scorePopups.push({x:310,y:380,text:'🚀 加速摇匀',color:'#9c27b0',life:50});
+        return;
+    }
+    G.current.shaking=true;
+    G.current.shakeProgress=0;
+    sfxShake();
+}
+
+function tryDeliver(){
+    if(G.customers.length===0)return;
+    const cust=G.customers[G.selectedCust];
+    if(!cust)return;
+    const cmp=G.current.compareTo(cust.order);
+    if(cmp<-1){sfxError();return}
+    let earn=0;
+    let txt='';
+    let col='#4caf50';
+    if(cmp===0){
+        G.perfect++;
+        earn=cust.order.price;
+        if(cust.order.isVIP){earn*=2;sfxVIP();txt='VIP完美! x2 '}else{sfxShakenDone();txt='完美! '}
+        if(cust.order.isVIP)G.vipServed++;
+    }else if(cmp===1){
+        earn=30;col='#ff9800';txt='1项错 ';sfxCoin();
+    }else if(cmp>=2){
+        earn=-20;col='#f44336';txt='错太多! ';sfxError();
+    }else{
+        sfxError();return;
+    }
+    G.coins+=earn;
+    G.served++;
+    G.scorePopups.push({x:310,y:380,text:txt+(earn>=0?'+':'')+earn,color:col,life:70});
+    G.customers.splice(G.selectedCust,1);
+    if(G.selectedCust>=G.customers.length)G.selectedCust=Math.max(0,G.customers.length-1);
+    G.current.reset();
+}
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){startGame();return}
+    }else if(G.state===STATE_PAUSE){
+        if(hitBtn(p,'resume')){togglePause();return}
+        if(hitBtn(p,'quit')){G.state=STATE_MENU;G.paused=false;sfxClick();return}
+    }else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;sfxClick();return}
+    }else if(G.state===STATE_PLAYING&&!G.paused){
+        for(let i=0;i<G.customers.length;i++){
+            const a=getCustSlot(i);
+            if(p.x>=a.x&&p.x<=a.x+a.w&&p.y>=a.y&&p.y<=a.y+a.h){G.selectedCust=i;sfxClick();return}
+        }
+        const step=getStepAreas();
+        for(let i=0;i<step.cups.length;i++){
+            if(p.x>=step.cups[i].x&&p.x<=step.cups[i].x+step.cups[i].w&&p.y>=step.cups[i].y&&p.y<=step.cups[i].y+step.cups[i].h){G.current.cup=i;sfxClick();return}
+        }
+        for(let i=0;i<step.teas.length;i++){
+            if(p.x>=step.teas[i].x&&p.x<=step.teas[i].x+step.teas[i].w&&p.y>=step.teas[i].y&&p.y<=step.teas[i].y+step.teas[i].h){G.current.tea=i;sfxClick();return}
+        }
+        for(let i=0;i<step.sweets.length;i++){
+            if(p.x>=step.sweets[i].x&&p.x<=step.sweets[i].x+step.sweets[i].w&&p.y>=step.sweets[i].y&&p.y<=step.sweets[i].y+step.sweets[i].h){G.current.sweet=i;sfxClick();return}
+        }
+        for(let i=0;i<step.ices.length;i++){
+            if(p.x>=step.ices[i].x&&p.x<=step.ices[i].x+step.ices[i].w&&p.y>=step.ices[i].y&&p.y<=step.ices[i].y+step.ices[i].h){G.current.ice=i;sfxClick();return}
+        }
+        for(let i=0;i<step.tops.length;i++){
+            if(p.x>=step.tops[i].x&&p.x<=step.tops[i].x+step.tops[i].w&&p.y>=step.tops[i].y&&p.y<=step.tops[i].y+step.tops[i].h){G.current.addTopping(i);sfxClick();return}
+        }
+        if(p.x>=step.shake.x&&p.x<=step.shake.x+step.shake.w&&p.y>=step.shake.y&&p.y<=step.shake.y+step.shake.h){tryShake();return}
+        if(p.x>=step.deliv.x&&p.x<=step.deliv.x+step.deliv.w&&p.y>=step.deliv.y&&p.y<=step.deliv.y+step.deliv.h){tryDeliver();return}
+        if(p.x>=step.reset.x&&p.x<=step.reset.x+step.reset.w&&p.y>=step.reset.y&&p.y<=step.reset.y+step.reset.h){G.current.reset();sfxClick();return}
+    }
+}
+function handlePointerMove(e){}
+function handlePointerUp(e){}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e)},{passive:false});
+
+function getStepAreas(){
+    const ox=155,ow=W-170;
+    const row1Y=660,row2Y=605,row3Y=550,row4Y=495;
+    const bw=(ow-3*4)/4;
+    const tw=(ow-4*4)/5;
+    const cups=[];for(let i=0;i<3;i++)cups.push({x:ox+i*(bw+4)+bw/2,y:row1Y,w:bw,h:48});
+    const teas=[];for(let i=0;i<4;i++)teas.push({x:ox+i*(bw+4),y:row2Y,w:bw,h:48});
+    const sweets=[];for(let i=0;i<4;i++)sweets.push({x:ox+i*(bw+4),y:row3Y,w:bw,h:48});
+    const ices=[];for(let i=0;i<4;i++)ices.push({x:ox+i*(bw+4),y:row4Y,w:bw,h:48});
+    const tops=[];for(let i=0;i<5;i++)tops.push({x:ox+i*(tw+4),y:442,w:tw,h:46});
+    const shake={x:ox,y:395,w:(ow-4)/2,h:42};
+    const deliv={x:ox+(ow-4)/2+4,y:395,w:(ow-4)/2,h:42};
+    const reset={x:ox,y:350,w:ow,h:40};
+    return{cups,teas,sweets,ices,tops,shake,deliv,reset};
+}
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.coins=0;
+    G.timeLeft=GAME_TIME*60;
+    G.customers=[];
+    G.selectedCust=0;
+    G.nextSpawn=60;
+    G.current=new CurrentTea();
+    G.served=0;
+    G.vipServed=0;
+    G.perfect=0;
+    G.scorePopups=[];
+    G.paused=false;
+    sfxBell();
+}
+
+function endGame(){
+    G.state=STATE_OVER;
+    if(G.coins>G.highScore){
+        G.highScore=G.coins;
+        Storage.save('bubble_high',G.highScore);
+    }
+    sfxBuzzer();
+}
+
+function togglePause(){
+    G.paused=!G.paused;
+    if(G.paused)G.state=STATE_PAUSE;
+    else G.state=STATE_PLAYING;
+    sfxClick();
+}
+
+function update(){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    G.timeLeft--;
+    if(G.timeLeft<=0){endGame();return}
+    G.nextSpawn--;
+    if(G.nextSpawn<=0&&G.customers.length<4){
+        G.customers.push(new Customer());
+        G.nextSpawn=150+Math.floor(Math.random()*180);
+        sfxBell();
+    }
+    for(let i=G.customers.length-1;i>=0;i--){
+        const c=G.customers[i];
+        c.waitTime++;
+        if(c.waitTime>=c.maxWait){
+            const lose=c.order.isVIP?-200:-100;
+            G.coins+=lose;
+            G.scorePopups.push({x:75,y:260,text:'顾客走! '+lose,color:'#f44336',life:70});
+            G.customers.splice(i,1);
+            if(G.selectedCust>=G.customers.length)G.selectedCust=Math.max(0,G.customers.length-1);
+            sfxError();
+        }
+    }
+    if(G.current.shaking){
+        G.current.shakeProgress++;
+        G.shakeAnimT++;
+        if(G.current.shakeProgress>=120){
+            G.current.shaking=false;
+            G.current.shaken=true;
+            sfxShakenDone();
+        }
+    }
+    for(let i=G.scorePopups.length-1;i>=0;i--){
+        const s=G.scorePopups[i];
+        s.y-=1.1;s.life--;
+        if(s.life<=0)G.scorePopups.splice(i,1);
+    }
+}
+
+function drawBg(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#fff8e1');
+    g.addColorStop(0.5,'#ffecb3');
+    g.addColorStop(1,'#ffe082');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(121,85,72,0.06)';
+    for(let i=0;i<W;i+=30)ctx.fillRect(i,0,2,H);
+    for(let i=0;i<H;i+=30)ctx.fillRect(0,i,W,2);
+}
+
+function drawHUD(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.55)';
+    roundRect(ctx,10,10,W-20,88,12);ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('金币',25,35);
+    ctx.font='bold 26px "Microsoft YaHei"';
+    ctx.fillStyle='#ffd700';
+    ctx.fillText('💰'+G.coins,25,62);
+    const secs=Math.ceil(G.timeLeft/60);
+    ctx.textAlign='center';
+    ctx.fillStyle=secs<=10?'#ff4444':'#fff';
+    ctx.font='bold 34px Arial';
+    ctx.fillText('⏱'+secs+'s',W/2,52);
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillStyle='#d7ccc8';
+    ctx.fillText('完成: '+G.served+'单  完美: '+G.perfect,W/2,82);
+    ctx.textAlign='right';
+    ctx.fillStyle='#8d6e63';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.fillText('最高分',W-25,35);
+    ctx.font='bold 19px "Microsoft YaHei"';
+    ctx.fillStyle='#ffd700';
+    ctx.fillText(G.highScore,W-25,59);
+    ctx.textAlign='left';
+}
+
+function drawCustomer(ctx,i){
+    if(i>=G.customers.length)return;
+    const a=getCustSlot(i);
+    const c=G.customers[i];
+    const o=c.order;
+    const sel=G.selectedCust===i;
+    ctx.fillStyle=sel?'rgba(121,85,72,0.25)':'rgba(255,255,255,0.75)';
+    roundRect(ctx,a.x,a.y,a.w,a.h,12);ctx.fill();
+    ctx.strokeStyle=sel?'#795548':'rgba(121,85,72,0.3)';
+    ctx.lineWidth=sel?3:1.5;
+    roundRect(ctx,a.x,a.y,a.w,a.h,12);ctx.stroke();
+    if(o.isVIP){
+        ctx.fillStyle='#ffc107';
+        roundRect(ctx,a.x+4,a.y+4,a.w-8,18,8);ctx.fill();
+        ctx.fillStyle='#fff';ctx.font='bold 11px "Microsoft YaHei"';ctx.textAlign='center';
+        ctx.fillText('👑 VIP x2',a.x+a.w/2,a.y+17);ctx.textAlign='left';
+    }
+    ctx.font='28px Arial';ctx.textAlign='center';
+    ctx.fillText(c.emoji,a.x+a.w/2,a.y+(o.isVIP?50:38));
+    ctx.font='bold 10px "Microsoft YaHei"';ctx.fillStyle='#3e2723';
+    ctx.fillText(c.name+c.getMoodText(),a.x+a.w/2,a.y+(o.isVIP?68:56));
+    const mw=c.maxWait,w=c.waitTime,pct=1-w/mw;
+    const bw=a.w-12,bh=5;
+    ctx.fillStyle='rgba(0,0,0,0.15)';
+    roundRect(ctx,a.x+6,a.y+(o.isVIP?76:64),bw,bh,3);ctx.fill();
+    const col=pct>0.5?'#4caf50':pct>0.2?'#ff9800':'#f44336';
+    ctx.fillStyle=col;
+    roundRect(ctx,a.x+6,a.y+(o.isVIP?76:64),bw*pct,bh,3);ctx.fill();
+    const oy=a.y+(o.isVIP?85:73);
+    ctx.font='9px "Microsoft YaHei"';ctx.fillStyle='#5d4037';
+    ctx.fillText(CUPS[o.cup].name+'·'+TEAS[o.tea].name,a.x+a.w/2,oy);
+    ctx.fillText(SWEETS[o.sweet].name+'·'+ICES[o.ice].name,a.x+a.w/2,oy+11);
+    let tt='无料';
+    if(o.toppings.length>0){tt=o.toppings.map(t=>TOPPINGS[t].emoji).join('')}
+    ctx.fillText(tt,a.x+a.w/2,oy+22);
+    ctx.fillStyle='#ff6f00';
+    ctx.font='bold 10px "Microsoft YaHei"';
+    ctx.fillText('💰'+o.price,a.x+a.w/2,oy+34);
+    ctx.textAlign='left';
+}
+
+function drawCustomers(ctx){
+    for(let i=0;i<4;i++)drawCustomer(ctx,i);
+    ctx.fillStyle='#5d4037';
+    ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.fillText('👥 顾客 (点选/Tab切换)',15,105);
+}
+
+function drawTeaPreview(ctx){
+    const cx=325,cy=330;
+    const t=G.current;
+    const cupCol=t.cup>=0?CUPS[t.cup].color:'#e0e0e0';
+    const size=t.cup>=0?CUPS[t.cup].size:1.0;
+    const cw=50*size,ch=90*size;
+    ctx.save();
+    let shakeX=0;
+    if(t.shaking){shakeX=Math.sin(G.shakeAnimT*0.8)*5;}
+    ctx.translate(cx+shakeX,cy);
+    ctx.fillStyle=cupCol;
+    ctx.beginPath();
+    ctx.moveTo(-cw/2,-ch/2);
+    ctx.lineTo(cw/2,-ch/2);
+    ctx.lineTo(cw/2-6,ch/2);
+    ctx.lineTo(-cw/2+6,ch/2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.2)';ctx.lineWidth=1.5;ctx.stroke();
+    if(t.tea>=0){
+        const teaCol=TEAS[t.tea].color;
+        const fill=t.shaken?0.85:0.35;
+        ctx.fillStyle=teaCol;
+        ctx.globalAlpha=fill;
+        ctx.beginPath();
+        ctx.moveTo(-cw/2+3,-ch/2+10);
+        ctx.lineTo(cw/2-3,-ch/2+10);
+        ctx.lineTo(cw/2-8,ch/2-5);
+        ctx.lineTo(-cw/2+8,ch/2-5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha=1;
+    }
+    if(t.ice>=0&&!ICES[t.ice].hot){
+        ctx.fillStyle='rgba(200,230,255,0.8)';
+        for(let i=0;i<3;i++){
+            ctx.beginPath();
+            ctx.arc(-12+i*12,-ch/2+25+i*5,5,0,Math.PI*2);
+            ctx.fill();
+        }
+    }
+    for(let i=0;i<t.toppings.length;i++){
+        const top=TOPPINGS[t.toppings[i]];
+        ctx.fillStyle=top.color;
+        for(let k=0;k<4;k++){
+            ctx.beginPath();
+            ctx.arc(-cw/3+Math.random()*2*cw/3,ch/2-15-i*6-k*3,3.5,0,Math.PI*2);
+            ctx.fill();
+        }
+    }
+    ctx.fillStyle='rgba(255,255,255,0.8)';
+    roundRect(ctx,-cw/2-3,-ch/2-12,cw+6,10,4);ctx.fill();
+    const sr=Math.sin(Date.now()/150)*2;
+    ctx.fillStyle='#ff5722';
+    ctx.beginPath();
+    ctx.arc(sr,-ch/2-48,6,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 9px Arial';ctx.textAlign='center';
+    ctx.fillText('茶',sr,-ch/2-45);
+    ctx.restore();
+    ctx.fillStyle='#5d4037';
+    ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('🧋 当前制作',cx,cy+90);
+    if(t.shaken){
+        ctx.fillStyle='#4caf50';
+        ctx.font='bold 13px "Microsoft YaHei"';
+        ctx.fillText('✅ 已摇匀 可出杯',cx,cy+108);
+    }else if(t.shaking){
+        const p=Math.floor(t.shakeProgress/120*100);
+        ctx.fillStyle='#ff9800';
+        ctx.font='bold 13px "Microsoft YaHei"';
+        ctx.fillText('⏳ 摇匀中 '+p+'%',cx,cy+108);
+    }else{
+        ctx.fillStyle='#9e9e9e';
+        ctx.font='12px "Microsoft YaHei"';
+        ctx.fillText('按步选择→摇匀→交付',cx,cy+108);
+    }
+    ctx.textAlign='left';
+    if(t.canShake()&&!t.shaking&&!t.shaken){
+        ctx.fillStyle='rgba(156,39,176,0.8)';
+        ctx.font='bold 11px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText('💰20 立即加速摇匀',cx,cy+126);
+        ctx.textAlign='left';
+    }
+}
+
+function drawStation(ctx){
+    const s=getStepAreas();
+    drawBtn(ctx,s.reset.x,s.reset.y,s.reset.w,s.reset.h,'🔄 重置当前 (退格)','reset','#9e9e9e',false);
+    drawBtn(ctx,s.shake.x,s.shake.y,s.shake.w,s.shake.h,
+        (G.current.shaking?'⏳ 摇匀中...':G.current.shaken?'✅ 已摇匀':'🧊 摇匀杯 (Shift) '+(G.coins>=20?'(加速20)':'')),'shake',
+        G.current.shaken?'#4caf50':'#673ab7',G.current.shaken);
+    drawBtn(ctx,s.deliv.x,s.deliv.y,s.deliv.w,s.deliv.h,'📤 交付顾客 (Enter)','deliver','#ff5722',false);
+    for(let i=0;i<s.cups.length;i++){
+        const c=CUPS[i];
+        drawBtn(ctx,s.cups[i].x,s.cups[i].y,s.cups[i].w,s.cups[i].h,c.name+' +'+c.price,'cup'+i,c.color,G.current.cup===i);
+    }
+    for(let i=0;i<s.teas.length;i++){
+        const t=TEAS[i];
+        drawBtn(ctx,s.teas[i].x,s.teas[i].y,s.teas[i].w,s.teas[i].h,t.name,'tea'+i,t.color,G.current.tea===i,t.emoji);
+    }
+    for(let i=0;i<s.sweets.length;i++){
+        const sw=SWEETS[i];
+        drawBtn(ctx,s.sweets[i].x,s.sweets[i].y,s.sweets[i].w,s.sweets[i].h,sw.name,'sweet'+i,
+            G.current.sweet===i?'#ffb300':'#fff176',G.current.sweet===i,'🍯');
+    }
+    for(let i=0;i<s.ices.length;i++){
+        const ic=ICES[i];
+        drawBtn(ctx,s.ices[i].x,s.ices[i].y,s.ices[i].w,s.ices[i].h,ic.name,'ice'+i,
+            G.current.ice===i?'#4fc3f7':'#b3e5fc',G.current.ice===i,ic.hot?'☕':'🧊');
+    }
+    for(let i=0;i<s.tops.length;i++){
+        const tp=TOPPINGS[i];
+        const has=G.current.toppings.indexOf(i)>=0;
+        drawBtn(ctx,s.tops[i].x,s.tops[i].y,s.tops[i].w,s.tops[i].h,tp.name,'top'+i,has?tp.color:'rgba(255,255,255,0.85)',has,tp.emoji);
+    }
+    ctx.fillStyle='#5d4037';
+    ctx.font='bold 11px "Microsoft YaHei"';
+    ctx.fillText('🫗 杯型(1/2/3):',s.cups[0].x-2,s.cups[0].y-4);
+    ctx.fillText('🍵 茶底(Q/W/E/R):',s.teas[0].x-2,s.teas[0].y-4);
+    ctx.fillText('🍯 甜度(A/S/D/F):',s.sweets[0].x-2,s.sweets[0].y-4);
+    ctx.fillText('🧊 冰度(Z/X/C/V):',s.ices[0].x-2,s.ices[0].y-4);
+    ctx.fillText('🧋 加料(5/6/7/8/9):',s.tops[0].x-2,s.tops[0].y-4);
+}
+
+function drawPopups(ctx){
+    for(const s of G.scorePopups){
+        ctx.globalAlpha=Math.min(1,s.life/35);
+        ctx.fillStyle=s.color;
+        ctx.font='bold 22px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(s.text,s.x,s.y);
+        ctx.textAlign='left';
+    }
+    ctx.globalAlpha=1;
+}
+
+function drawMenu(ctx){
+    drawBg(ctx);
+    ctx.fillStyle='rgba(255,255,255,0.25)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#5d4037';
+    ctx.font='bold 50px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('🧋 珍珠奶茶店',W/2,140);
+    ctx.fillStyle='#8d6e63';
+    ctx.font='22px Arial';
+    ctx.fillText('BUBBLE TEA SHOP',W/2,175);
+    const cx=W/2,cy=320;
+    ctx.save();ctx.translate(cx,cy);
+    ctx.fillStyle='#fff9c4';
+    ctx.beginPath();
+    ctx.moveTo(-55,-100);ctx.lineTo(55,-100);ctx.lineTo(48,10);ctx.lineTo(-48,10);
+    ctx.closePath();ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.2)';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='rgba(197,225,165,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(-50,-90);ctx.lineTo(50,-90);ctx.lineTo(44,5);ctx.lineTo(-44,5);
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle='#2c1810';
+    for(let i=0;i<15;i++){
+        ctx.beginPath();
+        ctx.arc(-30+Math.random()*60,-20+Math.random()*25,4,0,Math.PI*2);
+        ctx.fill();
+    }
+    ctx.fillStyle='rgba(255,255,255,0.9)';
+    roundRect(ctx,-58,-112,116,12,5);ctx.fill();
+    ctx.fillStyle='#ff5722';
+    ctx.beginPath();ctx.arc(0,-150,8,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText('茶',0,-147);
+    ctx.restore();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.fillText('最高分: 💰'+G.highScore,W/2,450);
+    drawBtn(ctx,W/2-100,490,200,60,'开始营业','start','#795548');
+    ctx.fillStyle='#5d4037';
+    ctx.font='15px "Microsoft YaHei"';
+    ctx.fillText('⏱ 60秒 · 做完美奶茶赚取金币',W/2,580);
+    ctx.fillStyle='#6d4c41';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('🖱️/📱 点选顾客→按6步配置→摇匀→交付',W/2,620);
+    ctx.fillText('⌨️ 1/2/3杯 QWER茶 ASDF甜 ZXCV冰 5-9料 Shift摇 Enter出',W/2,645);
+    ctx.fillText('完美=全价 · VIP x2 · 1错=30 · 多错=-20',W/2,670);
+    ctx.fillText('顾客等太久离开 -100(VIP -200) 💰20可加速摇匀',W/2,695);
+    ctx.textAlign='left';
+}
+
+function drawGame(ctx){
+    drawBg(ctx);
+    drawHUD(ctx);
+    drawCustomers(ctx);
+    drawTeaPreview(ctx);
+    drawStation(ctx);
+    drawPopups(ctx);
+    if(G.state===STATE_PAUSE){
+        ctx.fillStyle='rgba(0,0,0,0.72)';
+        ctx.fillRect(0,0,W,H);
+        ctx.fillStyle='#fff';
+        ctx.font='bold 44px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText('⏸ 暂停营业',W/2,H/2-60);
+        drawBtn(ctx,W/2-85,H/2,170,55,'继续','resume','#795548');
+        drawBtn(ctx,W/2-70,H/2+75,140,45,'退出','quit','#6d4c41');
+        ctx.textAlign='left';
+    }
+}
+
+function drawGameOver(ctx){
+    drawBg(ctx);
+    ctx.fillStyle='rgba(93,64,55,0.9)';
+    ctx.fillRect(0,0,W,H);
+    const isNew=G.coins>=G.highScore&&G.coins>0;
+    ctx.fillStyle=isNew?'#ffd700':'#fff3e0';
+    ctx.font='bold 48px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(isNew?'🏆 新纪录!':'打烊啦!',W/2,150);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('今日营收',W/2,225);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 80px Arial';
+    ctx.fillText('💰'+G.coins,W/2,315);
+    ctx.fillStyle='#ffe0b2';
+    ctx.font='17px "Microsoft YaHei"';
+    ctx.fillText('服务 '+G.served+' 单   完美 '+G.perfect+' 单   VIP '+G.vipServed+' 单',W/2,370);
+    const pr=G.served>0?Math.floor(G.perfect/G.served*100):0;
+    ctx.fillText('完美率: '+pr+'%',W/2,395);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 20px "Microsoft YaHei"';
+    ctx.fillText('历史最高: 💰'+G.highScore,W/2,440);
+    drawBtn(ctx,W/2-90,490,180,55,'再开一天','restart','#795548');
+    drawBtn(ctx,W/2-70,560,140,45,'返回菜单','menu','#4e342e');
+    ctx.textAlign='left';
+}
+
+function draw(){
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_PAUSE: drawGame(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+    }
+}
+
+let loopId;
+function gameLoop(){
+    loopId=requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+gameLoop();
+
+})();
+</script>
+
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try { initAudio(); } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

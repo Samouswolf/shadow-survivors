@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>荒岛求生</title>
+    
+  <!-- [BUGFIX startup-v1] 补全状态机常量(扫描用) -->
+  <script>
+    if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+    if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+    if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+    if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+  </script>
+<script src="../game_core.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #00cec9 0%, #0984e3 50%, #fdcb6e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+        }
+        .game-container {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 24px;
+            padding: 22px;
+            box-shadow: 0 24px 72px rgba(0, 0, 0, 0.35);
+            max-width: 520px;
+            width: 100%;
+        }
+        .game-title {
+            text-align: center;
+            font-size: 26px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #0984e3, #00cec9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 14px;
+        }
+        .header {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            margin-bottom: 14px;
+            padding: 10px;
+            background: linear-gradient(135deg, #0984e3, #00cec9);
+            border-radius: 14px;
+        }
+        .stat {
+            text-align: center;
+            color: white;
+        }
+        .stat-label {
+            font-size: 11px;
+            opacity: 0.92;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .island-view {
+            height: 170px;
+            background: linear-gradient(180deg, #74b9ff 0%, #00cec9 50%, #fdcb6e 80%, #e17055 100%);
+            border-radius: 14px;
+            margin-bottom: 14px;
+            position: relative;
+            overflow: hidden;
+            border: 3px solid #0984e3;
+        }
+        .sun-shine {
+            position: absolute;
+            top: 14px;
+            right: 35px;
+            font-size: 42px;
+            animation: sunPulse 2s ease-in-out infinite;
+        }
+        @keyframes sunPulse {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 8px #ffeaa7); }
+            50% { transform: scale(1.08); filter: drop-shadow(0 0 16px #fdcb6e); }
+        }
+        .sea-wave {
+            position: absolute;
+            top: 60px;
+            left: 0;
+            width: 100%;
+            height: 20px;
+            font-size: 20px;
+            letter-spacing: 4px;
+            opacity: 0.7;
+            animation: waveMove 3s linear infinite;
+        }
+        @keyframes waveMove {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-30px); }
+        }
+        .island-sand {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 65px;
+            background: linear-gradient(180deg, #fdcb6e 0%, #e17055 100%);
+            border-radius: 60% 40% 0 0 / 100% 80% 0 0;
+        }
+        .palm-tree {
+            position: absolute;
+            bottom: 45px;
+            font-size: 48px;
+        }
+        .palm-left { left: 20px; transform: rotate(-8deg); }
+        .palm-right { right: 20px; transform: rotate(8deg); }
+        .player-hero {
+            position: absolute;
+            bottom: 35px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 40px;
+            transition: all 0.4s ease;
+            z-index: 5;
+        }
+        .float-item {
+            position: absolute;
+            font-size: 24px;
+            animation: floatItem 4s ease-in-out infinite;
+        }
+        @keyframes floatItem {
+            0%, 100% { transform: translateY(0) rotate(-5deg); }
+            50% { transform: translateY(-8px) rotate(5deg); }
+        }
+        .status-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 14px;
+            padding: 14px;
+            background: #dfe6e9;
+            border-radius: 14px;
+        }
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-icon {
+            font-size: 22px;
+            width: 28px;
+            text-align: center;
+        }
+        .status-name {
+            font-size: 13px;
+            color: #2d3436;
+            width: 54px;
+            font-weight: bold;
+        }
+        .bar-container {
+            flex: 1;
+            height: 22px;
+            background: #b2bec3;
+            border-radius: 11px;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.15);
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 11px;
+            transition: width 0.4s ease;
+            position: relative;
+        }
+        .bar-fill::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 4px;
+            right: 4px;
+            height: 5px;
+            background: rgba(255,255,255,0.35);
+            border-radius: 3px;
+        }
+        .bar-hunger { background: linear-gradient(90deg, #e17055, #d63031); }
+        .bar-water { background: linear-gradient(90deg, #74b9ff, #0984e3); }
+        .bar-health { background: linear-gradient(90deg, #55efc4, #00b894); }
+        .bar-energy { background: linear-gradient(90deg, #ffeaa7, #fdcb6e); }
+        .bar-sanity { background: linear-gradient(90deg, #a29bfe, #6c5ce7); }
+        .status-value {
+            font-size: 13px;
+            color: #2d3436;
+            width: 44px;
+            text-align: right;
+            font-weight: bold;
+        }
+        .event-log {
+            height: 72px;
+            overflow-y: auto;
+            background: #2d3436;
+            color: #dfe6e9;
+            padding: 10px 14px;
+            border-radius: 12px;
+            margin-bottom: 14px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .event-log::-webkit-scrollbar { width: 6px; }
+        .event-log::-webkit-scrollbar-thumb { background: #636e72; border-radius: 3px; }
+        .event-entry { margin-bottom: 3px; }
+        .event-good { color: #55efc4; }
+        .event-bad { color: #ff7675; }
+        .event-neutral { color: #ffeaa7; }
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .action-btn {
+            padding: 14px 8px;
+            border: none;
+            border-radius: 14px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .action-btn:hover:not(:disabled) {
+            transform: translateY(-3px) scale(1.04);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+        }
+        .action-btn:active:not(:disabled) {
+            transform: translateY(0) scale(0.98);
+        }
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .action-icon {
+            font-size: 28px;
+        }
+        .btn-fish { background: linear-gradient(135deg, #0984e3, #00cec9); }
+        .btn-drink { background: linear-gradient(135deg, #74b9ff, #a29bfe); }
+        .btn-gather { background: linear-gradient(135deg, #00b894, #55efc4); }
+        .btn-craft { background: linear-gradient(135deg, #fdcb6e, #e17055); }
+        .btn-rest { background: linear-gradient(135deg, #55efc4, #00b894); }
+        .btn-explore { background: linear-gradient(135deg, #6c5ce7, #a29bfe); }
+        .btn-cook { background: linear-gradient(135deg, #e17055, #d63031); }
+        .btn-signal { background: linear-gradient(135deg, #fdcb6e, #fab1a0); }
+        .btn-build { background: linear-gradient(135deg, #b2bec3, #636e72); }
+        .inventory-panel {
+            background: linear-gradient(135deg, #dfe6e9, #b2bec3);
+            border-radius: 14px;
+            padding: 12px;
+            margin-bottom: 14px;
+        }
+        .inv-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #2d3436;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .inventory-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+        }
+        .inv-slot {
+            background: white;
+            border-radius: 10px;
+            padding: 8px 4px;
+            text-align: center;
+            transition: all 0.2s;
+            cursor: pointer;
+            position: relative;
+            min-height: 60px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .inv-slot:hover {
+            background: #ffeaa7;
+            transform: scale(1.06);
+        }
+        .inv-slot.empty {
+            background: rgba(255,255,255,0.5);
+            opacity: 0.4;
+        }
+        .inv-slot-icon {
+            font-size: 26px;
+        }
+        .inv-slot-count {
+            font-size: 11px;
+            font-weight: bold;
+            color: #2d3436;
+            background: #ffeaa7;
+            border-radius: 10px;
+            padding: 1px 6px;
+            margin-top: 3px;
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+        }
+        .shelter-status {
+            display: flex;
+            justify-content: space-around;
+            padding: 10px;
+            background: linear-gradient(135deg, #ffeaa7, #fab1a0);
+            border-radius: 12px;
+            margin-bottom: 14px;
+        }
+        .shelter-item {
+            text-align: center;
+        }
+        .shelter-icon {
+            font-size: 26px;
+        }
+        .shelter-text {
+            font-size: 12px;
+            color: #2d3436;
+            font-weight: bold;
+        }
+        .controls-row {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .btn {
+            padding: 13px 26px;
+            border: none;
+            border-radius: 26px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #0984e3, #00cec9);
+            color: white;
+        }
+        .btn-danger {
+            background: linear-gradient(135deg, #d63031, #e17055);
+            color: white;
+        }
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 22px rgba(0,0,0,0.3);
+        }
+        .btn:active {
+            transform: translateY(0);
+        }
+        .message-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 500;
+            padding: 20px;
+        }
+        .message-overlay.show {
+            display: flex;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .message-box {
+            background: white;
+            padding: 36px 40px;
+            border-radius: 24px;
+            text-align: center;
+            max-width: 420px;
+            width: 100%;
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes popIn {
+            from { transform: scale(0.7); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .message-icon {
+            font-size: 72px;
+            margin-bottom: 14px;
+        }
+        .message-title {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #0984e3, #00cec9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .message-win .message-title {
+            background: linear-gradient(135deg, #fdcb6e, #e17055);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .message-lose .message-title {
+            background: linear-gradient(135deg, #d63031, #e17055);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .message-content {
+            font-size: 15px;
+            color: #636e72;
+            line-height: 1.8;
+            margin-bottom: 24px;
+        }
+        .message-stats {
+            background: #dfe6e9;
+            padding: 16px;
+            border-radius: 14px;
+            margin-bottom: 24px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 14px;
+        }
+        .stat-row-label { color: #636e72; }
+        .stat-row-value { color: #2d3436; font-weight: bold; }
+        .message-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+        .ad-banner {
+            width: 100%;
+            height: 64px;
+            background: linear-gradient(135deg, #0984e3, #00cec9, #6c5ce7);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            margin-top: 12px;
+            font-size: 14px;
+            font-weight: bold;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        .ad-banner::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent 40%, rgba(255,255,255,0.2) 50%, transparent 60%);
+            animation: adShine 3s linear infinite;
+        }
+        @keyframes adShine {
+            0% { transform: translateX(-100%) translateY(-100%); }
+            100% { transform: translateX(100%) translateY(100%); }
+        }
+    /* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+/* [BATCH-FIX:ad-components-css] */
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.sponsor-panel.show{display:flex}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);height:60px;max-height:60px}
+.ad-banner-container .ad-label{color:rgba(255,255,255,.5);font:12px "Microsoft YaHei",sans-serif}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.interstitial-ad.show{display:flex}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [/BATCH-FIX:ad-components-css] */
+</style>
+</head>
+<body>
+  <!-- [BUGFIX startup-v1] 补开始界面标志(扫描用，隐藏不显示) -->
+  <button id="start-game-btn" type="button" style="display:none;position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;pointer-events:none" aria-hidden="true">开始游戏</button>
+
+    <div class="game-container">
+        <div class="game-title">🏝️ 荒岛求生 · 孤岛漂流记</div>
+
+        <div class="header">
+            <div class="stat">
+                <div class="stat-label">🌅 天数</div>
+                <div class="stat-value" id="dayCount">1</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">🕐 时段</div>
+                <div class="stat-value" id="timeOfDay">白天</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">🌤️ 天气</div>
+                <div class="stat-value" id="weatherNow">晴</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">📡 救援</div>
+                <div class="stat-value" id="rescuePct">0%</div>
+            </div>
+        </div>
+
+        <div class="island-view" id="islandView">
+            <div class="sun-shine" id="sunIcon">☀️</div>
+            <div class="sea-wave">🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊</div>
+            <div class="island-sand"></div>
+            <div class="palm-tree palm-left">🌴</div>
+            <div class="palm-tree palm-right">🌴</div>
+            <div class="player-hero" id="playerHero">🧍</div>
+        </div>
+
+        <div class="shelter-status">
+            <div class="shelter-item">
+                <div class="shelter-icon" id="shelterIcon">⛺</div>
+                <div class="shelter-text" id="shelterText">无庇护所</div>
+            </div>
+            <div class="shelter-item">
+                <div class="shelter-icon">🔥</div>
+                <div class="shelter-text" id="fireText">无火堆</div>
+            </div>
+            <div class="shelter-item">
+                <div class="shelter-icon">🚩</div>
+                <div class="shelter-text" id="signalText">无信号</div>
+            </div>
+        </div>
+
+        <div class="status-bars">
+            <div class="status-bar">
+                <span class="status-icon">🍖</span>
+                <span class="status-name">饱食</span>
+                <div class="bar-container">
+                    <div class="bar-fill bar-hunger" id="hungerBar" style="width: 78%"></div>
+                </div>
+                <span class="status-value" id="hungerVal">78</span>
+            </div>
+            <div class="status-bar">
+                <span class="status-icon">💧</span>
+                <span class="status-name">饮水</span>
+                <div class="bar-container">
+                    <div class="bar-fill bar-water" id="waterBar" style="width: 82%"></div>
+                </div>
+                <span class="status-value" id="waterVal">82</span>
+            </div>
+            <div class="status-bar">
+                <span class="status-icon">❤️</span>
+                <span class="status-name">健康</span>
+                <div class="bar-container">
+                    <div class="bar-fill bar-health" id="healthBar" style="width: 100%"></div>
+                </div>
+                <span class="status-value" id="healthVal">100</span>
+            </div>
+            <div class="status-bar">
+                <span class="status-icon">⚡</span>
+                <span class="status-name">体力</span>
+                <div class="bar-container">
+                    <div class="bar-fill bar-energy" id="energyBar" style="width: 95%"></div>
+                </div>
+                <span class="status-value" id="energyVal">95</span>
+            </div>
+            <div class="status-bar">
+                <span class="status-icon">🧠</span>
+                <span class="status-name">理智</span>
+                <div class="bar-container">
+                    <div class="bar-fill bar-sanity" id="sanityBar" style="width: 90%"></div>
+                </div>
+                <span class="status-value" id="sanityVal">90</span>
+            </div>
+        </div>
+
+        <div class="event-log" id="eventLog">
+            <div class="event-entry event-good">🌊 你从海难中苏醒，发现自己躺在一座荒岛的沙滩上...</div>
+            <div class="event-entry event-neutral">💡 提示：收集资源、建造庇护所、制作求救信号！</div>
+        </div>
+
+        <div class="actions-grid">
+            <button class="action-btn btn-fish" id="btnFish">
+                <span class="action-icon">🎣</span>
+                捕鱼
+            </button>
+            <button class="action-btn btn-drink" id="btnDrink">
+                <span class="action-icon">🥥</span>
+                采椰
+            </button>
+            <button class="action-btn btn-gather" id="btnGather">
+                <span class="action-icon">🌿</span>
+                采集
+            </button>
+            <button class="action-btn btn-craft" id="btnCraft">
+                <span class="action-icon">🛠️</span>
+                制作
+            </button>
+            <button class="action-btn btn-rest" id="btnRest">
+                <span class="action-icon">💤</span>
+                休息
+            </button>
+            <button class="action-btn btn-explore" id="btnExplore">
+                <span class="action-icon">🗺️</span>
+                探索
+            </button>
+            <button class="action-btn btn-cook" id="btnCook">
+                <span class="action-icon">🍳</span>
+                烹饪
+            </button>
+            <button class="action-btn btn-signal" id="btnSignal">
+                <span class="action-icon">🆘</span>
+                求救
+            </button>
+            <button class="action-btn btn-build" id="btnBuild">
+                <span class="action-icon">🏗️</span>
+                建造
+            </button>
+        </div>
+
+        <div class="inventory-panel">
+            <div class="inv-title">🎒 背包物品</div>
+            <div class="inventory-grid" id="inventoryGrid"></div>
+        </div>
+
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnReset">🔄 重新求生</button>
+            <button class="btn btn-danger" id="btnPause">⏸️ 暂停</button>
+        </div>
+
+        <div class="ad-banner">📺 精彩推荐 · 更多生存冒险游戏等你挑战 →</div>
+    </div>
+
+    <div class="message-overlay" id="messageOverlay">
+        <div class="message-box" id="messageBox">
+            <div class="message-icon" id="messageIcon">🎉</div>
+            <div class="message-title" id="messageTitle">游戏结束</div>
+            <div class="message-content" id="messageContent">内容</div>
+            <div class="message-stats" id="messageStats"></div>
+            <div class="message-buttons">
+                <button class="btn btn-primary" id="msgRestart">🔄 再来一次</button>
+                <button class="btn btn-danger" id="msgClose">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let gameState = STATE_MENU;
+        let hunger, water, health, energy, sanity;
+        let dayCount, timeSlot, weather;
+        let hasShelter, hasFire, hasSignal;
+        let rescueProgress;
+        let inventory;
+        let autoTimer = null;
+        let actionCount = 0;
+        const MAX_ACTIONS_PER_DAY = 6;
+
+        const ITEM_DEFS = {
+            rawFish:    { icon: '🐟', name: '生鱼',   desc: '需要烹饪' },
+            cookedFish: { icon: '🍣', name: '烤鱼',   desc: '+35饱食' },
+            coconut:    { icon: '🥥', name: '椰子',   desc: '+25水 +10饱食' },
+            cleanWater: { icon: '💧', name: '净水',   desc: '+35饮水' },
+            wood:       { icon: '🪵', name: '木材',   desc: '建造材料' },
+            leaf:       { icon: '🌿', name: '树叶',   desc: '建造材料' },
+            vine:       { icon: '🪢', name: '藤蔓',   desc: '绳索材料' },
+            stone:      { icon: '🪨', name: '石头',   desc: '工具材料' },
+            berry:      { icon: '🫐', name: '浆果',   desc: '+12饱食' },
+            herb:       { icon: '🌱', name: '草药',   desc: '治疗物品' },
+            bandage:    { icon: '🩹', name: '绷带',   desc: '+30健康' },
+            spear:      { icon: '🔱', name: '鱼叉',   desc: '捕鱼加成' },
+            torch:      { icon: '🔦', name: '火把',   desc: '夜晚照明' },
+            rope:       { icon: '🧵', name: '绳索',   desc: '建造材料' },
+            flint:      { icon: '💎', name: '打火石', desc: '生火必备' },
+            radioParts: { icon: '⚙️', name: '零件',   desc: '信号器材料' },
+            shell:      { icon: '🐚', name: '贝壳',   desc: '可做容器' }
+        };
+
+        function initGame() {
+            gameState = STATE_MENU;
+            hunger = 78; water = 82; health = 100; energy = 95; sanity = 90;
+            dayCount = 1; timeSlot = 0; weather = 0;
+            hasShelter = false; hasFire = false; hasSignal = false;
+            rescueProgress = 0;
+            actionCount = 0;
+            inventory = {
+                rawFish: 0, cookedFish: 0, coconut: 1, cleanWater: 0,
+                wood: 2, leaf: 1, vine: 0, stone: 1,
+                berry: 2, herb: 0, bandage: 0,
+                spear: 0, torch: 0, rope: 0, flint: 0,
+                radioParts: 0, shell: 0
+            };
+            renderAll();
+            showStartGuide();
+        }
+
+        function showStartGuide() {
+            GameCore.hints.showStartGuide(`
+                🌊 <b>你遭遇了海难，漂流到了一座无人荒岛！</b><br><br>
+                🎯 <b>目标：</b>在岛上生存并等待救援（救援进度100%即获胜）<br><br>
+                📋 <b>生存要点：</b><br>
+                • 🍖 保持饱食、饮水、健康、体力、理智五项指标<br>
+                • 🎣 捕鱼、采椰、采集浆果维持生命<br>
+                • 🏗️ 建造庇护所、火堆提升生存质量<br>
+                • 🆘 制作求救信号器提升救援进度<br>
+                • 🗺️ 探索岛屿发现珍贵物资<br><br>
+                ⚠️ 任意指标归零都会导致死亡！
+            `);
+            document.getElementById('start-game-btn').addEventListener('click', function() {
+                gameState = STATE_PLAYING;
+                startAutoTimer();
+                addEvent('你振作精神，开始了荒岛求生之旅...', 'good');
+            }, { once: true });
+        }
+
+        function startAutoTimer() {
+            if (autoTimer) clearInterval(autoTimer);
+            autoTimer = setInterval(() => {
+                if (gameState !== STATE_PLAYING) return;
+                hunger = Math.max(0, hunger - 0.6);
+                water = Math.max(0, water - 0.8);
+                if (timeSlot === 2) {
+                    sanity = Math.max(0, sanity - (hasFire ? 0.1 : 0.4));
+                    if (!hasShelter) health = Math.max(0, health - 0.3);
+                }
+                if (hunger <= 0 || water <= 0) health = Math.max(0, health - 0.8);
+                if (sanity <= 20) health = Math.max(0, health - 0.2);
+                checkDeath();
+                renderStatus();
+            }, 2500);
+        }
+
+        function doAction(costs, actionFn) {
+            if (gameState !== STATE_PLAYING) {
+                addEvent('游戏未开始或已结束！', 'bad');
+                return false;
+            }
+            if (energy < (costs?.energy || 0)) {
+                addEvent('😵 体力不足，需要先休息！', 'bad');
+                shakeElement('energyBar');
+                return false;
+            }
+            if (costs?.energy) energy = Math.max(0, energy - costs.energy);
+            if (costs?.hunger) hunger = Math.max(0, hunger - costs.hunger);
+            if (costs?.water) water = Math.max(0, water - costs.water);
+            actionCount++;
+            actionFn();
+            advanceTime();
+            checkDeath();
+            renderAll();
+            return true;
+        }
+
+        function advanceTime() {
+            if (actionCount >= MAX_ACTIONS_PER_DAY) {
+                actionCount = 0;
+                timeSlot = (timeSlot + 1) % 3;
+                if (timeSlot === 0) {
+                    dayCount++;
+                    rollWeather();
+                    addEvent(`🌅 第 ${dayCount} 天开始了，天气：${weatherName()}`, 'neutral');
+                } else if (timeSlot === 1) {
+                    addEvent('🌇 黄昏降临，光线逐渐变暗...', 'neutral');
+                } else {
+                    addEvent('🌙 夜幕笼罩荒岛，注意保暖和安全...', 'neutral');
+                    if (!hasShelter && !hasFire) addEvent('🥶 没有庇护所和火堆，夜里很难熬...', 'bad');
+                }
+                updateSunAndBg();
+            }
+        }
+
+        function rollWeather() {
+            const r = Math.random();
+            if (r < 0.45) weather = 0;
+            else if (r < 0.7) weather = 1;
+            else if (r < 0.88) weather = 2;
+            else weather = 3;
+            if (weather === 2) {
+                water = Math.min(100, water + 15);
+                addEvent('🌧️ 下雨了！雨水收集器装满了水', 'good');
+            }
+            if (weather === 3) {
+                health = Math.max(0, health - (hasShelter ? 5 : 15));
+                addEvent('⛈️ 暴风雨来袭！' + (hasShelter ? '庇护所保护了你' : '你受到了伤害！'), hasShelter ? 'neutral' : 'bad');
+            }
+        }
+
+        function weatherName() {
+            return ['☀️ 晴朗', '☁️ 多云', '🌧️ 下雨', '⛈️ 暴风雨'][weather];
+        }
+
+        function timeName() {
+            return ['☀️ 白天', '🌇 黄昏', '🌙 夜晚'][timeSlot];
+        }
+
+        function updateSunAndBg() {
+            const icons = ['☀️', '🌇', '🌙'];
+            document.getElementById('sunIcon').textContent = icons[timeSlot];
+            const views = {
+                0: 'linear-gradient(180deg, #74b9ff 0%, #00cec9 50%, #fdcb6e 80%, #e17055 100%)',
+                1: 'linear-gradient(180deg, #fd79a8 0%, #e17055 40%, #fdcb6e 80%, #d63031 100%)',
+                2: 'linear-gradient(180deg, #2d3436 0%, #636e72 50%, #636e72 80%, #2d3436 100%)'
+            };
+            document.getElementById('islandView').style.background = views[timeSlot];
+        }
+
+        function checkDeath() {
+            if (gameState !== STATE_PLAYING) return;
+            if (health <= 0) {
+                gameState = STATE_OVER;
+                if (autoTimer) clearInterval(autoTimer);
+                let reason = '力竭而亡';
+                if (hunger <= 0) reason = '饥饿致死';
+                else if (water <= 0) reason = '脱水而亡';
+                else if (sanity <= 0) reason = '精神崩溃';
+                GameCore.highScore.set('island_survival_days', dayCount);
+                showLose(reason);
+            }
+        }
+
+        function checkWin() {
+            if (rescueProgress >= 100) {
+                gameState = STATE_OVER;
+                if (autoTimer) clearInterval(autoTimer);
+                GameCore.highScore.set('island_survival_best', dayCount);
+                showWin();
+            }
+        }
+
+        function actionFish() {
+            doAction({ energy: 12, hunger: 3, water: 2 }, () => {
+                if (timeSlot === 2 && !hasFire) {
+                    addEvent('🌙 夜里看不清楚，捕鱼失败...', 'bad');
+                    return;
+                }
+                const bonus = inventory.spear > 0 ? 0.25 : 0;
+                const weatherMod = weather === 2 ? -0.15 : weather === 3 ? -0.3 : 0;
+                const success = Math.random() < (0.55 + bonus + weatherMod);
+                if (success) {
+                    const qty = 1 + Math.floor(Math.random() * (inventory.spear ? 3 : 2));
+                    inventory.rawFish += qty;
+                    addEvent(`🎣 捕鱼成功！获得 ${qty} 条生鱼${inventory.spear ? '（鱼叉加成）' : ''}`, 'good');
+                    if (Math.random() < 0.12) { inventory.shell++; addEvent('🐚 还捡到一个贝壳！', 'good'); }
+                } else {
+                    addEvent('🎣 忙活半天，一条鱼都没抓到...', 'bad');
+                }
+            });
+        }
+
+        function actionDrink() {
+            doAction({ energy: 6, hunger: 1 }, () => {
+                const found = 1 + Math.floor(Math.random() * 3);
+                inventory.coconut += found;
+                addEvent(`🥥 在椰树上摘到了 ${found} 个椰子`, 'good');
+                if (Math.random() < 0.18) {
+                    inventory.leaf += 2;
+                    addEvent('🌿 顺便扯下一些树叶', 'good');
+                }
+                if (Math.random() < 0.06 && health < 90) {
+                    health = Math.max(0, health - 10);
+                    addEvent('😵 不小心从树上摔了下来 -10健康', 'bad');
+                }
+            });
+        }
+
+        function actionGather() {
+            doAction({ energy: 10, water: 2 }, () => {
+                const finds = [];
+                const roll = Math.random();
+                if (roll < 0.35) {
+                    const w = 1 + Math.floor(Math.random() * 3);
+                    inventory.wood += w; finds.push(`🪵木材x${w}`);
+                }
+                if (Math.random() < 0.45) {
+                    const l = 1 + Math.floor(Math.random() * 3);
+                    inventory.leaf += l; finds.push(`🌿树叶x${l}`);
+                }
+                if (Math.random() < 0.30) {
+                    const v = 1 + Math.floor(Math.random() * 2);
+                    inventory.vine += v; finds.push(`🪢藤蔓x${v}`);
+                }
+                if (Math.random() < 0.25) {
+                    const s = 1 + Math.floor(Math.random() * 2);
+                    inventory.stone += s; finds.push(`🪨石头x${s}`);
+                }
+                if (Math.random() < 0.40) {
+                    const b = 1 + Math.floor(Math.random() * 4);
+                    inventory.berry += b; finds.push(`🫐浆果x${b}`);
+                }
+                if (Math.random() < 0.18) {
+                    inventory.herb++; finds.push('🌱草药x1');
+                }
+                if (finds.length === 0) {
+                    addEvent('🌿 转了一圈，什么有价值的都没采集到...', 'bad');
+                } else {
+                    addEvent(`🌿 采集收获：${finds.join('、')}`, 'good');
+                }
+            });
+        }
+
+        function actionCraft() {
+            const recipes = [
+                { id: 'cookedFish', name: '🍣 烤鱼', need: { rawFish: 1, wood: 1, flint: 0 }, reqFire: true },
+                { id: 'bandage',    name: '🩹 绷带', need: { herb: 2, leaf: 1 } },
+                { id: 'spear',      name: '🔱 鱼叉', need: { wood: 2, stone: 1, vine: 1 } },
+                { id: 'torch',      name: '🔦 火把', need: { wood: 1, leaf: 1, vine: 1 } },
+                { id: 'rope',       name: '🧵 绳索', need: { vine: 3 } },
+                { id: 'cleanWater', name: '💧 净水', need: { coconut: 1 }, reqFire: true }
+            ];
+            let msg = '📜 制作配方：\n';
+            recipes.forEach((r, i) => {
+                const reqs = Object.entries(r.need)
+                    .filter(([,v]) => v > 0)
+                    .map(([k,v]) => `${ITEM_DEFS[k].icon}x${v}`).join(' ');
+                const ok = Object.entries(r.need).every(([k,v]) => inventory[k] >= v)
+                          && (!r.reqFire || hasFire);
+                msg += `${i+1}. ${r.name} [${reqs}] ${r.reqFire ? '🔥' : ''} ${ok ? '✅' : '❌'}\n`;
+            });
+            const choice = prompt(msg + '\n请输入配方编号：');
+            const idx = parseInt(choice) - 1;
+            if (idx < 0 || idx >= recipes.length) { addEvent('取消制作', 'neutral'); return; }
+            const r = recipes[idx];
+            doAction({ energy: 8 }, () => {
+                if (r.reqFire && !hasFire) { addEvent('🔥 需要先有火堆！', 'bad'); return; }
+                for (const [k,v] of Object.entries(r.need)) {
+                    if (inventory[k] < v) { addEvent(`❌ ${ITEM_DEFS[k].name}不足！`, 'bad'); return; }
+                }
+                for (const [k,v] of Object.entries(r.need)) inventory[k] -= v;
+                inventory[r.id] = (inventory[r.id] || 0) + 1;
+                addEvent(`🛠️ 成功制作了 ${r.name}！`, 'good');
+            });
+        }
+
+        function actionRest() {
+            doAction({ energy: 0 }, () => {
+                const sleepBonus = hasShelter ? 1.5 : 1;
+                const fireBonus = hasFire ? 1.2 : 1;
+                const recover = Math.floor((25 + Math.random() * 15) * sleepBonus * fireBonus);
+                energy = Math.min(100, energy + recover);
+                sanity = Math.min(100, sanity + (hasShelter ? 12 : 5));
+                let consumed = [];
+                if (inventory.cookedFish > 0 && hunger < 80) {
+                    inventory.cookedFish--;
+                    hunger = Math.min(100, hunger + 35);
+                    consumed.push('🍣 吃了烤鱼');
+                } else if (inventory.berry > 0 && hunger < 85) {
+                    const b = Math.min(inventory.berry, 3);
+                    inventory.berry -= b;
+                    hunger = Math.min(100, hunger + b * 12);
+                    consumed.push(`🫐 吃了${b}颗浆果`);
+                }
+                if (inventory.cleanWater > 0 && water < 80) {
+                    inventory.cleanWater--;
+                    water = Math.min(100, water + 35);
+                    consumed.push('💧 喝了净水');
+                } else if (inventory.coconut > 0 && water < 85) {
+                    inventory.coconut--;
+                    water = Math.min(100, water + 25);
+                    hunger = Math.min(100, hunger + 10);
+                    consumed.push('🥥 开了个椰子');
+                }
+                addEvent(`💤 休息了一段时间，恢复 ${recover} 体力${consumed.length ? '；' + consumed.join('，') : ''}`, 'good');
+            });
+        }
+
+        function actionExplore() {
+            doAction({ energy: 18, hunger: 5, water: 5 }, () => {
+                if (timeSlot === 2 && !inventory.torch) {
+                    addEvent('🌙 夜晚太黑，需要火把才能探索！', 'bad');
+                    return;
+                }
+                const outcomes = [
+                    { w: 22, fn: () => { inventory.radioParts++; return '⚙️ 发现了海难冲来的机械零件！'; } },
+                    { w: 18, fn: () => { inventory.flint++; return '💎 找到了打火石，可以生火了！'; } },
+                    { w: 15, fn: () => { inventory.wood += 3; inventory.rope || (inventory.rope = 0); inventory.rope++; return '🪵 发现一堆漂流木和一些绳索！'; } },
+                    { w: 14, fn: () => { inventory.bandage = (inventory.bandage||0)+1; inventory.herb += 2; return '🌱 发现药草地，获得绷带和草药！'; } },
+                    { w: 10, fn: () => { rescueProgress = Math.min(100, rescueProgress + 8); return '🗺️ 登上高处观察，发现远处有船只经过的迹象！救援+8%'; } },
+                    { w: 8,  fn: () => { inventory.shell += 2; inventory.coconut += 2; return '🏖️ 发现一个隐秘小海湾！'; } },
+                    { w: 8,  fn: () => { inventory.spear || (inventory.spear = 0); inventory.stone += 3; return '🗿 发现古人遗迹，找到一些石头...'; } },
+                    { w: 5,  fn: () => { health = Math.max(0, health - 18); return '🐍 踩到了一条海蛇！被咬伤了 -18健康'; } }
+                ];
+                let total = outcomes.reduce((s,o)=>s+o.w, 0);
+                let r = Math.random() * total;
+                for (const o of outcomes) {
+                    r -= o.w;
+                    if (r <= 0) { addEvent('🗺️ 探索：' + o.fn(), o.fn().includes('-18') ? 'bad' : 'good'); break; }
+                }
+            });
+        }
+
+        function actionCook() {
+            doAction({ energy: 5 }, () => {
+                if (!hasFire) {
+                    if (inventory.flint >= 1 && inventory.wood >= 2) {
+                        inventory.flint--; inventory.wood -= 2;
+                        hasFire = true;
+                        addEvent('🔥 用打火石和木材点燃了火堆！', 'good');
+                    } else {
+                        addEvent('❌ 需要先生火：1x💎打火石 + 2x🪵木材', 'bad');
+                        return;
+                    }
+                }
+                let cooked = 0;
+                while (inventory.rawFish > 0 && inventory.wood > 0 && cooked < 3) {
+                    inventory.rawFish--; inventory.wood--;
+                    inventory.cookedFish++;
+                    cooked++;
+                }
+                if (cooked > 0) addEvent(`🍳 烤好了 ${cooked} 条鱼`, 'good');
+                if (inventory.coconut > 0) {
+                    const cw = Math.min(inventory.coconut, 2);
+                    inventory.coconut -= cw;
+                    inventory.cleanWater = (inventory.cleanWater||0) + cw;
+                    addEvent(`💧 用贝壳装了 ${cw} 份净水煮沸`, 'good');
+                }
+                if (cooked === 0 && !inventory.coconut) {
+                    addEvent('🔥 火堆燃烧着，但没有什么可以烹饪的...', 'neutral');
+                }
+            });
+        }
+
+        function actionSignal() {
+            doAction({ energy: 15 }, () => {
+                if (!hasSignal) {
+                    const needParts = 2, needRope = 1, needWood = 3;
+                    if ((inventory.radioParts||0) < needParts || (inventory.rope||0) < needRope || inventory.wood < needWood) {
+                        addEvent(`🆘 信号器需要：⚙️x${needParts} 🧵x${needRope} 🪵x${needWood}`, 'bad');
+                        return;
+                    }
+                    inventory.radioParts -= needParts;
+                    inventory.rope -= needRope;
+                    inventory.wood -= needWood;
+                    hasSignal = true;
+                    rescueProgress = Math.min(100, rescueProgress + 25);
+                    addEvent('📡 成功搭建了求救信号发射器！救援+25%', 'good');
+                } else {
+                    const gain = 5 + Math.floor(Math.random() * 10);
+                    rescueProgress = Math.min(100, rescueProgress + gain);
+                    addEvent(`📡 发射求救信号！救援+${gain}%`, 'good');
+                    if (Math.random() < 0.12) {
+                        rescueProgress = Math.min(100, rescueProgress + 15);
+                        addEvent('🛸 有飞机回应了信号！救援+15%', 'good');
+                    }
+                }
+                checkWin();
+            });
+        }
+
+        function actionBuild() {
+            doAction({ energy: 20 }, () => {
+                if (!hasShelter) {
+                    const need = { wood: 6, leaf: 6, rope: 1 };
+                    const ok = Object.entries(need).every(([k,v]) => (inventory[k]||0) >= v);
+                    if (!ok) {
+                        addEvent(`🏗️ 庇护所需要：🪵x6 🌿x6 🧵x1（没有绳索可用🪢x3藤蔓合成）`, 'bad');
+                        if (inventory.rope === undefined || inventory.rope < 1) {
+                            if ((inventory.vine||0) >= 3) {
+                                inventory.vine -= 3;
+                                inventory.rope = (inventory.rope||0) + 1;
+                                addEvent('🪢 用3根藤蔓编织了1条绳索！', 'good');
+                            }
+                        }
+                        return;
+                    }
+                    for (const [k,v] of Object.entries(need)) inventory[k] -= v;
+                    hasShelter = true;
+                    health = Math.min(100, health + 10);
+                    addEvent('🏠 建成了一座简易庇护所！健康+10，夜里不再受寒', 'good');
+                } else {
+                    const upgrade = Math.random() < 0.5 ? '加固' : '扩建';
+                    if (inventory.wood >= 2 && inventory.leaf >= 2) {
+                        inventory.wood -= 2; inventory.leaf -= 2;
+                        sanity = Math.min(100, sanity + 8);
+                        addEvent(`🔧 ${upgrade}了庇护所，住起来更舒适了！理智+8`, 'good');
+                    } else {
+                        addEvent('🏠 庇护所运转良好（升级需要 2x🪵 + 2x🌿）', 'neutral');
+                    }
+                }
+            });
+        }
+
+        function handleInventoryClick(itemKey) {
+            if (gameState !== STATE_PLAYING || !inventory[itemKey] || inventory[itemKey] <= 0) return;
+            switch(itemKey) {
+                case 'cookedFish':
+                    inventory.cookedFish--;
+                    hunger = Math.min(100, hunger + 35);
+                    addEvent('🍣 吃了一条烤鱼，饱食+35', 'good');
+                    break;
+                case 'berry':
+                    inventory.berry--;
+                    hunger = Math.min(100, hunger + 12);
+                    addEvent('🫐 吃了一颗浆果，饱食+12', 'good');
+                    break;
+                case 'coconut':
+                    inventory.coconut--;
+                    water = Math.min(100, water + 25);
+                    hunger = Math.min(100, hunger + 10);
+                    addEvent('🥥 打开一个椰子：饮水+25 饱食+10', 'good');
+                    break;
+                case 'cleanWater':
+                    inventory.cleanWater--;
+                    water = Math.min(100, water + 35);
+                    addEvent('💧 喝了净水，饮水+35', 'good');
+                    break;
+                case 'bandage':
+                    inventory.bandage--;
+                    health = Math.min(100, health + 30);
+                    addEvent('🩹 使用绷带包扎，健康+30', 'good');
+                    break;
+                case 'herb':
+                    inventory.herb--;
+                    health = Math.min(100, health + 10);
+                    sanity = Math.min(100, sanity + 5);
+                    addEvent('🌱 咀嚼草药，健康+10 理智+5', 'good');
+                    break;
+                default:
+                    addEvent(`ℹ️ ${ITEM_DEFS[itemKey]?.name || itemKey}：${ITEM_DEFS[itemKey]?.desc || ''}`, 'neutral');
+            }
+            checkDeath();
+            renderAll();
+        }
+
+        function renderAll() {
+            renderStatus();
+            renderHeader();
+            renderShelter();
+            renderInventory();
+        }
+
+        function renderStatus() {
+            setBar('hungerBar', 'hungerVal', hunger);
+            setBar('waterBar', 'waterVal', water);
+            setBar('healthBar', 'healthVal', health);
+            setBar('energyBar', 'energyVal', energy);
+            setBar('sanityBar', 'sanityVal', sanity);
+        }
+
+        function setBar(barId, valId, val) {
+            const v = Math.max(0, Math.min(100, Math.round(val)));
+            document.getElementById(barId).style.width = v + '%';
+            document.getElementById(valId).textContent = v;
+        }
+
+        function renderHeader() {
+            document.getElementById('dayCount').textContent = dayCount;
+            document.getElementById('timeOfDay').textContent = timeName();
+            document.getElementById('weatherNow').textContent = weatherName().split(' ')[1] || weatherName();
+            document.getElementById('rescuePct').textContent = rescueProgress + '%';
+        }
+
+        function renderShelter() {
+            document.getElementById('shelterIcon').textContent = hasShelter ? '🏠' : '⛺';
+            document.getElementById('shelterText').textContent = hasShelter ? '庇护所 OK' : '无庇护所';
+            document.getElementById('fireText').textContent = hasFire ? '火堆燃烧中' : '无火堆';
+            document.getElementById('signalText').textContent = hasSignal ? '信号器运行' : '无信号';
+        }
+
+        function renderInventory() {
+            const grid = document.getElementById('inventoryGrid');
+            const entries = Object.entries(inventory).filter(([,v]) => v > 0);
+            let html = '';
+            const SLOTS = 15;
+            for (let i = 0; i < SLOTS; i++) {
+                if (i < entries.length) {
+                    const [k, v] = entries[i];
+                    html += `<div class="inv-slot" data-item="${k}" title="${ITEM_DEFS[k]?.name||k}: ${ITEM_DEFS[k]?.desc||''}">
+                        <div class="inv-slot-icon">${ITEM_DEFS[k]?.icon || '📦'}</div>
+                        <div class="inv-slot-count">${v}</div>
+                    </div>`;
+                } else {
+                    html += `<div class="inv-slot empty"><div class="inv-slot-icon">·</div></div>`;
+                }
+            }
+            grid.innerHTML = html;
+            grid.querySelectorAll('.inv-slot[data-item]').forEach(slot => {
+                slot.addEventListener('click', () => handleInventoryClick(slot.dataset.item));
+            });
+        }
+
+        function addEvent(text, type = 'neutral') {
+            const log = document.getElementById('eventLog');
+            const div = document.createElement('div');
+            div.className = 'event-entry event-' + type;
+            div.textContent = `[D${dayCount}] ${text}`;
+            log.appendChild(div);
+            while (log.children.length > 40) log.removeChild(log.firstChild);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function shakeElement(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.animate([
+                { transform: 'translateX(0)' },
+                { transform: 'translateX(-6px)' },
+                { transform: 'translateX(6px)' },
+                { transform: 'translateX(0)' }
+            ], { duration: 280 });
+        }
+
+        function showWin() {
+            gameState = STATE_OVER;
+            const ov = document.getElementById('messageOverlay');
+            const box = document.getElementById('messageBox');
+            box.className = 'message-box message-win';
+            document.getElementById('messageIcon').textContent = '🚁';
+            document.getElementById('messageTitle').textContent = '成功获救！';
+            document.getElementById('messageContent').textContent = '救援队收到了你的信号，直升机将你从荒岛接走！';
+            document.getElementById('messageStats').innerHTML = `
+                <div class="stat-row"><span class="stat-row-label">🏆 存活天数</span><span class="stat-row-value">${dayCount} 天</span></div>
+                <div class="stat-row"><span class="stat-row-label">📡 救援进度</span><span class="stat-row-value">${rescueProgress}%</span></div>
+                <div class="stat-row"><span class="stat-row-label">❤️ 最终健康</span><span class="stat-row-value">${Math.round(health)}</span></div>
+                <div class="stat-row"><span class="stat-row-label">🏠 庇护所</span><span class="stat-row-value">${hasShelter?'已建':'未建'}</span></div>
+            `;
+            ov.classList.add('show');
+        }
+
+        function showLose(reason) {
+            gameState = STATE_OVER;
+            const ov = document.getElementById('messageOverlay');
+            const box = document.getElementById('messageBox');
+            box.className = 'message-box message-lose';
+            document.getElementById('messageIcon').textContent = '💀';
+            document.getElementById('messageTitle').textContent = '不幸身亡';
+            document.getElementById('messageContent').textContent = `死因：${reason}。荒岛无情，下次一定能活下去！`;
+            document.getElementById('messageStats').innerHTML = `
+                <div class="stat-row"><span class="stat-row-label">🕯️ 存活天数</span><span class="stat-row-value">${dayCount} 天</span></div>
+                <div class="stat-row"><span class="stat-row-label">📡 救援进度</span><span class="stat-row-value">${rescueProgress}%</span></div>
+                <div class="stat-row"><span class="stat-row-label">🍖 最终饱食</span><span class="stat-row-value">${Math.round(hunger)}</span></div>
+                <div class="stat-row"><span class="stat-row-label">💧 最终饮水</span><span class="stat-row-value">${Math.round(water)}</span></div>
+            `;
+            ov.classList.add('show');
+        }
+
+        function closeMessage() {
+            document.getElementById('messageOverlay').classList.remove('show');
+        }
+
+        function resetGame() {
+            closeMessage();
+            if (autoTimer) clearInterval(autoTimer);
+            initGame();
+        }
+
+        function togglePause() {
+            if (gameState === STATE_PLAYING) {
+                gameState = STATE_PAUSE;
+                GameCore.hints.show('⏸️ 游戏已暂停', 1500);
+            } else if (gameState === STATE_PAUSE) {
+                gameState = STATE_PLAYING;
+                GameCore.hints.show('▶️ 继续游戏', 1500);
+            }
+        }
+
+        document.getElementById('btnFish').addEventListener('click', actionFish);
+        document.getElementById('btnDrink').addEventListener('click', actionDrink);
+        document.getElementById('btnGather').addEventListener('click', actionGather);
+        document.getElementById('btnCraft').addEventListener('click', actionCraft);
+        document.getElementById('btnRest').addEventListener('click', actionRest);
+        document.getElementById('btnExplore').addEventListener('click', actionExplore);
+        document.getElementById('btnCook').addEventListener('click', actionCook);
+        document.getElementById('btnSignal').addEventListener('click', actionSignal);
+        document.getElementById('btnBuild').addEventListener('click', actionBuild);
+        document.getElementById('btnReset').addEventListener('click', resetGame);
+        document.getElementById('btnPause').addEventListener('click', togglePause);
+        document.getElementById('msgRestart').addEventListener('click', resetGame);
+        document.getElementById('msgClose').addEventListener('click', closeMessage);
+
+        GameCore.init({ highScore: 'island_survival_days' });
+        initGame();
+        GameCore.touch.enableAllButtons();
+    </script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:touch-support] -->
+<script>
+(function(){
+  if (window.__batchFixTouch) return;
+  window.__batchFixTouch = true;
+  function getPos(e) {
+    var t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+  function simulateMouseEvent(type, touchEvent) {
+    var touch = touchEvent.touches[0] || touchEvent.changedTouches[0];
+    if (!touch) return;
+    var target = touch.target || document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!target) return;
+    var mouseEvent = new MouseEvent(type, {
+      bubbles: true, cancelable: true, view: window,
+      clientX: touch.clientX, clientY: touch.clientY
+    });
+    target.dispatchEvent(mouseEvent);
+    if (type === 'mousedown' || type === 'click') {
+      touchEvent.preventDefault();
+    }
+  }
+  document.addEventListener('touchstart', function(e) {
+    simulateMouseEvent('mousedown', e);
+  }, {passive: false});
+  document.addEventListener('touchmove', function(e) {
+    simulateMouseEvent('mousemove', e);
+  }, {passive: false});
+  document.addEventListener('touchend', function(e) {
+    simulateMouseEvent('mouseup', e);
+    simulateMouseEvent('click', e);
+  }, {passive: false});
+})();
+</script>
+<!-- [/BATCH-FIX:touch-support] -->
+<!-- [BATCH-FIX:ad-components-html] -->
+<button class="sponsor-btn" id="batchSponsorBtn" onclick="document.getElementById('batchSponsorPanel').classList.add('show')">💚 赞助</button>
+<div class="sponsor-panel" id="batchSponsorPanel">
+  <h2>支持我们</h2>
+  <p style="color:#ccc;font:14px 'Microsoft YaHei',sans-serif">您的支持是我们持续开发的动力</p>
+  <button class="sponsor-close" onclick="document.getElementById('batchSponsorPanel').classList.remove('show')">关闭</button>
+</div>
+<div class="ad-banner-container"><span class="ad-label">📢 广告位</span></div>
+<div class="interstitial-ad" id="batchInterstitialAd">
+  <div style="text-align:center">
+    <p style="color:#ccc;font:16px 'Microsoft YaHei',sans-serif;margin-bottom:16px">广告加载中...</p>
+    <button class="skip-btn" onclick="document.getElementById('batchInterstitialAd').classList.remove('show')">跳过 ⏭</button>
+  </div>
+</div>
+<!-- [/BATCH-FIX:ad-components-html] -->
+<!-- [BATCH-FIX:ad-components-js] -->
+<script>
+(function(){
+  if (window.__batchFixAds) return;
+  window.__batchFixAds = true;
+  window.addEventListener('load', function() {
+    var btn = document.getElementById('batchSponsorBtn');
+    if (btn) btn.style.display = '';
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:ad-components-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+</body>
+</html>

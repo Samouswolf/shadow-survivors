@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>电路模拟器</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1b2a;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"Microsoft YaHei",sans-serif}
+canvas{display:block;margin:0 auto}
+#start-game-btn{display:block!important;}
+.sponsor-close,#sponsorClose,.skip-btn,#skipInterstitial{pointer-events:auto!important;}
+</style>
+<style>
+.ad-banner-container{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);height:90px;max-height:90px;overflow:hidden;contain:layout style paint;pointer-events:none!important}.ad-banner-container,.ad-banner-container *{pointer-events:none!important}.ad-banner-container iframe{max-height:90px;pointer-events:none!important}
+.ad-banner-container iframe{max-width:100%}
+.ad-label{position:absolute;top:1px;right:6px;font:9px "Microsoft YaHei",sans-serif;color:rgba(255,255,255,.35)}
+.sponsor-btn{position:fixed;top:44px;right:8px;z-index:20;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.25);color:#ffd700;padding:3px 9px;border-radius:10px;font:11px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-btn:hover{background:rgba(255,215,0,.25);transform:scale(1.05)}
+.sponsor-panel{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.sponsor-panel h2{color:#ffd700;font:bold 26px "Microsoft YaHei",sans-serif;margin-bottom:4px}
+.sponsor-panel .qr-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.sponsor-panel .qr-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;text-align:center;min-width:140px}
+.sponsor-panel .qr-card .qr-icon{font-size:48px;margin-bottom:6px}
+.sponsor-panel .qr-card .qr-label{color:#ccc;font:13px "Microsoft YaHei",sans-serif}
+.sponsor-panel .qr-card .qr-hint{color:#888;font:11px "Microsoft YaHei",sans-serif;margin-top:4px}
+.sponsor-panel .sponsor-close{margin-top:8px;padding:8px 28px;border:1px solid rgba(255,255,255,.2);border-radius:20px;color:#aaa;background:0 0;font:14px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.sponsor-panel .sponsor-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.interstitial-ad{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none}
+.interstitial-ad .ad-content{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;text-align:center;min-width:280px;max-width:400px}
+.interstitial-ad .ad-content p{color:#aaa;font:14px "Microsoft YaHei",sans-serif;margin-bottom:12px}
+.interstitial-ad .skip-btn{padding:8px 28px;background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3);border-radius:20px;color:#ffd700;font:bold 15px "Microsoft YaHei",sans-serif;cursor:pointer;transition:.2s}
+.interstitial-ad .skip-btn:hover{background:rgba(255,215,0,.25)}
+/* [BATCH-FIX:responsive-css] */
+canvas{max-width:100%!important;height:auto!important}
+.game-container,.game-area,#gameContainer,#gameArea{max-width:100%!important}
+/* [/BATCH-FIX:responsive-css] */
+</style>
+</head>
+<body>
+
+<button id="start-game-btn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:20px;background:#ffd700;color:#0d1b2a;border:none;border-radius:12px;cursor:pointer;z-index:999;font-weight:bold;display:none;">开始接线</button>
+
+<canvas id="c"></canvas>
+
+<script>
+if (typeof STATE_MENU    === 'undefined') var STATE_MENU    = 0;
+if (typeof STATE_PLAYING === 'undefined') var STATE_PLAYING = 1;
+if (typeof STATE_OVER    === 'undefined') var STATE_OVER    = 2;
+if (typeof STATE_PAUSE   === 'undefined') var STATE_PAUSE   = 3;
+</script>
+<script src="../game_core.js"></script>
+<script>
+(function(){
+"use strict";
+
+const W=480,H=800;
+
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+function playTone(freq,dur,type,vol){
+    if(!audioCtx)return;
+    try{
+        const o=audioCtx.createOscillator();
+        const g=audioCtx.createGain();
+        o.type=type||'square';
+        o.frequency.value=freq;
+        g.gain.value=vol||0.15;
+        g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+        o.connect(g);g.connect(audioCtx.destination);
+        o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+}
+function sfxStart(){playTone(523,0.1,'sine',0.2);setTimeout(()=>playTone(659,0.1,'sine',0.2),100);setTimeout(()=>playTone(784,0.15,'sine',0.2),200)}
+function sfxScore(){playTone(880,0.08,'sine',0.18);setTimeout(()=>playTone(1047,0.1,'sine',0.18),80);setTimeout(()=>playTone(1319,0.15,'sine',0.18),160)}
+function sfxFail(){playTone(220,0.15,'sawtooth',0.18);setTimeout(()=>playTone(165,0.25,'sawtooth',0.18),120)}
+function sfxClick(){playTone(660,0.05,'triangle',0.12)}
+function sfxWire(){playTone(900,0.04,'sine',0.1)}
+function sfxLight(){for(let i=0;i<3;i++){setTimeout(()=>playTone(800+i*200,0.06,'sine',0.12),i*40)}}
+function sfxBell(){playTone(1200,0.08,'sine',0.15);setTimeout(()=>playTone(1600,0.12,'sine',0.12),80)}
+function sfxMotor(){playTone(150,0.15,'square',0.1);setTimeout(()=>playTone(180,0.1,'sawtooth',0.08),80)}
+function sfxShort(){playTone(120,0.3,'sawtooth',0.25);setTimeout(()=>sfxFail(),100)}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
+function resize(){
+    const r=W/H;
+    let cw=window.innerWidth,ch=window.innerHeight;
+    if(cw/ch>r){ch=cw/r}else{cw=ch*r}
+    canvas.width=cw;canvas.height=ch;
+    scale=cw/W;
+    ctx.setTransform(scale,0,0,scale,0,0);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const COMPONENT_TYPES={
+    BATTERY_15:{id:'BATTERY_15',name:'电池1.5V',v:1.5,r:0.1,color:'#ff9800',emoji:'🔋',pins:['+','-']},
+    BATTERY_9:{id:'BATTERY_9',name:'电池9V',v:9,r:0.5,color:'#f44336',emoji:'🔋',pins:['+','-']},
+    SWITCH:{id:'SWITCH',name:'开关',v:0,r:0.01,color:'#9c27b0',emoji:'🎚️',pins:['A','B'],toggleable:true},
+    BULB:{id:'BULB',name:'灯泡',v:0,r:10,color:'#ffeb3b',emoji:'💡',pins:['A','B'],lightable:true},
+    RESISTOR_10:{id:'RESISTOR_10',name:'电阻10Ω',v:0,r:10,color:'#795548',emoji:'〰️',pins:['A','B']},
+    RESISTOR_50:{id:'RESISTOR_50',name:'电阻50Ω',v:0,r:50,color:'#5d4037',emoji:'〰️',pins:['A','B']},
+    RESISTOR_100:{id:'RESISTOR_100',name:'电阻100Ω',v:0,r:100,color:'#3e2723',emoji:'〰️',pins:['A','B']},
+    MOTOR:{id:'MOTOR',name:'电机',v:0,r:15,color:'#2196f3',emoji:'⚙️',pins:['A','B'],spinnable:true},
+    LED:{id:'LED',name:'LED灯',v:0,r:20,color:'#00bcd4',emoji:'💠',pins:['+','-'],lightable:true,polarized:true},
+    BELL:{id:'BELL',name:'电铃',v:0,r:25,color:'#e91e63',emoji:'🔔',pins:['A','B'],ringable:true}
+};
+
+const LEVELS=[
+    {
+        id:'L1',
+        name:'点亮一颗灯',
+        emoji:'💡',
+        desc:'最简单的串联电路：1电池+1开关+1灯泡',
+        allowed:['BATTERY_15','SWITCH','BULB'],
+        required:{BULB:1},
+        check:function(c){
+            const bulbs=c.filter(x=>x.type==='BULB');
+            const batt=c.filter(x=>x.type==='BATTERY_15');
+            if(bulbs.length<1||batt.length<1)return{pass:false,msg:'缺少元件'};
+            const lit=bulbs.filter(b=>b.lit);
+            return{pass:lit.length>=1,msg:lit.length>=1?'灯泡亮了!':'灯泡没亮，请检查接线'};
+        },
+        targetScore:80,
+        principle:'串联电路：电源→开关→用电器→电源形成闭合回路。电流处处相等 I=U/R总。总电压=各元件分压之和。',
+        formula:'欧姆定律: U=I×R (电压=电流×电阻)'
+    },
+    {
+        id:'L2',
+        name:'灯泡亮度',
+        emoji:'🔆',
+        desc:'不同电压下灯泡的亮度变化',
+        allowed:['BATTERY_15','BATTERY_9','SWITCH','BULB','RESISTOR_10'],
+        required:{BULB:1},
+        check:function(c){
+            const bulbs=c.filter(x=>x.type==='BULB');
+            const b9=c.filter(x=>x.type==='BATTERY_9');
+            if(bulbs.length<1)return{pass:false,msg:'需要灯泡'};
+            const bright=bulbs.filter(b=>b.lit&&b.brightness>0.5);
+            return{pass:bright.length>=1||b9.length>=1,msg:bright.length>=1?'灯泡明亮!':'试试用9V电池或减少电阻'};
+        },
+        targetScore:80,
+        principle:'功率 P=U²/R=I²R。电压越高或电阻越小，灯泡功率越大，越亮(在额定值内)。电阻串联可分压降低负载电压。',
+        formula:'P = U²/R = I²R (电功率公式)'
+    },
+    {
+        id:'L3',
+        name:'双灯串联',
+        emoji:'💡💡',
+        desc:'2灯泡串联，亮度都变暗',
+        allowed:['BATTERY_9','SWITCH','BULB','BULB'],
+        required:{BULB:2},
+        check:function(c){
+            const bulbs=c.filter(x=>x.type==='BULB');
+            if(bulbs.length<2)return{pass:false,msg:'需要2个灯泡'};
+            const bothLit=bulbs.filter(b=>b.lit);
+            return{pass:bothLit.length>=2,msg:bothLit.length>=2?'双灯串联成功！':'灯泡未全部点亮，串联电流相同'};
+        },
+        targetScore:82,
+        principle:'串联分压：R总=R₁+R₂，电流 I=U/(R₁+R₂)，每灯电压 U₁=U₂=U/2。串联两相同灯，每灯功率是单灯的1/4，都更暗。',
+        formula:'串联: R总 = R₁ + R₂, I相同, U = U₁ + U₂'
+    },
+    {
+        id:'L4',
+        name:'双灯并联',
+        emoji:'💡∥💡',
+        desc:'2灯泡并联，电压相同',
+        allowed:['BATTERY_9','SWITCH','SWITCH','BULB','BULB'],
+        required:{BULB:2},
+        check:function(c){
+            const bulbs=c.filter(x=>x.type==='BULB');
+            if(bulbs.length<2)return{pass:false,msg:'需要2个灯泡'};
+            const lit=bulbs.filter(b=>b.lit);
+            return{pass:lit.length>=2,msg:lit.length>=2?'并联成功! 亮度相同':'并联支路互不影响，电压相同'};
+        },
+        targetScore:82,
+        principle:'并联分流：U₁=U₂=U，总电流 I总=I₁+I₂，总电阻 1/R总=1/R₁+1/R₂。并联两灯每灯电压都等于电源电压，亮度和单灯一样亮。',
+        formula:'并联: U相同, I总 = I₁ + I₂, 1/R总=1/R₁+1/R₂'
+    },
+    {
+        id:'L5',
+        name:'三灯独立控制',
+        emoji:'🎚️×3',
+        desc:'并联电路：每个灯配独立开关',
+        allowed:['BATTERY_9','SWITCH','SWITCH','SWITCH','BULB','BULB','BULB'],
+        required:{BULB:3,SWITCH:3},
+        check:function(c){
+            const bulbs=c.filter(x=>x.type==='BULB');
+            const sw=c.filter(x=>x.type==='SWITCH');
+            if(bulbs.length<3||sw.length<3)return{pass:false,msg:'需要3灯+3开关'};
+            return{pass:true,msg:'完成！闭合开关可分别控制各灯'};
+        },
+        targetScore:84,
+        principle:'家庭照明用并联：每个用电器独立一条支路，支路开关只控制本支路。一条断开不影响其他。干路开关控制全部。',
+        formula:'并联支路: 每条支路电压相等=电源电压'
+    },
+    {
+        id:'L6',
+        name:'电阻限流',
+        emoji:'〰️→💡',
+        desc:'串联电阻降低LED电流防止烧毁',
+        allowed:['BATTERY_9','SWITCH','LED','RESISTOR_100','RESISTOR_50','RESISTOR_10'],
+        required:{LED:1,RESISTOR_100:1},
+        check:function(c){
+            const leds=c.filter(x=>x.type==='LED');
+            const r=c.filter(x=>x.type==='RESISTOR_100'||x.type==='RESISTOR_50');
+            if(leds.length<1||r.length<1)return{pass:false,msg:'LED必须串联保护电阻!'};
+            const lit=leds.filter(b=>b.lit);
+            return{pass:lit.length>=1,msg:lit.length>=1?'LED安全点亮!':'无电阻LED会过流烧毁'};
+        },
+        targetScore:84,
+        principle:'LED是二极管，导通后内阻很小。必须串联限流电阻：R=(U电源 - U_LED)/I_额定。典型20mA LED+9V电源需R≈(9-2)/0.02≈350Ω。',
+        formula:'限流电阻: R = (U源 - U_LED) / I_LED'
+    },
+    {
+        id:'L7',
+        name:'电铃电路',
+        emoji:'🔔',
+        desc:'闭合开关电铃持续响',
+        allowed:['BATTERY_9','SWITCH','BELL','RESISTOR_50'],
+        required:{BELL:1},
+        check:function(c){
+            const bells=c.filter(x=>x.type==='BELL');
+            if(bells.length<1)return{pass:false,msg:'需要电铃'};
+            const ring=bells.filter(b=>b.lit);
+            return{pass:ring.length>=1,msg:ring.length>=1?'叮咚! 电铃响了':'请检查接线形成闭合回路'};
+        },
+        targetScore:85,
+        principle:'电铃利用电磁继电器原理：电流通过电磁铁→吸下锤敲击铃碗→同时断开触点→电流断→锤弹回→再次接通，循环往复发出连续铃声。',
+        formula:'电磁铁磁力: F ∝ N×I (线圈匝数×电流)'
+    },
+    {
+        id:'L8',
+        name:'综合应用',
+        emoji:'⚙️💡〰️',
+        desc:'电机+灯泡+电阻的正确分压电路',
+        allowed:['BATTERY_9','SWITCH','MOTOR','BULB','RESISTOR_10','RESISTOR_50'],
+        required:{MOTOR:1,BULB:1},
+        check:function(c){
+            const m=c.filter(x=>x.type==='MOTOR');
+            const b=c.filter(x=>x.type==='BULB');
+            if(m.length<1||b.length<1)return{pass:false,msg:'需要电机+灯泡'};
+            const run=m.filter(x=>x.lit);
+            const lit=b.filter(x=>x.lit);
+            return{pass:run.length>=1||lit.length>=1,msg:(run.length+lit.length)>=2?'完美! 两个用电器都工作':'请检查电机和灯泡是否都接入回路'};
+        },
+        targetScore:88,
+        principle:'复杂电路分析：先识别串联段与并联段，逐步简化算总电阻，再用欧姆定律求总电流，最后反推每条支路的电压电流和每个元件功率。',
+        formula:'步骤: 画等效图→算R总→I总=U/R总→分配各支路U/I→验算P=UI'
+    }
+];
+
+const G={
+    state:STATE_MENU,
+    score:0,
+    highScore:0,
+    currentLevel:0,
+    btnRects:{},
+    keys:{},
+    paused:false,
+    components:[],
+    wires:[],
+    placingComp:null,
+    selectedComp:-1,
+    selectedPin:null,
+    wireStart:null,
+    draggingComp:-1,
+    dragOffset:{x:0,y:0},
+    running:false,
+    principleOpen:false,
+    resultMsg:'',
+    animationFrame:0,
+    levelScores:[],
+    totalStars:0,
+    sparkT:0
+};
+
+G.highScore=parseInt(Storage.load('circuit_highscore','0'));
+
+function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+}
+
+function drawBtn(ctx,x,y,w,h,text,name,color,textColor){
+    G.btnRects[name]={x:x,y:y,w:w,h:h};
+    ctx.fillStyle=color||'#ffd700';
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=2;
+    roundRect(ctx,x,y,w,h,8);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle=textColor||'#0d1b2a';
+    ctx.font='bold 13px "Microsoft YaHei"';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2);
+    ctx.textBaseline='alphabetic';
+}
+
+function hitBtn(p,name){
+    const r=G.btnRects[name];
+    return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h;
+}
+
+function getPos(e){
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    return{x:(t.clientX-rect.left)/scale,y:(t.clientY-rect.top)/scale};
+}
+
+window.addEventListener('keydown',function(e){
+    G.keys[e.key.toLowerCase()]=true;
+    if(e.key===' '||e.key==='Enter'){
+        e.preventDefault();
+        initAudio();
+        if(G.state===STATE_MENU){startGame();return}
+        if(G.state===STATE_OVER){startGame();return}
+        if(G.state===STATE_PLAYING&&!G.paused){toggleRun();return}
+    }
+    if(e.key==='Escape'){
+        if(G.state===STATE_PLAYING)togglePause();
+    }
+    if(G.state===STATE_PLAYING&&!G.paused){
+        if(e.key==='c'||e.key==='C'){clearBoard();}
+        if(e.key==='e'||e.key==='E'){toggleRun();}
+    }
+});
+window.addEventListener('keyup',function(e){
+    G.keys[e.key.toLowerCase()]=false;
+});
+
+function handlePointerDown(e){
+    initAudio();
+    const p=getPos(e);
+    if(G.state===STATE_MENU){
+        if(hitBtn(p,'start')){startGame();return}
+        if(hitBtn(p,'selectLeft')){changeLevel(-1);return}
+        if(hitBtn(p,'selectRight')){changeLevel(1);return}
+    } else if(G.state===STATE_OVER){
+        if(hitBtn(p,'restart')){startGame();return}
+        if(hitBtn(p,'menu')){G.state=STATE_MENU;return}
+    } else if(G.state===STATE_PLAYING){
+        if(G.paused){
+            if(hitBtn(p,'resume')){togglePause();return}
+            if(hitBtn(p,'quit')){G.state=STATE_MENU;G.paused=false;return}
+            return;
+        }
+        if(G.principleOpen){
+            if(hitBtn(p,'closePrinciple')){G.principleOpen=false;return}
+            return;
+        }
+        if(hitBtn(p,'pauseBtn')){togglePause();return}
+        if(hitBtn(p,'showPrinciple')){G.principleOpen=true;return}
+        if(hitBtn(p,'runBtn')){toggleRun();return}
+        if(hitBtn(p,'clearBtn')){clearBoard();return}
+        if(hitBtn(p,'checkBtn')){checkCircuit();return}
+        if(hitBtn(p,'nextLevel')&&G.resultMsg&&G.resultMsg.indexOf('成功')>=0){nextLevel();return}
+        handleBoardClick(p);
+    }
+}
+function handlePointerMove(e){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    if(G.draggingComp>=0){
+        const p=getPos(e);
+        const c=G.components[G.draggingComp];
+        c.x=p.x-G.dragOffset.x;
+        c.y=p.y-G.dragOffset.y;
+        c.x=Math.max(60,Math.min(W-60,c.x));
+        c.y=Math.max(260,Math.min(H-250,c.y));
+    }
+}
+function handlePointerUp(e){
+    G.draggingComp=-1;
+    if(G.wireStart){
+        G.wireStart=null;
+        G.selectedPin=null;
+    }
+}
+
+canvas.addEventListener('mousedown',handlePointerDown);
+canvas.addEventListener('mousemove',handlePointerMove);
+canvas.addEventListener('mouseup',handlePointerUp);
+canvas.addEventListener('touchstart',function(e){e.preventDefault();handlePointerDown(e)},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();handlePointerMove(e)},{passive:false});
+canvas.addEventListener('touchend',function(e){e.preventDefault();handlePointerUp(e)},{passive:false});
+
+function changeLevel(dir){
+    G.currentLevel=(G.currentLevel+dir+LEVELS.length)%LEVELS.length;
+    sfxClick();
+}
+
+function handleBoardClick(p){
+    const shelf=getShelfItems();
+    for(let i=0;i<shelf.length;i++){
+        const s=shelf[i];
+        if(p.x>=s.x&&p.x<=s.x+s.w&&p.y>=s.y&&p.y<=s.y+s.h){
+            placeComponent(s.type,120+Math.random()*(W-240),350+Math.random()*200);
+            return;
+        }
+    }
+    for(let i=0;i<G.components.length;i++){
+        const c=G.components[i];
+        const pins=getCompPins(c);
+        for(let j=0;j<pins.length;j++){
+            const d=Math.hypot(p.x-pins[j].x,p.y-pins[j].y);
+            if(d<14){
+                if(G.wireStart===null){
+                    G.wireStart={comp:i,pin:j,x:pins[j].x,y:pins[j].y};
+                    sfxWire();
+                }else{
+                    if(G.wireStart.comp!==i||G.wireStart.pin!==j){
+                        G.wires.push({
+                            c1:G.wireStart.comp,p1:G.wireStart.pin,
+                            c2:i,p2:j,
+                            x1:G.wireStart.x,y1:G.wireStart.y,
+                            x2:pins[j].x,y2:pins[j].y
+                        });
+                        sfxWire();
+                    }
+                    G.wireStart=null;
+                }
+                return;
+            }
+        }
+    }
+    for(let i=0;i<G.components.length;i++){
+        const c=G.components[i];
+        const d=Math.hypot(p.x-c.x,p.y-c.y);
+        if(d<40){
+            const ct=COMPONENT_TYPES[c.type];
+            if(ct.toggleable){
+                c.on=!c.on;
+                sfxClick();
+                if(G.running)analyzeCircuit();
+                return;
+            }else{
+                G.draggingComp=i;
+                G.dragOffset={x:p.x-c.x,y:p.y-c.y};
+                return;
+            }
+        }
+    }
+    if(p.y>H-200){
+        for(let i=G.wires.length-1;i>=0;i--){
+            const w=G.wires[i];
+            const mx=(w.x1+w.x2)/2,my=(w.y1+w.y2)/2;
+            if(Math.hypot(p.x-mx,p.y-my)<20){
+                G.wires.splice(i,1);
+                sfxClick();
+                return;
+            }
+        }
+    }
+}
+
+function getShelfItems(){
+    const lv=LEVELS[G.currentLevel];
+    const items=[];
+    const used={};
+    for(let c of G.components){
+        used[c.type]=(used[c.type]||0)+1;
+    }
+    let col=0,row=0;
+    const cols=5;
+    const itemW=80,itemH=60;
+    const startX=(W-(cols*itemW+(cols-1)*8))/2;
+    const startY=H-195;
+    for(const type of lv.allowed){
+        const ct=COMPONENT_TYPES[type];
+        if(!ct)continue;
+        const req=lv.required[type]||0;
+        const placedCount=used[type]||0;
+        const canPlace=placedCount<Math.max(req,lv.allowed.filter(x=>x===type).length);
+        if(canPlace||req>0){
+            items.push({
+                type:type,
+                x:startX+col*(itemW+8),
+                y:startY+row*(itemH+8),
+                w:itemW,h:itemH,
+                ct:ct,
+                used:used[type]||0,
+                total:Math.max(req,lv.allowed.filter(x=>x===type).length)
+            });
+            col++;
+            if(col>=cols){col=0;row++;}
+        }
+    }
+    return items;
+}
+
+function placeComponent(type,x,y){
+    const ct=COMPONENT_TYPES[type];
+    if(!ct)return;
+    G.components.push({
+        type:type,x:x,y:y,
+        on:!ct.toggleable,
+        lit:false,
+        brightness:0,
+        rotation:0
+    });
+    sfxClick();
+}
+
+function getCompPins(c){
+    const w=70,h=50;
+    const pins=[];
+    const ct=COMPONENT_TYPES[c.type];
+    const labels=ct.pins;
+    if(c.type==='BATTERY_15'||c.type==='BATTERY_9'){
+        pins.push({x:c.x+w/2,y:c.y-h/2,label:labels[0]});
+        pins.push({x:c.x+w/2,y:c.y+h/2,label:labels[1]});
+    }else{
+        pins.push({x:c.x-w/2-5,y:c.y,label:labels[0]});
+        pins.push({x:c.x+w/2+5,y:c.y,label:labels[1]});
+    }
+    return pins;
+}
+
+function clearBoard(){
+    G.components=[];
+    G.wires=[];
+    G.wireStart=null;
+    G.selectedPin=null;
+    G.running=false;
+    G.resultMsg='';
+    sfxClick();
+}
+
+function toggleRun(){
+    G.running=!G.running;
+    if(G.running){
+        analyzeCircuit();
+        sfxMotor();
+    }else{
+        for(const c of G.components){
+            c.lit=false;c.brightness=0;
+        }
+        G.resultMsg='';
+        sfxClick();
+    }
+}
+
+function analyzeCircuit(){
+    for(const c of G.components){
+        c.lit=false;c.brightness=0;
+    }
+    if(G.components.length<2){
+        G.resultMsg='元件太少，无法形成回路';
+        return;
+    }
+    const batteries=G.components.filter(c=>c.type==='BATTERY_15'||c.type==='BATTERY_9');
+    if(batteries.length<1){
+        G.resultMsg='缺少电源(电池)';
+        return;
+    }
+    const totalV=batteries.reduce((s,b)=>s+COMPONENT_TYPES[b.type].v,0);
+    const switchesOn=G.components.filter(c=>c.type==='SWITCH').every(c=>c.on);
+    const hasOpenSwitch=G.components.some(c=>c.type==='SWITCH'&&!c.on);
+    const components=G.components.filter(c=>c.type!=='BATTERY_15'&&c.type!=='BATTERY_9');
+    if(components.length<1){
+        G.resultMsg='没有用电器(灯泡/电机等)';
+        return;
+    }
+    const parallelGroups=Math.max(1,G.components.filter(c=>c.type==='BULB'||c.type==='LED').length>1?2:1);
+    const resistors=components.filter(c=>c.type==='RESISTOR_10'||c.type==='RESISTOR_50'||c.type==='RESISTOR_100');
+    const nonResistors=components.filter(c=>!(c.type==='RESISTOR_10'||c.type==='RESISTOR_50'||c.type==='RESISTOR_100'));
+    let totalR=0;
+    for(const c of components){
+        totalR+=COMPONENT_TYPES[c.type].r;
+    }
+    if(totalR<0.5&&nonResistors.length>0&&resistors.length===0){
+        if(nonResistors.some(c=>c.type==='LED')){
+            totalR+=2;
+        }
+    }
+    const hasShort=totalR<0.3&&nonResistors.filter(n=>n.type==='MOTOR'||n.type==='BULB'||n.type==='LED'||n.type==='BELL').length===0;
+    if(hasShort){
+        sfxShort();
+        G.resultMsg='⚠️ 短路！危险！请加用电器';
+        G.sparkT=60;
+        return;
+    }
+    const current=switchesOn||G.components.filter(c=>c.type==='SWITCH').length===0?totalV/Math.max(0.1,totalR):0;
+    const workComponents=components.filter(c=>c.type!=='SWITCH'||c.on);
+    let idx=0;
+    for(const c of workComponents){
+        const ct=COMPONENT_TYPES[c.type];
+        const voltage=totalV*ct.r/Math.max(0.1,totalR);
+        const power=current*voltage;
+        idx++;
+        if(current>0.05||c.type==='SWITCH'){
+            c.lit=ct.lightable||ct.spinnable||ct.ringable;
+            c.brightness=Math.min(1.2,Math.max(0,current*ct.r/Math.max(3,ct.v||2)));
+            if(ct.lightable&&c.brightness>0.1){
+                sfxLight();
+            }
+            if(ct.spinnable&&c.brightness>0.1){
+                sfxMotor();
+            }
+            if(ct.ringable&&c.brightness>0.1){
+                sfxBell();
+            }
+        }
+    }
+    const lv=LEVELS[G.currentLevel];
+    const res=lv.check(G.components);
+    if(G.components.filter(c=>c.type==='SWITCH').length>0){
+        if(hasOpenSwitch){
+            G.resultMsg='开关断开，无电流 (按下开关打开)';
+        }else{
+            G.resultMsg=(res.pass?'✅ ':'❌ ')+res.msg+' | I='+current.toFixed(2)+'A';
+            if(res.pass){
+                completeLevel();
+            }
+        }
+    }else{
+        G.resultMsg=(res.pass?'✅ ':'❌ ')+res.msg;
+        if(res.pass)completeLevel();
+    }
+}
+
+function completeLevel(){
+    const lv=LEVELS[G.currentLevel];
+    let s=70;
+    const compsUsed=G.components.length;
+    const wireCount=G.wires.length;
+    s+=Math.min(15,Math.max(0,20-compsUsed));
+    s+=Math.min(15,Math.max(0,15-wireCount*0.5));
+    if(s>=lv.targetScore+10){
+        s=Math.min(100,s);
+    }
+    G.score+=s;
+    const stars=s>=lv.targetScore+10?3:s>=lv.targetScore?2:1;
+    if(!G.levelScores[G.currentLevel]||G.levelScores[G.currentLevel]<stars){
+        G.levelScores[G.currentLevel]=stars;
+    }
+    G.totalStars=G.levelScores.reduce((a,b)=>a+(b||0),0);
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        Storage.save('circuit_highscore',G.highScore);
+    }
+    Storage.save('circuit_levelstars',G.levelScores);
+    sfxScore();
+}
+
+function nextLevel(){
+    if(G.currentLevel<LEVELS.length-1){
+        G.currentLevel++;
+        clearBoard();
+        sfxClick();
+    }else{
+        endGame();
+    }
+}
+
+function checkCircuit(){
+    if(!G.running)toggleRun();
+    else analyzeCircuit();
+    sfxClick();
+}
+
+function startGame(){
+    initAudio();
+    G.state=STATE_PLAYING;
+    G.currentLevel=0;
+    G.score=0;
+    G.levelScores=Storage.load('circuit_levelstars',[])||[];
+    G.totalStars=G.levelScores.reduce((a,b)=>a+(b||0),0);
+    clearBoard();
+    G.paused=false;
+    G.principleOpen=false;
+    sfxStart();
+}
+
+function endGame(){
+    G.state=STATE_OVER;
+    if(G.score>G.highScore){
+        G.highScore=G.score;
+        Storage.save('circuit_highscore',G.highScore);
+    }
+    sfxScore();
+}
+
+function togglePause(){
+    G.paused=!G.paused;
+    sfxClick();
+}
+
+function update(){
+    if(G.state!==STATE_PLAYING||G.paused)return;
+    G.animationFrame++;
+    if(G.sparkT>0)G.sparkT--;
+    if(G.running){
+        for(const c of G.components){
+            if(c.type==='MOTOR'&&c.lit)c.rotation+=0.15*(0.5+c.brightness);
+        }
+    }
+}
+
+function drawBackground(ctx){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#0d1b2a');
+    g.addColorStop(0.5,'#1b263b');
+    g.addColorStop(1,'#0d1b2a');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='rgba(255,255,255,0.04)';
+    ctx.lineWidth=1;
+    for(let x=0;x<W;x+=40){
+        ctx.beginPath();ctx.moveTo(x,250);ctx.lineTo(x,H-210);ctx.stroke();
+    }
+    for(let y=250;y<H-210;y+=40){
+        ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+    }
+}
+
+function drawShelf(ctx){
+    const items=getShelfItems();
+    ctx.fillStyle='rgba(30,40,60,0.9)';
+    roundRect(ctx,15,H-210,W-30,200,12);ctx.fill();
+    ctx.strokeStyle='rgba(255,215,0,0.3)';ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 14px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('📦 元件库 (点击放置 | 双击删除元件)',28,H-188);
+    for(const s of items){
+        const selected=false;
+        ctx.fillStyle=selected?'rgba(255,215,0,0.3)':'rgba(255,255,255,0.08)';
+        ctx.strokeStyle=selected?'#ffd700':'rgba(255,255,255,0.2)';
+        ctx.lineWidth=2;
+        roundRect(ctx,s.x,s.y,s.w,s.h,8);
+        ctx.fill();ctx.stroke();
+        drawCompIcon(ctx,s.x+s.w/2,s.y+s.h/2-4,s.ct);
+        ctx.fillStyle='#fff';
+        ctx.font='bold 10px "Microsoft YaHei"';
+        ctx.textAlign='center';
+        ctx.fillText(s.ct.name,s.x+s.w/2,s.y+s.h-8);
+        if(s.total>1){
+            ctx.fillStyle='#ff9800';
+            ctx.font='bold 9px Arial';
+            ctx.fillText(s.used+'/'+s.total,s.x+s.w/2,s.y+10);
+        }
+    }
+    ctx.textAlign='left';
+}
+
+function drawCompIcon(ctx,x,y,ct){
+    ctx.save();
+    ctx.translate(x,y);
+    switch(ct.id){
+        case 'BATTERY_15':case'BATTERY_9':
+            ctx.fillStyle=ct.color;
+            roundRect(ctx,-14,-18,28,36,4);ctx.fill();
+            ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+            ctx.fillStyle='#fff';ctx.font='bold 10px Arial';ctx.textAlign='center';
+            ctx.fillText(ct.v+'V',0,4);
+            ctx.fillStyle='#f44336';ctx.fillText('+',0,-22);
+            break;
+        case 'SWITCH':
+            ctx.strokeStyle=ct.color;ctx.lineWidth=3;ctx.lineCap='round';
+            ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(-5,0);ctx.stroke();
+            ctx.beginPath();ctx.moveTo(5,0);ctx.lineTo(20,0);ctx.stroke();
+            ctx.beginPath();ctx.moveTo(-5,0);ctx.lineTo(15,-12);ctx.stroke();
+            ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-5,0,3,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(20,0,3,0,Math.PI*2);ctx.fill();
+            ctx.lineCap='butt';
+            break;
+        case 'BULB':
+            ctx.fillStyle=ct.color;
+            ctx.beginPath();ctx.arc(0,0,14,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle='#666';ctx.lineWidth=1.5;ctx.stroke();
+            ctx.strokeStyle='#333';ctx.lineWidth=1.5;
+            ctx.beginPath();ctx.moveTo(-6,5);ctx.lineTo(0,-6);ctx.lineTo(6,5);ctx.stroke();
+            break;
+        case 'RESISTOR_10':case'RESISTOR_50':case'RESISTOR_100':
+            ctx.strokeStyle=ct.color;ctx.lineWidth=2;
+            ctx.beginPath();ctx.moveTo(-28,0);
+            for(let i=0;i<8;i++){
+                const sx=-24+i*6;
+                ctx.lineTo(sx,i%2?-6:6);
+            }
+            ctx.lineTo(28,0);ctx.stroke();
+            break;
+        case 'MOTOR':
+            ctx.fillStyle=ct.color;
+            ctx.beginPath();ctx.arc(0,0,16,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+            ctx.fillStyle='#fff';ctx.font='bold 12px Arial';ctx.textAlign='center';
+            ctx.fillText('M',0,4);
+            break;
+        case 'LED':
+            ctx.fillStyle=ct.color;
+            ctx.beginPath();
+            ctx.moveTo(-12,-10);ctx.lineTo(12,0);ctx.lineTo(-12,10);ctx.closePath();ctx.fill();
+            ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+            ctx.beginPath();ctx.moveTo(12,-10);ctx.lineTo(12,10);ctx.stroke();
+            break;
+        case 'BELL':
+            ctx.fillStyle=ct.color;
+            ctx.beginPath();ctx.arc(0,-4,14,Math.PI*1.1,Math.PI*1.9);ctx.closePath();ctx.fill();
+            ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+            ctx.fillRect(-2,10,4,8);
+            break;
+    }
+    ctx.restore();
+}
+
+function drawComponents(ctx){
+    for(let i=0;i<G.components.length;i++){
+        const c=G.components[i];
+        const ct=COMPONENT_TYPES[c.type];
+        const selected=G.draggingComp===i;
+        const pins=getCompPins(c);
+        if(c.lit&&(ct.lightable||ct.spinnable)){
+            const glow=10+c.brightness*30;
+            const color=c.type==='LED'?'#00e5ff':c.type==='MOTOR'?'#2196f3':'#ffeb3b';
+            ctx.save();
+            ctx.globalCompositeOperation='lighter';
+            const g=ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,glow);
+            g.addColorStop(0,color+'aa');
+            g.addColorStop(1,color+'00');
+            ctx.fillStyle=g;
+            ctx.beginPath();ctx.arc(c.x,c.y,glow,0,Math.PI*2);ctx.fill();
+            ctx.restore();
+        }
+        if(c.lit&&ct.ringable&&G.running){
+            const wobble=Math.sin(G.animationFrame*0.5)*2;
+            ctx.save();
+            ctx.translate(c.x+wobble,c.y);
+            drawCompIcon(ctx,0,0,ct);
+            ctx.restore();
+        }else if(c.type==='MOTOR'){
+            ctx.save();
+            ctx.translate(c.x,c.y);
+            ctx.rotate(c.rotation);
+            drawCompIcon(ctx,0,0,ct);
+            ctx.restore();
+        }else{
+            drawCompIcon(ctx,c.x,c.y,ct);
+        }
+        if(ct.toggleable){
+            ctx.strokeStyle=c.on?'#4caf50':'#f44336';
+            ctx.lineWidth=3;
+            ctx.beginPath();ctx.arc(c.x,c.y+35,5,0,Math.PI*2);ctx.stroke();
+            ctx.fillStyle=c.on?'#4caf50':'#f44336';
+            ctx.font='bold 10px Arial';ctx.textAlign='center';
+            ctx.fillText(c.on?'ON':'OFF',c.x,c.y+52);
+        }
+        for(const p of pins){
+            const isWireStart=G.wireStart&&G.wireStart.comp===i&&pins[G.wireStart.pin]===p;
+            ctx.fillStyle=isWireStart?'#ffd700':(p.label==='+'?'#f44336':p.label==='-'?'#2196f3':'#888');
+            ctx.beginPath();ctx.arc(p.x,p.y,7,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+            if(p.label==='+'||p.label==='-'){
+                ctx.fillStyle='#fff';ctx.font='bold 10px Arial';ctx.textAlign='center';
+                ctx.fillText(p.label,p.x,p.y-10);
+            }
+        }
+        if(selected){
+            ctx.strokeStyle='#ffd700';ctx.lineWidth=2;ctx.setLineDash([5,5]);
+            ctx.strokeRect(c.x-40,c.y-30,80,60);
+            ctx.setLineDash([]);
+        }
+    }
+}
+
+function drawWires(ctx){
+    for(let i=0;i<G.wires.length;i++){
+        const w=G.wires[i];
+        const c1=G.components[w.c1],c2=G.components[w.c2];
+        if(!c1||!c2)continue;
+        const p1=getCompPins(c1)[w.p1],p2=getCompPins(c2)[w.p2];
+        if(p1&&p2){
+            w.x1=p1.x;w.y1=p1.y;w.x2=p2.x;w.y2=p2.y;
+        }
+        const glow=G.running?2.5:1;
+        ctx.strokeStyle=G.running?(i%2===0?'#ffd700':'#ff9800'):'#888';
+        ctx.lineWidth=3*glow;
+        ctx.lineCap='round';
+        ctx.beginPath();
+        const mx=(w.x1+w.x2)/2,my=(w.y1+w.y2)/2;
+        ctx.moveTo(w.x1,w.y1);
+        ctx.quadraticCurveTo(mx+(my-w.y1)*0.1,my-(mx-w.x1)*0.1,w.x2,w.y2);
+        ctx.stroke();
+        ctx.lineCap='butt';
+        if(G.running&&G.sparkT<=0){
+            const prog=((G.animationFrame*0.02)+i*0.3)%1;
+            const px=w.x1+(w.x2-w.x1)*prog;
+            const py=w.y1+(w.y2-w.y1)*prog;
+            ctx.fillStyle='#fff';
+            ctx.beginPath();ctx.arc(px,py,3,0,Math.PI*2);ctx.fill();
+        }
+    }
+    if(G.wireStart){
+        const p=getPos({touches:null,clientX:0,clientY:0});
+        ctx.strokeStyle='#ffd700';ctx.lineWidth=2;ctx.setLineDash([5,5]);
+        ctx.beginPath();ctx.moveTo(G.wireStart.x,G.wireStart.y);
+        ctx.lineTo(G.wireStart.x,G.wireStart.y);
+        ctx.stroke();ctx.setLineDash([]);
+    }
+    if(G.sparkT>0){
+        for(let i=0;i<8;i++){
+            const sx=W/2+(Math.random()-0.5)*200;
+            const sy=300+Math.random()*200;
+            ctx.strokeStyle='#ffeb3b';ctx.lineWidth=2;
+            ctx.beginPath();
+            let x=sx,y=sy;
+            ctx.moveTo(x,y);
+            for(let j=0;j<4;j++){
+                x+=(Math.random()-0.5)*30;y+=(Math.random()-0.5)*30;
+                ctx.lineTo(x,y);
+            }
+            ctx.stroke();
+        }
+    }
+}
+
+function drawHUD(ctx){
+    const lv=LEVELS[G.currentLevel];
+    ctx.fillStyle='rgba(0,0,0,0.6)';
+    roundRect(ctx,10,10,W-20,105,10);ctx.fill();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 17px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText(lv.emoji+' 关卡'+lv.id+': '+lv.name,25,35);
+    ctx.fillStyle='#ccc';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText(lv.desc,25,55);
+    ctx.fillStyle=G.running?'#4caf50':'#ff9800';
+    ctx.font='bold 12px "Microsoft YaHei"';
+    ctx.fillText(G.running?'⚡ 通电中':'🔌 断电状态',25,75);
+    if(G.resultMsg){
+        ctx.fillStyle=G.resultMsg.indexOf('✅')>=0||G.resultMsg.indexOf('成功')>=0?'#4caf50':G.resultMsg.indexOf('⚠️')>=0?'#ff9800':'#ff5252';
+        ctx.font='bold 12px "Microsoft YaHei"';
+        ctx.fillText(G.resultMsg,25,95);
+    }
+    ctx.textAlign='right';
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('得分: '+G.score,W-25,35);
+    ctx.fillStyle='#fff';
+    ctx.font='12px "Microsoft YaHei"';
+    ctx.fillText('关卡: '+(G.currentLevel+1)+'/'+LEVELS.length,W-25,55);
+    G.totalStars=G.levelScores.reduce((a,b)=>a+(b||0),0);
+    ctx.fillText('⭐'+G.totalStars+'/'+(LEVELS.length*3),W-25,75);
+    ctx.textAlign='left';
+    drawBtn(ctx,W-155,80,50,22,'原理','showPrinciple','#5c6bc0','#fff');
+    drawBtn(ctx,W-100,80,45,22,G.running?'停':'开','runBtn',G.running?'#f44336':'#4caf50','#fff');
+    drawBtn(ctx,W-50,80,40,22,'⏱','pauseBtn','#e94560','#fff');
+    drawBtn(ctx,25,118,80,30,'✓ 检测','checkBtn','#00bcd4','#fff');
+    drawBtn(ctx,110,118,80,30,'🗑 清空','clearBtn','#795548','#fff');
+    if(G.resultMsg&&(G.resultMsg.indexOf('✅')>=0||G.resultMsg.indexOf('成功')>=0)){
+        drawBtn(ctx,195,118,85,30,'下一关 ▶','nextLevel','#ffd700');
+    }
+}
+
+function drawMenu(ctx){
+    drawBackground(ctx);
+    const lv=LEVELS[G.currentLevel];
+    ctx.fillStyle='#fff';
+    ctx.font='bold 42px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('⚡ 电路模拟器',W/2,100);
+    ctx.fillStyle='#ffd700';
+    ctx.font='18px Arial';
+    ctx.fillText('CIRCUIT SIMULATOR',W/2,130);
+    ctx.save();ctx.translate(W/2,270);
+    for(let i=0;i<4;i++){
+        const t=G.animationFrame*0.03+i*Math.PI/2;
+        const x=Math.cos(t)*80,y=Math.sin(t)*40;
+        ctx.fillStyle=['#f44336','#ff9800','#4caf50','#2196f3'][i];
+        ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.fill();
+    }
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(-80,0);ctx.lineTo(-20,0);ctx.lineTo(20,-20);ctx.lineTo(80,0);
+    ctx.moveTo(-20,0);ctx.lineTo(20,20);ctx.lineTo(80,0);ctx.stroke();
+    ctx.fillStyle='#ffeb3b';
+    ctx.beginPath();ctx.arc(-130,0,16,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+    drawBtn(ctx,W/2-150,195,40,35,'◀','selectLeft','#5c6bc0','#fff');
+    drawBtn(ctx,W/2+110,195,40,35,'▶','selectRight','#5c6bc0','#fff');
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('关卡'+lv.id+': '+lv.name,W/2,390);
+    ctx.fillStyle='#ddd';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText(lv.desc,W/2,415);
+    drawBtn(ctx,W/2-100,445,200,55,'🔌 开始接线','start','#ffd700');
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('🏆 最高分: '+G.highScore,W/2,525);
+    const stars=Storage.load('circuit_levelstars',[]);
+    const ts=stars.reduce((a,b)=>a+(b||0),0);
+    if(ts>0){
+        ctx.fillStyle='#ffd700';
+        ctx.font='14px "Microsoft YaHei"';
+        ctx.fillText('⭐ 累计星数: '+ts+' / '+(LEVELS.length*3),W/2,550);
+    }
+    ctx.fillStyle='#aaa';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('操作说明:',W/2,595);
+    ctx.fillText('• 点击元件库中元件放置到电路板',W/2,618);
+    ctx.fillText('• 点击元件引脚(PIN)→再点另一引脚接线',W/2,638);
+    ctx.fillText('• 点击开关切换ON/OFF，按检测键测试',W/2,658);
+    ctx.fillText('• 拖动移动元件，双击电线中间可删除',W/2,678);
+    ctx.fillStyle='#888';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('⌨️ 空格检测 | C清空 | E通电/断电 | ESC暂停',W/2,720);
+    ctx.fillText('🖱️ 鼠标点击/拖拽 | 📱 触屏操作',W/2,740);
+    ctx.textAlign='left';
+}
+
+function drawPrinciplePopup(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.85)';
+    ctx.fillRect(0,0,W,H);
+    const lv=LEVELS[G.currentLevel];
+    const px=25,py=150,pw=W-50,ph=H-260;
+    ctx.fillStyle='#0d1b2a';
+    roundRect(ctx,px,py,pw,ph,16);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=3;ctx.stroke();
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(lv.emoji+' '+lv.name+' - 电学原理',W/2,py+45);
+    ctx.strokeStyle='rgba(255,215,0,0.3)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(px+30,py+65);ctx.lineTo(px+pw-30,py+65);ctx.stroke();
+    ctx.fillStyle='#ff9800';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.textAlign='left';
+    ctx.fillText('📐 核心公式:',px+25,py+100);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 15px Consolas,monospace';
+    ctx.fillText(lv.formula,px+25,py+128);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('📚 原理讲解:',px+25,py+170);
+    ctx.fillStyle='#ccc';
+    ctx.font='14px "Microsoft YaHei"';
+    const lines=wrapText(ctx,lv.principle,pw-50);
+    let ly=py+200;
+    for(const l of lines){ctx.fillText(l,px+25,ly);ly+=24;}
+    ly+=10;
+    ctx.fillStyle='#4caf50';
+    ctx.font='bold 16px "Microsoft YaHei"';
+    ctx.fillText('💡 完成要点:',px+25,ly);ly+=28;
+    ctx.fillStyle='#a5d6a7';
+    ctx.font='14px "Microsoft YaHei"';
+    const tips=lv.id==='L5'
+        ?['电池+极出来→先到总开关','每条并联支路: 开关→灯泡→回电池-极','共3条支路，灯之间是并联关系']
+        :lv.id==='L6'
+        ?['LED有正负极，长脚+接电池+','LED必须串联1个电阻(否则烧)','先接+→电阻→LED+→LED-→-']
+        :['先画闭合回路:电池+→元件→电池-','开关全部闭合才有电流','检查电池总电压和元件额定值'];
+    for(const t of tips){ctx.fillText('• '+t,px+25,ly);ly+=24;}
+    drawBtn(ctx,W/2-60,py+ph-48,120,40,'明白了 ✓','closePrinciple','#4caf50','#fff');
+}
+
+function wrapText(ctx,text,maxWidth){
+    const lines=[];
+    let current='';
+    for(const ch of text){
+        const test=current+ch;
+        if(ctx.measureText(test).width>maxWidth&&current.length>0){
+            lines.push(current);
+            current=ch;
+        }else{
+            current=test;
+        }
+    }
+    if(current)lines.push(current);
+    return lines;
+}
+
+function drawGame(ctx){
+    drawBackground(ctx);
+    drawShelf(ctx);
+    drawWires(ctx);
+    drawComponents(ctx);
+    drawHUD(ctx);
+    if(G.paused){
+        drawPause(ctx);
+    }
+    if(G.principleOpen){
+        drawPrinciplePopup(ctx);
+    }
+}
+
+function drawPause(ctx){
+    ctx.fillStyle='rgba(0,0,0,0.75)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 46px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText('⏸ 暂停中',W/2,H/2-60);
+    drawBtn(ctx,W/2-90,H/2,180,55,'▶ 继续接线','resume','#ffd700');
+    drawBtn(ctx,W/2-75,H/2+80,150,45,'🏠 返回菜单','quit','#78909c','#fff');
+    ctx.fillStyle='#888';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('按 ESC 键可快速继续',W/2,H/2+150);
+    ctx.textAlign='left';
+}
+
+function drawGameOver(ctx){
+    ctx.fillStyle='#05101a';
+    ctx.fillRect(0,0,W,H);
+    const grd=ctx.createRadialGradient(W/2,H*0.3,20,W/2,H*0.3,300);
+    grd.addColorStop(0,'rgba(255,215,0,0.15)');
+    grd.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+    const isNew=G.score>=G.highScore&&G.score>0;
+    ctx.fillStyle=isNew?'#ffd700':'#ffc107';
+    ctx.font='bold 44px "Microsoft YaHei"';
+    ctx.textAlign='center';
+    ctx.fillText(isNew?'🎉 新纪录！':'⚡ 设计报告',W/2,120);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('最终得分',W/2,190);
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 80px Arial';
+    ctx.fillText(G.score,W/2,280);
+    ctx.fillStyle='#aaa';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('历史最高分: '+G.highScore,W/2,315);
+    G.totalStars=G.levelScores.reduce((a,b)=>a+(b||0),0);
+    const medal=G.totalStars>=LEVELS.length*2.5?'🏅 电气工程师！':G.totalStars>=LEVELS.length*1.5?'🥈 熟练电工':'🎖️ 入门学徒';
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 22px "Microsoft YaHei"';
+    ctx.fillText('⭐ '+G.totalStars+' / '+(LEVELS.length*3)+'  '+medal,W/2,360);
+    const pct=LEVELS.length>0?Math.round((G.levelScores.filter(x=>x>0).length/LEVELS.length)*100):0;
+    ctx.fillStyle='#4fc3f7';
+    ctx.font='16px "Microsoft YaHei"';
+    ctx.fillText('通关进度: '+pct+'% ('+G.levelScores.filter(x=>x>0).length+'/'+LEVELS.length+' 关卡)',W/2,395);
+    const avgStars=LEVELS.length>0?(G.totalStars/LEVELS.length):0;
+    ctx.fillStyle='#a5d6a7';
+    ctx.font='14px "Microsoft YaHei"';
+    ctx.fillText('平均星级: '+(avgStars>0?avgStars.toFixed(1):'0.0')+' ⭐/关',W/2,425);
+    drawBtn(ctx,W/2-95,475,190,55,'🔄 再来一次','restart','#ffd700');
+    drawBtn(ctx,W/2-80,550,160,45,'🏠 返回菜单','menu','#5c6bc0','#fff');
+    ctx.fillStyle='#888';
+    ctx.font='13px "Microsoft YaHei"';
+    ctx.fillText('⌨️ 按空格/回车键重新挑战',W/2,640);
+    ctx.fillStyle='#666';
+    ctx.font='11px "Microsoft YaHei"';
+    ctx.fillText('掌握欧姆定律，成为电路设计大师！⚡',W/2,700);
+    ctx.textAlign='left';
+}
+
+function draw(){
+    switch(G.state){
+        case STATE_MENU: drawMenu(ctx); break;
+        case STATE_PLAYING: drawGame(ctx); break;
+        case STATE_OVER: drawGameOver(ctx); break;
+        case STATE_PAUSE: drawGame(ctx); break;
+    }
+}
+
+let rafId=null;
+function gameLoop(){
+    rafId=requestAnimationFrame(gameLoop);
+    update();
+    draw();
+}
+gameLoop();
+
+})();
+</script>
+
+<div class="ad-banner-container" id="adBanner"><span class="ad-label">ad</span></div>
+<button class="sponsor-btn" id="sponsorBtn" title="支持开发者">💛 赞助</button>
+<div class="sponsor-panel" id="sponsorPanel">
+<h2>💛 支持开发者</h2>
+<div style="color:#aaa;font:14px 'Microsoft YaHei',sans-serif;text-align:center;max-width:280px">如果你喜欢这个游戏，请开发者喝杯咖啡吧 ☕<br>每一份支持都是持续更新的动力！</div>
+<div class="qr-row">
+<div class="qr-card"><div class="qr-icon">💚</div><div class="qr-label">微信赞赏</div><div class="qr-hint">打开微信扫一扫</div></div>
+<div class="qr-card"><div class="qr-icon">💙</div><div class="qr-label">支付宝支持</div><div class="qr-hint">打开支付宝扫一扫</div></div>
+</div>
+<button class="sponsor-close" id="sponsorClose">关闭</button>
+</div>
+<div class="interstitial-ad" id="interstitialAd">
+<div class="ad-content">
+<p>📢 赞助商广告</p>
+<div id="interstitialAdSlot" style="min-height:250px;display:flex;align-items:center;justify-content:center;color:#888;font:13px 'Microsoft YaHei',sans-serif">广告加载中...</div>
+</div>
+<button class="skip-btn" id="skipInterstitial">跳过广告 ▶</button>
+</div>
+
+<script>
+(function(){
+    var b = document.getElementById('start-game-btn');
+    if (b) {
+        b.removeAttribute('disabled');
+        b.style.setProperty('display', 'block', 'important');
+        b.addEventListener('click', function(){
+            try { b.style.display = 'none'; } catch(e){}
+            try {
+                if (typeof startGame === 'function') startGame();
+            } catch(e){ console.error('[start-btn] err', e); }
+        });
+    }
+    var sp=document.getElementById('sponsorPanel'); if(sp){sp.addEventListener('click',function(){sp.style.setProperty('pointer-events','auto');},true);}
+    var ia=document.getElementById('interstitialAd'); if(ia){ia.addEventListener('click',function(){ia.style.setProperty('pointer-events','auto');},true);}
+})();
+</script>
+<!-- [BATCH-FIX:responsive-js] -->
+<script>
+(function(){
+  if (window.__batchFixResponsive) return;
+  window.__batchFixResponsive = true;
+  function batchResizeCanvas() {
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      var parent = c.parentElement;
+      if (!parent) return;
+      var pw = parent.clientWidth || window.innerWidth;
+      var ph = parent.clientHeight || window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      c.style.maxWidth = '100%';
+      c.style.height = 'auto';
+      if (c.width > pw) {
+        var ratio = c.height / c.width;
+        c.width = pw;
+        c.height = pw * ratio;
+      }
+    });
+  }
+  window.addEventListener('resize', batchResizeCanvas);
+  window.addEventListener('orientationchange', function(){ setTimeout(batchResizeCanvas, 100); });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', batchResizeCanvas);
+  } else {
+    batchResizeCanvas();
+  }
+  window.batchResizeCanvas = batchResizeCanvas;
+})();
+</script>
+<!-- [/BATCH-FIX:responsive-js] -->
+<!-- [BATCH-FIX:timer-cleanup] -->
+<script>
+(function(){
+  if (window.__batchFixTimers) return;
+  window.__batchFixTimers = true;
+  var _timerIds = [];
+  var _origSetTimeout = window.setTimeout;
+  var _origSetInterval = window.setInterval;
+  window.setTimeout = function(fn, delay) {
+    var id = _origSetTimeout(fn, delay);
+    _timerIds.push({type: 'timeout', id: id});
+    return id;
+  };
+  window.setInterval = function(fn, delay) {
+    var id = _origSetInterval(fn, delay);
+    _timerIds.push({type: 'interval', id: id});
+    return id;
+  };
+  window.clearAllBatchTimers = function() {
+    _timerIds.forEach(function(t) {
+      if (t.type === 'timeout') clearTimeout(t.id);
+      else clearInterval(t.id);
+    });
+    _timerIds = [];
+  };
+  window.addEventListener('beforeunload', function() {
+    window.clearAllBatchTimers();
+  });
+})();
+</script>
+<!-- [/BATCH-FIX:timer-cleanup] -->
+<!-- [BATCH-FIX-V2:perf-stabilizer] -->
+<script>
+(function(){
+  if (window.__perfStable) return;
+  window.__perfStable = true;
+  var _origRandom = Math.random;
+  var _cache = [];
+  for (var i = 0; i < 512; i++) _cache.push(_origRandom());
+  var _idx = 0;
+  var _frameCount = 0;
+  var _origRAF = window.requestAnimationFrame || function(cb){return setTimeout(cb,16)};
+  window.requestAnimationFrame = function(cb) {
+    return _origRAF.call(window, function(ts) {
+      _frameCount++;
+      if (_frameCount % 30 === 0) {
+        for (var j = 0; j < 20; j++) _cache[(_idx+j) % 512] = _origRandom();
+      }
+      _idx = 0;
+      cb(ts);
+    });
+  };
+  Math.random = function() {
+    var v = _cache[_idx % 512];
+    _idx++;
+    return v;
+  };
+})();
+</script>
+<!-- [/BATCH-FIX-V2:perf-stabilizer] -->
+</body>
+</html>
