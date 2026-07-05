@@ -10,7 +10,7 @@
 (function() {
     if (window.GameCore) {
         // 已有 GameCore（可能是内联 class 或重复加载），只补 Storage shim
-        if (!window.Storage) installStorageShim();
+        if (!window.Storage || typeof window.Storage.load !== 'function') installStorageShim();
         return;
     }
 
@@ -49,8 +49,11 @@
 
         touch: {
             enable: function(selector, callback) {
-                const element = document.querySelector(selector);
-                if (!element) return;
+                // 兼容：可以传CSS选择器字符串，也可以传DOM元素
+                const element = (typeof selector === 'string')
+                    ? document.querySelector(selector)
+                    : selector;
+                if (!element || !element.addEventListener) return;
 
                 let startX, startY;
 
@@ -355,7 +358,7 @@
     installStorageShim();
 
     function installStorageShim() {
-        if (window.Storage) return;  // 已有，不覆盖
+        if (window.Storage && typeof window.Storage.load === 'function') return;  // 已有shim，不覆盖
         window.Storage = {
             load: function(key, defaultValue) {
                 var val = GameCore.storage.get(key, defaultValue);
